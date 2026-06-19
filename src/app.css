@@ -1,0 +1,18 @@
+/* Lock down the page and apply pixelated rendering globally */
+:root {
+    --win98-bg: #c0c0c0;
+    --win98-blue: #0000aa; /* Oversaturated */
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden; /* No scrolling */
+    font-family: 'MS Sans Serif', 'Pixelated Font', sans-serif;
+    -webkit-font-smoothing: none; /* Crucial for crisp, pixelated fonts */
+    image-rendering: pixelated; 
+}
+
+/* Add custom font imports here later to ensure the UI looks perfectly retro */
