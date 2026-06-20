@@ -1,17 +1,29 @@
 <script lang="ts">
-    import { closeWindow, focusWindow, minimizeWindow } from '$lib/stores/os';
+    import { closeWindow, focusWindow, minimizeWindow } from "$lib/stores/os";
 
-    let { 
-        id, title, zIndex, isMinimized, 
-        initialWidth = 400, initialHeight = 300,
-        minWidth = 250, minHeight = 150 
+    let {
+        id,
+        title,
+        zIndex,
+        isMinimized,
+        initialWidth = 400,
+        initialHeight = 300,
+        minWidth = 250,
+        minHeight = 150,
     } = $props();
 
     let width = $state(initialWidth);
     let height = $state(initialHeight);
-    
-    let left = $state(window.innerWidth / 2 - (initialWidth / 2)); 
-    let top = $state(window.innerHeight / 2 - (initialHeight / 2));
+
+    // Calculate the actual available workspace by ignoring the 320px sidebar on desktop
+    const isDesktop = window.innerWidth > 768;
+    const availableWidth = isDesktop
+        ? window.innerWidth - 320
+        : window.innerWidth;
+
+    // Center the window within the AVAILABLE space, pushing it perfectly to the left
+    let left = $state(availableWidth / 2 - initialWidth / 2);
+    let top = $state(window.innerHeight / 2 - initialHeight / 2);
 
     // --- MAXIMIZE LOGIC ---
     let isMaximized = $state(false);
@@ -40,22 +52,25 @@
 
     // --- DRAG LOGIC ---
     let isDragging = false;
-    let dragStartX: number, dragStartY: number, initialLeft: number, initialTop: number;
+    let dragStartX: number,
+        dragStartY: number,
+        initialLeft: number,
+        initialTop: number;
 
     function onDragStart(e: MouseEvent) {
         // Prevent dragging if the window is maximized!
-        if (e.button !== 0 || isMaximized) return; 
-        
+        if (e.button !== 0 || isMaximized) return;
+
         isDragging = true;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
         initialLeft = left;
         initialTop = top;
-        
+
         focusWindow(id);
 
-        window.addEventListener('mousemove', onDrag);
-        window.addEventListener('mouseup', onDragEnd);
+        window.addEventListener("mousemove", onDrag);
+        window.addEventListener("mouseup", onDragEnd);
     }
 
     function onDrag(e: MouseEvent) {
@@ -66,8 +81,8 @@
 
     function onDragEnd() {
         isDragging = false;
-        window.removeEventListener('mousemove', onDrag);
-        window.removeEventListener('mouseup', onDragEnd);
+        window.removeEventListener("mousemove", onDrag);
+        window.removeEventListener("mouseup", onDragEnd);
     }
 
     // --- RESIZE LOGIC ---
@@ -78,15 +93,15 @@
         e.stopPropagation();
         // Prevent resizing if the window is maximized!
         if (e.button !== 0 || isMaximized) return;
-        
+
         isResizing = true;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
         resizeStartW = width;
         resizeStartH = height;
 
-        window.addEventListener('mousemove', onResize);
-        window.addEventListener('mouseup', onResizeEnd);
+        window.addEventListener("mousemove", onResize);
+        window.addEventListener("mouseup", onResizeEnd);
     }
 
     function onResize(e: MouseEvent) {
@@ -97,36 +112,50 @@
 
     function onResizeEnd() {
         isResizing = false;
-        window.removeEventListener('mousemove', onResize);
-        window.removeEventListener('mouseup', onResizeEnd);
+        window.removeEventListener("mousemove", onResize);
+        window.removeEventListener("mouseup", onResizeEnd);
     }
 </script>
-<div 
-    class="win98-window" 
+
+<div
+    class="win98-window"
     class:maximized={isMaximized}
     style="
-        display: {isMinimized ? 'none' : 'flex'}; 
-        z-index: {zIndex}; 
-        top: {top}px; 
-        left: {left}px; 
-        width: {width}px; 
+        display: {isMinimized ? 'none' : 'flex'};
+        z-index: {zIndex};
+        top: {top}px;
+        left: {left}px;
+        width: {width}px;
         height: {height}px;
     "
-    onmousedown={() => focusWindow(id)} 
+    onmousedown={() => focusWindow(id)}
 >
     <div class="title-bar" onmousedown={onDragStart}>
         <div class="title-bar-text">{title}</div>
         <div class="title-bar-controls">
-            <button aria-label="Minimize" onclick={(e) => { e.stopPropagation(); minimizeWindow(id); }}>_</button>
-            
-            <button aria-label="Maximize" onclick={(e) => { e.stopPropagation(); toggleMaximize(); }}>
-                {isMaximized ? '❐' : '☐'}
+            <button
+                aria-label="Minimize"
+                onclick={(e) => {
+                    e.stopPropagation();
+                    minimizeWindow(id);
+                }}>_</button
+            >
+
+            <button
+                aria-label="Maximize"
+                onclick={(e) => {
+                    e.stopPropagation();
+                    toggleMaximize();
+                }}
+            >
+                {isMaximized ? "❐" : "☐"}
             </button>
-            
-            <button aria-label="Close" onclick={() => closeWindow(id)}>X</button>
+
+            <button aria-label="Close" onclick={() => closeWindow(id)}>X</button
+            >
         </div>
     </div>
-    
+
     <div class="window-body">
         <slot></slot>
     </div>
@@ -143,17 +172,17 @@
         display: flex;
         flex-direction: column;
         /* Adds a subtle classic shadow to floating windows */
-        box-shadow: 2px 2px 0 rgba(0,0,0,0.5); 
+        box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
     }
     .maximized {
         top: 0 !important;
         left: 0 !important;
-        
+
         /* 1. Viewport width MINUS the 320px UwU Sidebar */
-        width: calc(100vw - 320px) !important; 
-        
+        width: calc(100vw - 320px) !important;
+
         /* 2. Viewport height MINUS the 35px Taskbar */
-        height: calc(100dvh - 35px) !important; 
+        height: calc(100dvh - 35px) !important;
     }
 
     .title-bar {
@@ -165,9 +194,9 @@
         align-items: center;
         font-weight: bold;
         /* Indicates to the user that this area is grab-able */
-        cursor: default; 
+        cursor: default;
     }
-    
+
     .title-bar-controls {
         display: flex;
         gap: 2px;
@@ -186,7 +215,7 @@
     .title-bar-controls button:active {
         border-color: #000000 #ffffff #ffffff #000000;
         /* Classic 98 push-in effect */
-        padding: 1px 3px 0 5px; 
+        padding: 1px 3px 0 5px;
     }
 
     .window-body {
@@ -205,7 +234,6 @@
         z-index: 10;
         /* A classic ridged texture could be added here later, for now it's an invisible hit-box */
     }
-    
 
     /* =========================================
        MOBILE OVERRIDES (Cleaned up and merged)
@@ -244,8 +272,8 @@
             padding: 4px 16px !important;
             font-size: 1.2rem !important;
         }
-        .maximized { 
-            width: 100vw !important; 
+        .maximized {
+            width: 100vw !important;
         }
     }
 </style>
