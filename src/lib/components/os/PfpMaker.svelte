@@ -1,11 +1,13 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
+    // 1. New Layering Sequence
     const LAYER_ORDER = [
         "background",
         "body",
+        "face_accessory",
         "eyes",
-        "face",
+        "eyewear",
         "hair",
         "costume",
         "accessory",
@@ -13,125 +15,238 @@
         "horn",
     ];
 
-    // 2. Map Traits to your /static folder paths
-    const TRAITS: Record<string, any[]> = {
-        background: [
-            { name: "Teal", src: "/traits/background/background_01.png" },
-        ],
-        body: [
-            { name: "Normal", src: "/traits/body/body_01.png" },
-            { name: "black", src: "/traits/body/body_02.png" },
-            { name: "Alien", src: "/traits/body/body_03.png" },
-        ],
-        eyes: [
-            { name: "1", src: "/traits/eyes/eyes_01.png" },
-            { name: "2", src: "/traits/eyes/eyes_02.png" },
-            { name: "3", src: "/traits/eyes/eyes_03.png" },
-            { name: "4", src: "/traits/eyes/eyes_04.png" },
-            { name: "5", src: "/traits/eyes/eyes_05.png" },
-            { name: "6", src: "/traits/eyes/eyes_06.png" },
-            { name: "7", src: "/traits/eyes/eyes_07.png" },
-            { name: "8", src: "/traits/eyes/eyes_08.png" },
-            { name: "9", src: "/traits/eyes/eyes_09.png" },
-            { name: "10", src: "/traits/eyes/eyes_10.png" },
-            { name: "11", src: "/traits/eyes/eyes_11.png" },
-            { name: "12", src: "/traits/eyes/eyes_12.png" },
-            { name: "13", src: "/traits/eyes/eyes_13.png" },
-            { name: "14", src: "/traits/eyes/eyes_14.png" },
-            { name: "15", src: "/traits/eyes/eyes_15.png" },
-            { name: "16", src: "/traits/eyes/eyes_16.png" },
-            { name: "17", src: "/traits/eyes/eyes_17.png" },
-            { name: "18", src: "/traits/eyes/eyes_18.png" },
-            { name: "19", src: "/traits/eyes/eyes_19.png" },
-            { name: "20", src: "/traits/eyes/eyes_20.png" },
-        ],
-        face: [
-            { name: "None", src: "/traits/face/face_06.png" },
-            { name: "7", src: "/traits/face/face_07.png" },
-            { name: "8", src: "/traits/face/face_08.png" },
-            { name: "9", src: "/traits/face/face_09.png" },
-            { name: "10", src: "/traits/face/face_10.png" },
-            { name: "11", src: "/traits/face/face_11.png" },
-            { name: "12", src: "/traits/face/face_12.png" },
-            { name: "13", src: "/traits/face/face_13.png" },
-            { name: "14", src: "/traits/face/face_14.png" },
-            { name: "15", src: "/traits/face/face_15.png" },
-            { name: "16", src: "/traits/face/face_16.png" },
-            { name: "17", src: "/traits/face/face_17.png" },
-            { name: "18", src: "/traits/face/face_18.png" },
-            { name: "19", src: "/traits/face/face_19.png" },
-            { name: "20", src: "/traits/face/face_20.png" }, // Need a transparent 1x1px png for "None" options
-        ],
-        hair: [
-            { name: "None", src: "/traits/hair/hair_01.png" },
-            { name: "2", src: "/traits/hair/hair_02.png" },
-            { name: "3", src: "/traits/hair/hair_03.png" },
-            { name: "4", src: "/traits/hair/hair_04.png" },
-            { name: "5", src: "/traits/hair/hair_05.png" },
-            { name: "6", src: "/traits/hair/hair_06.png" },
-            { name: "7", src: "/traits/hair/hair_07.png" },
-            { name: "8", src: "/traits/hair/hair_08.png" },
-            { name: "9", src: "/traits/hair/hair_09.png" },
-            { name: "10", src: "/traits/hair/hair_10.png" },
-            { name: "11", src: "/traits/hair/hair_11.png" },
-            { name: "12", src: "/traits/hair/hair_12.png" },
-            { name: "13", src: "/traits/hair/hair_13.png" },
-            { name: "14", src: "/traits/hair/hair_14.png" },
-            { name: "15", src: "/traits/hair/hair_15.png" },
-            { name: "16", src: "/traits/hair/hair_16.png" },
-            { name: "17", src: "/traits/hair/hair_17.png" },
-            { name: "18", src: "/traits/hair/hair_18.png" },
-            { name: "19", src: "/traits/hair/hair_19.png" },
-            { name: "20", src: "/traits/hair/hair_20.png" },
-        ],
-        costume: [
-            { name: "None", src: "/traits/costume/costume_08.png" },
-            { name: "None", src: "/traits/costume/costume_11.png" },
-            { name: "None", src: "/traits/costume/costume_12.png" },
-        ],
-        accessory: [
-            { name: "None", src: "/traits/accessory/accessory_04.png" },
-            { name: "5", src: "/traits/accessory/accessory_05.png" },
-            { name: "6", src: "/traits/accessory/accessory_06.png" },
-            { name: "12", src: "/traits/accessory/accessory_12.png" },
-            { name: "16", src: "/traits/accessory/accessory_16.png" },
-            { name: "17", src: "/traits/accessory/accessory_17.png" },
-            { name: "18", src: "/traits/accessory/accessory_18.png" },
-        ],
-        headgear: [
-            { name: "Pirarte Hat", src: "/traits/headgear/headgear_12.png" },
-        ],
-        horn: [
-            { name: "None", src: "/traits/horn/horn_01.png" },
-            { name: "2", src: "/traits/horn/horn_02.png" },
-            { name: "3", src: "/traits/horn/horn_03.png" },
-            { name: "4", src: "/traits/horn/horn_04.png" },
-            { name: "5", src: "/traits/horn/horn_05.png" },
-            { name: "6", src: "/traits/horn/horn_06.png" },
-            { name: "7", src: "/traits/horn/horn_07.png" },
-            { name: "8", src: "/traits/horn/horn_08.png" },
-            { name: "9", src: "/traits/horn/horn_09.png" },
-            { name: "10", src: "/traits/horn/horn_10.png" },
-            { name: "11", src: "/traits/horn/horn_11.png" },
-            { name: "12", src: "/traits/horn/horn_12.png" },
-            { name: "13", src: "/traits/horn/horn_13.png" },
-            { name: "14", src: "/traits/horn/horn_14.png" },
-            { name: "15", src: "/traits/horn/horn_15.png" },
-            { name: "16", src: "/traits/horn/horn_16.png" },
-            { name: "17", src: "/traits/horn/horn_17.png" },
-            { name: "18", src: "/traits/horn/horn_18.png" },
-            { name: "19", src: "/traits/horn/horn_19.png" },
-            { name: "20", src: "/traits/horn/horn_20.png" },
-        ],
+    // Helper function to dynamically generate your file paths without hardcoding!
+    // Helper function that takes an array of custom names!
+    const generateTraits = (
+        traitName: string,
+        names: string[],
+        hasNone: boolean,
+    ) => {
+        const arr = [];
+        if (hasNone) {
+            arr.push({ name: "None", src: null });
+        }
+
+        // Loop through your custom names
+        names.forEach((name, index) => {
+            arr.push({
+                name: name,
+                // index is 0-based, but your files are 1-based, so we add 1!
+                src: `/traits/${traitName}/${traitName}_${index + 1}.png`,
+            });
+        });
+        return arr;
     };
 
+    // 2. Map Traits to your /static folder paths
+    const TRAITS: Record<string, any[]> = {
+        background: generateTraits("background", ["Teal"], true),
+
+        body: generateTraits(
+            "body",
+            [
+                "Normal",
+                "Black",
+                "Alien",
+                "Zombie", // Make sure you have 4 names here!
+            ],
+            false,
+        ),
+
+        face_accessory: generateTraits(
+            "face_accessory",
+            [
+                "Grillz",
+                "Ciggrette",
+                "Sandwhich",
+                "Tatoo",
+                "Scar",
+                "Mustache",
+                "Heart",
+                "Ring",
+                "Clown",
+                "Cigar",
+                "Toothpick",
+                "Cute",
+                // Add the remaining 8 names here
+            ],
+            true,
+        ),
+
+        eyes: generateTraits(
+            "eyes",
+            [
+                "Normal",
+                "Cute",
+                "Accept",
+                "Bummer",
+                "Happy",
+                "Circle",
+                "Closed",
+                "Round",
+                "Tall",
+                "Solid-Tall",
+                "Asian",
+                "Heart",
+                "Sharp",
+                "Flat",
+                "Chill",
+                "Sparkle",
+                "Aztec",
+                "Relaxed",
+                "Tripping",
+                "Enjoying",
+                // Add the remaining 15 names here
+            ],
+            true,
+        ),
+
+        eyewear: generateTraits(
+            "eyewear",
+            [
+                "MOG glasses",
+                "Bitcoin",
+                "Classic glasses",
+                "Party",
+                "Eyepatch",
+                "Deal with it",
+            ],
+            true,
+        ),
+
+        hair: generateTraits(
+            "hair",
+            [
+                "Long",
+                "Round",
+                "Florida",
+                "Short",
+                "Rock",
+                "Thick",
+                "Longer",
+                "Femboy",
+                "Boycut",
+                "Norewood 4",
+                "Norewood 3",
+                "Norewood 2",
+                "Liberal women",
+                "Rebel kid",
+                "Longest",
+                "Stacy",
+                "Norewood 5",
+                "Hair 1",
+                "Hair 2",
+            ],
+            true,
+        ),
+
+        costume: generateTraits(
+            "costume",
+            [
+                "School girl",
+                "Samurai",
+                "Mario",
+                "Mickey",
+                "Assasin",
+                "Night suit",
+                "Mcdonalds",
+                "Detective",
+                "Joe",
+                "Black coat",
+                "Asian",
+                "Pirate",
+                "Suit",
+                "Superhero",
+                "Roman",
+                "Clown",
+                "Tracksuit",
+                "Tracksuit black",
+                "Bear",
+            ],
+            true,
+        ),
+
+        accessory: generateTraits(
+            "accessory",
+            [
+                "Hectacorn",
+                "Katana",
+                "Glock",
+                "Card",
+                "Pokemon Card",
+                "Sword",
+                "Mc Donalds",
+                "Cash",
+                "Minecraft AXE",
+                "UNO reverse",
+                "Chinese lamp",
+                "Pirate hand",
+                "Pop Corn",
+                "Blade",
+                "Guitar",
+                "Whip",
+                "Coke",
+                "Monster",
+                "Celary",
+                "Pineapple Kool-aid",
+                "Knife",
+            ],
+            true,
+        ),
+
+        headgear: generateTraits(
+            "headgear",
+            [
+                "Plant",
+                "Pirate hat",
+                "Cap",
+                "Halo",
+                "Cap 2",
+                "Night cap",
+                "Mc donalds",
+                "Detective hat",
+            ],
+            true,
+        ),
+
+        horn: generateTraits(
+            "horn",
+            [
+                "White",
+                "Meat",
+                "Strawberry",
+                "Pineapple",
+                "Pizza",
+                "Fire",
+                "Watermelon",
+                "Corn",
+                "Cheese",
+                "Mushroom",
+                "Cloud",
+                "Rainbow",
+                "Gold",
+                "Cookie",
+                "Ice-cream",
+                "Night",
+                "Cactus",
+                "Dougnut",
+                "Carrot",
+                "Barber",
+                "Avacado",
+            ],
+            true,
+        ),
+    };
+
+    // Set initial load state (so the character isn't totally naked on boot)
     let currentTraits: Record<string, number> = $state({
-        background: 0,
+        background: 1,
         body: 0,
-        eyes: 0,
-        face: 0,
-        hair: 0,
-        costume: 0,
+        face_accessory: 0,
+        eyes: 1,
+        eyewear: 0,
+        hair: 1,
+        costume: 1,
         accessory: 0,
         headgear: 0,
         horn: 0,
@@ -149,8 +264,8 @@
         isRendering = true;
         const ctx = canvasElement.getContext("2d");
 
-        // 2. DYNAMICALLY BUILD THE LAYER STACK
-        const imagePathsToLoad = [];
+        // DYNAMICALLY BUILD THE LAYER STACK
+        const imagePathsToLoad: string[] = [];
 
         LAYER_ORDER.forEach((layerName) => {
             // RING BACK: Insert at the very back, sitting on the background but behind the body
@@ -163,14 +278,16 @@
                 imagePathsToLoad.push("/traits/ring/ring_front.png");
             }
 
-            // Push the standard trait layer
+            // Push the standard trait layer (if it is not 'None')
             const selectedTraitIndex = currentTraits[layerName];
-            imagePathsToLoad.push(TRAITS[layerName][selectedTraitIndex].src);
+            const traitObj = TRAITS[layerName][selectedTraitIndex];
+
+            if (traitObj && traitObj.src !== null) {
+                imagePathsToLoad.push(traitObj.src);
+            }
         });
 
-        // 3. LOAD IMAGES
-
-        // 3. LOAD IMAGES
+        // 4. LOAD IMAGES
         const images = await Promise.all(
             imagePathsToLoad.map((src) => {
                 return new Promise((resolve) => {
@@ -188,7 +305,7 @@
 
         ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-        images.forEach((img) => {
+        images.forEach((img: any) => {
             if (img) {
                 ctx.drawImage(
                     img,
@@ -203,8 +320,6 @@
         isRendering = false;
     }
 
-    // Because 'showRing' is now evaluated inside renderPfp,
-    // Svelte 5 will automatically track it and re-render when clicked!
     $effect(() => {
         if (currentTraits) renderPfp();
     });
@@ -214,16 +329,13 @@
     });
 
     function randomize() {
-        currentTraits.background = Math.floor(
-            Math.random() * TRAITS.background.length,
-        );
-        currentTraits.body = Math.floor(Math.random() * TRAITS.body.length);
-        currentTraits.eyes = Math.floor(Math.random() * TRAITS.eyes.length);
-        currentTraits.mouth = Math.floor(Math.random() * TRAITS.mouth.length);
-        currentTraits.clothing = Math.floor(
-            Math.random() * TRAITS.clothing.length,
-        );
-        currentTraits.hat = Math.floor(Math.random() * TRAITS.hat.length);
+        // True randomizer: Loops through every active trait and picks a valid index
+        // based on the actual length of the dynamically generated arrays!
+        LAYER_ORDER.forEach((layer) => {
+            currentTraits[layer] = Math.floor(
+                Math.random() * TRAITS[layer].length,
+            );
+        });
     }
 
     function exportPng() {
@@ -261,7 +373,8 @@
             {#each Object.keys(TRAITS) as tab}
                 <li role="tab" aria-selected={activeTab === tab}>
                     <button onclick={() => (activeTab = tab)}>
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        {tab.charAt(0).toUpperCase() +
+                            tab.slice(1).replace("_", " ")}
                     </button>
                 </li>
             {/each}
@@ -291,7 +404,6 @@
         width: 100%;
         background: #c0c0c0;
         box-sizing: border-box;
-        /* Grab the height constraint from the window */
         flex-grow: 1;
         min-height: 0;
     }
@@ -303,20 +415,17 @@
         padding: 6px;
         border: 2px solid;
         border-color: #000000 #ffffff #ffffff #000000;
-        /* Let the preview box grow to fill all remaining window space! */
         flex-grow: 1;
         min-width: 250px;
     }
 
     .canvas-container {
-        /* Let the container fill all vertical space above the buttons */
         flex-grow: 1;
         width: 100%;
-        min-height: 0; /* Crucial: allows it to shrink safely */
+        min-height: 0;
         background: #000;
         border: 2px solid;
         border-color: #000000 #ffffff #ffffff #000000;
-        /* Center the growing canvas */
         display: flex;
         justify-content: center;
         align-items: center;
@@ -330,13 +439,11 @@
         object-fit: contain;
         image-rendering: pixelated;
 
-        /* Smooth transition for the blur effect */
         transition:
             filter 0.15s ease-in-out,
             opacity 0.15s ease-in-out;
     }
 
-    /* The subtle loading cue */
     canvas.is-loading {
         filter: blur(6px);
         opacity: 0.6;
@@ -344,13 +451,13 @@
 
     .action-row {
         display: flex;
-        flex-direction: row; /* Put buttons side-by-side to save vertical space */
+        flex-direction: row;
         gap: 6px;
         margin-top: 8px;
     }
 
     .action-row button {
-        flex: 1; /* Stretch buttons evenly */
+        flex: 1;
     }
     .win98-checkbox-label {
         display: flex;
@@ -363,14 +470,12 @@
         font-weight: bold;
         font-size: 0.9rem;
         cursor: pointer;
-        /* Keeps the checkbox from stretching too wide */
         flex-shrink: 0;
     }
 
     .win98-checkbox-label input[type="checkbox"] {
         margin: 0;
         cursor: pointer;
-        /* Optional: Makes the checkbox slightly larger to match the chunky aesthetic */
         width: 14px;
         height: 14px;
     }
@@ -379,16 +484,15 @@
         border-color: #000000 #ffffff #ffffff #000000;
     }
 
-    /* =========================================
-       DESKTOP: VERTICAL SIDE-TABS
-       ========================================= */
     .control-box {
-        /* FIXED width. Never grow or shrink! */
         width: 320px;
         flex-shrink: 0;
         display: flex;
         flex-direction: row;
+        flex-grow: 1;
+        min-width: 0;
     }
+
     .win98-btn {
         font-family: inherit;
         font-weight: bold;
@@ -408,19 +512,13 @@
         color: white;
         border-color: #fff #000 #000 #fff;
     }
-    .control-box {
-        flex-grow: 1;
-        display: flex;
-        flex-direction: row; /* Puts tabs on the left, panel on the right */
-        min-width: 0;
-    }
 
     .win98-tabs {
         list-style-type: none;
-        margin: 0 -2px 0 0; /* Pull right slightly to overlap the panel border */
+        margin: 0 -2px 0 0;
         padding: 0;
         display: flex;
-        flex-direction: column; /* Stack tabs vertically */
+        flex-direction: column;
         gap: 2px;
         z-index: 2;
     }
@@ -442,12 +540,11 @@
         text-align: left;
     }
 
-    /* The magic trick to blend the selected tab into the panel */
     .win98-tabs li[aria-selected="true"] button {
         background: #c0c0c0;
-        border-right: 2px solid #c0c0c0; /* Overwrite the black border with gray */
-        margin-right: -2px; /* Pull it over the panel line */
-        padding-right: 14px; /* Slight padding bump to secure the overlap */
+        border-right: 2px solid #c0c0c0;
+        margin-right: -2px;
+        padding-right: 14px;
     }
 
     .tab-panel {
@@ -467,30 +564,25 @@
     }
 
     .trait-option {
-        background: #c0c0c0; /* Use standard Win98 gray for unselected */
+        background: #c0c0c0;
         border: 2px solid;
-        border-color: #ffffff #000000 #000000 #ffffff; /* 3D popped-out border */
-        padding: 10px; /* Base padding */
+        border-color: #ffffff #000000 #000000 #ffffff;
+        padding: 10px;
         text-align: left;
         cursor: pointer;
         font-family: inherit;
     }
 
-    /* Pushed-in effect when clicking */
     .trait-option:active {
         border-color: #000000 #ffffff #ffffff #000000;
-        /* Shift padding 1px down and right to create a physical indent */
         padding: 11px 9px 9px 11px;
     }
 
-    /* Locked pushed-in effect for the active selection */
     .trait-option.selected {
-        background: #000080; /* Classic selection blue */
+        background: #000080;
         color: white;
-        border-color: #000000 #ffffff #ffffff #000000; /* Inverted border */
-        padding: 11px 9px 9px 11px; /* Keeps the text indented */
-
-        /* The iconic inner dotted focus ring */
+        border-color: #000000 #ffffff #ffffff #000000;
+        padding: 11px 9px 9px 11px;
         outline: 1px dotted #e0e0e0;
         outline-offset: -4px;
     }
@@ -499,14 +591,8 @@
         font-weight: bold;
         font-size: 0.95rem;
     }
-    /* =========================================
-       Responsive Mobile UI Transforms
-       ========================================= */
-    /* =========================================
-       Responsive Mobile UI Transforms
-       ========================================= */
+
     @media (max-width: 768px) {
-        /* 1. Strictly lock the parent Window Body */
         :global(.win98-window .window-body) {
             display: flex !important;
             flex-direction: column !important;
@@ -549,7 +635,7 @@
         }
 
         .action-row {
-            flex-shrink: 0; /* Prevent the canvas from squishing the buttons */
+            flex-shrink: 0;
         }
 
         .control-box {
@@ -584,15 +670,14 @@
             padding-bottom: 10px;
         }
 
-        /* 2. THE NUCLEAR SCROLL FIX */
         .tab-panel {
             flex: 1;
             width: 100%;
             box-sizing: border-box;
             overflow-y: auto;
             min-height: 0;
-            height: 0; /* Forces the browser to calculate height based on remaining space, not content */
-            -webkit-overflow-scrolling: touch; /* Re-enables smooth momentum scrolling on iOS */
+            height: 0;
+            -webkit-overflow-scrolling: touch;
         }
     }
 </style>
