@@ -1,7 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
-    // 1. New Layering Sequence
     const LAYER_ORDER = [
         "background",
         "body",
@@ -15,270 +14,91 @@
         "horn",
     ];
 
-    // Helper function to dynamically generate your file paths without hardcoding!
-    // Helper function that takes an array of custom names!
-    const generateTraits = (
-        traitName: string,
-        names: string[],
-        hasNone: boolean,
-    ) => {
-        const arr = [];
-        if (hasNone) {
-            arr.push({ name: "None", src: null });
+    // 1. The Vite Magic: Auto-discover every PNG in the static folder
+    const allTraitFiles = import.meta.glob("/static/traits/**/*.png");
+    const filePaths = Object.keys(allTraitFiles);
+
+    // 2. Initialize dynamic objects
+    const TRAITS: Record<string, any[]> = {};
+    const RING_OPTIONS: any[] = [{ name: "None", id: null }];
+
+    // Set up base arrays (Add 'None' to everything except body)
+    LAYER_ORDER.forEach((layer) => {
+        TRAITS[layer] = layer === "body" ? [] : [{ name: "None", src: null }];
+    });
+
+    // 3. Parse file paths into names and URLs automatically
+    filePaths.forEach((path) => {
+        // Example path: "/static/traits/body/alien.png"
+        const parts = path.split("/");
+        const fileName = parts.pop() as string; // "alien.png"
+        const folderName = parts.pop() as string; // "body"
+
+        // Format name: "cool glasses.png" -> "Cool glasses"
+        let cleanName = fileName.replace(".png", "").replace(/[-_]/g, " ");
+        cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+
+        // The public URL the browser needs to load the image
+        const publicUrl = path.replace("/static", "");
+
+        if (folderName === "ring") {
+            // Only count 'top-ring' files so we don't double-count the colors
+            if (fileName.startsWith("top-ring")) {
+                // Extracts "1" from "top-ring-1.png"
+                const colorId = fileName
+                    .replace("top-ring-", "")
+                    .replace(".png", "");
+                RING_OPTIONS.push({ name: `Color ${colorId}`, id: colorId });
+            }
+        } else if (TRAITS[folderName]) {
+            // Push the auto-generated trait into its folder's array
+            TRAITS[folderName].push({ name: cleanName, src: publicUrl });
         }
+    });
 
-        // Loop through your custom names
-        names.forEach((name, index) => {
-            arr.push({
-                name: name,
-                // index is 0-based, but your files are 1-based, so we add 1!
-                src: `/traits/${traitName}/${traitName}_${index + 1}.png`,
-            });
-        });
-        return arr;
-    };
+    // Ensure rings are sorted numerically just in case Vite read them randomly
+    RING_OPTIONS.sort((a, b) => {
+        if (!a.id) return -1;
+        if (!b.id) return 1;
+        return parseInt(a.id) - parseInt(b.id);
+    });
 
-    // 2. Map Traits to your /static folder paths
-    const TRAITS: Record<string, any[]> = {
-        background: generateTraits("background", ["Teal"], true),
-
-        body: generateTraits(
-            "body",
-            [
-                "Normal",
-                "Black",
-                "Alien",
-                "Zombie", // Make sure you have 4 names here!
-            ],
-            false,
-        ),
-
-        face_accessory: generateTraits(
-            "face_accessory",
-            [
-                "Grillz",
-                "Ciggrette",
-                "Sandwhich",
-                "Tatoo",
-                "Scar",
-                "Mustache",
-                "Heart",
-                "Ring",
-                "Clown",
-                "Cigar",
-                "Toothpick",
-                "Cute",
-                // Add the remaining 8 names here
-            ],
-            true,
-        ),
-
-        eyes: generateTraits(
-            "eyes",
-            [
-                "Normal",
-                "Cute",
-                "Accept",
-                "Bummer",
-                "Happy",
-                "Circle",
-                "Closed",
-                "Round",
-                "Tall",
-                "Solid-Tall",
-                "Asian",
-                "Heart",
-                "Sharp",
-                "Flat",
-                "Chill",
-                "Sparkle",
-                "Aztec",
-                "Relaxed",
-                "Tripping",
-                "Enjoying",
-                // Add the remaining 15 names here
-            ],
-            true,
-        ),
-
-        eyewear: generateTraits(
-            "eyewear",
-            [
-                "MOG glasses",
-                "Bitcoin",
-                "Classic glasses",
-                "Party",
-                "Eyepatch",
-                "Deal with it",
-            ],
-            true,
-        ),
-
-        hair: generateTraits(
-            "hair",
-            [
-                "Long",
-                "Round",
-                "Florida",
-                "Short",
-                "Rock",
-                "Thick",
-                "Longer",
-                "Femboy",
-                "Boycut",
-                "Norewood 4",
-                "Norewood 3",
-                "Norewood 2",
-                "Liberal women",
-                "Rebel kid",
-                "Longest",
-                "Stacy",
-                "Norewood 5",
-                "Hair 1",
-                "Hair 2",
-            ],
-            true,
-        ),
-
-        costume: generateTraits(
-            "costume",
-            [
-                "School girl",
-                "Samurai",
-                "Mario",
-                "Mickey",
-                "Assasin",
-                "Night suit",
-                "Mcdonalds",
-                "Detective",
-                "Joe",
-                "Black coat",
-                "Asian",
-                "Pirate",
-                "Suit",
-                "Superhero",
-                "Roman",
-                "Clown",
-                "Tracksuit",
-                "Tracksuit black",
-                "Bear",
-            ],
-            true,
-        ),
-
-        accessory: generateTraits(
-            "accessory",
-            [
-                "Hectacorn",
-                "Katana",
-                "Glock",
-                "Card",
-                "Pokemon Card",
-                "Sword",
-                "Mc Donalds",
-                "Cash",
-                "Minecraft AXE",
-                "UNO reverse",
-                "Chinese lamp",
-                "Pirate hand",
-                "Pop Corn",
-                "Blade",
-                "Guitar",
-                "Whip",
-                "Coke",
-                "Monster",
-                "Celary",
-                "Pineapple Kool-aid",
-                "Knife",
-            ],
-            true,
-        ),
-
-        headgear: generateTraits(
-            "headgear",
-            [
-                "Plant",
-                "Pirate hat",
-                "Cap",
-                "Halo",
-                "Cap 2",
-                "Night cap",
-                "Mc donalds",
-                "Detective hat",
-            ],
-            true,
-        ),
-
-        horn: generateTraits(
-            "horn",
-            [
-                "White",
-                "Meat",
-                "Strawberry",
-                "Pineapple",
-                "Pizza",
-                "Fire",
-                "Watermelon",
-                "Corn",
-                "Cheese",
-                "Mushroom",
-                "Cloud",
-                "Rainbow",
-                "Gold",
-                "Cookie",
-                "Ice-cream",
-                "Night",
-                "Cactus",
-                "Dougnut",
-                "Carrot",
-                "Barber",
-                "Avacado",
-            ],
-            true,
-        ),
-    };
-
-    // Set initial load state (so the character isn't totally naked on boot)
-    let currentTraits: Record<string, number> = $state({
-        background: 1,
-        body: 0,
-        face_accessory: 0,
-        eyes: 1,
-        eyewear: 0,
-        hair: 1,
-        costume: 1,
-        accessory: 0,
-        headgear: 0,
-        horn: 0,
+    // 4. Set Initial State dynamically based on available files
+    let currentTraits: Record<string, number> = $state({});
+    LAYER_ORDER.forEach((layer) => {
+        // Default to index 1 (the first real trait) so character isn't naked on load
+        // Unless it's body, which starts at index 0.
+        currentTraits[layer] =
+            layer !== "body" && TRAITS[layer].length > 1 ? 1 : 0;
     });
 
     let activeTab = $state("body");
     let canvasElement: any = $state(null);
     let isRendering = $state(false);
-    let showRing = $state(false);
+    let currentRing = $state(0);
 
-    // 3. Async Image Loading Engine
     async function renderPfp() {
         if (!canvasElement) return;
 
         isRendering = true;
         const ctx = canvasElement.getContext("2d");
 
-        // DYNAMICALLY BUILD THE LAYER STACK
         const imagePathsToLoad: string[] = [];
 
         LAYER_ORDER.forEach((layerName) => {
-            // RING BACK: Insert at the very back, sitting on the background but behind the body
-            if (layerName === "body" && showRing) {
-                imagePathsToLoad.push("/traits/ring/ring_back.png");
+            // RING BACK: "top-ring" goes at the bottom layer (behind body)
+            if (layerName === "body" && currentRing > 0) {
+                const ringId = RING_OPTIONS[currentRing].id;
+                imagePathsToLoad.push(`/traits/ring/top-ring-${ringId}.png`);
             }
 
-            // RING FRONT: Insert exactly between the body/costume and the accessory layers
-            if (layerName === "accessory" && showRing) {
-                imagePathsToLoad.push("/traits/ring/ring_front.png");
+            // RING FRONT: "bottom-ring" goes right behind accessory (over costume)
+            if (layerName === "accessory" && currentRing > 0) {
+                const ringId = RING_OPTIONS[currentRing].id;
+                imagePathsToLoad.push(`/traits/ring/bottom-ring-${ringId}.png`);
             }
 
-            // Push the standard trait layer (if it is not 'None')
+            // Standard trait layer
             const selectedTraitIndex = currentTraits[layerName];
             const traitObj = TRAITS[layerName][selectedTraitIndex];
 
@@ -287,7 +107,6 @@
             }
         });
 
-        // 4. LOAD IMAGES
         const images = await Promise.all(
             imagePathsToLoad.map((src) => {
                 return new Promise((resolve) => {
@@ -321,7 +140,7 @@
     }
 
     $effect(() => {
-        if (currentTraits) renderPfp();
+        if (currentTraits || currentRing > -1) renderPfp();
     });
 
     onMount(() => {
@@ -329,8 +148,8 @@
     });
 
     function randomize() {
-        // True randomizer: Loops through every active trait and picks a valid index
-        // based on the actual length of the dynamically generated arrays!
+        // True randomizer: Picks a valid index based on the actual length
+        // of the dynamically generated arrays!
         LAYER_ORDER.forEach((layer) => {
             currentTraits[layer] = Math.floor(
                 Math.random() * TRAITS[layer].length,
@@ -357,10 +176,6 @@
             ></canvas>
         </div>
         <div class="action-row">
-            <label class="win98-checkbox-label">
-                <input type="checkbox" bind:checked={showRing} />
-                <span>3D Ring</span>
-            </label>
             <button class="win98-btn" onclick={randomize}>🎲 Randomize</button>
             <button class="win98-btn save-btn" onclick={exportPng}
                 >💾 Save Avatar</button
@@ -378,19 +193,43 @@
                     </button>
                 </li>
             {/each}
+
+            <div class="tab-separator"></div>
+
+            <li
+                role="tab"
+                aria-selected={activeTab === "ring"}
+                class="ring-tab"
+            >
+                <button onclick={() => (activeTab = "ring")}>
+                    ✨ 3D Ring
+                </button>
+            </li>
         </menu>
 
         <div role="tabpanel" class="tab-panel">
             <div class="trait-grid">
-                {#each TRAITS[activeTab] as trait, idx}
-                    <button
-                        class="trait-option"
-                        class:selected={currentTraits[activeTab] === idx}
-                        onclick={() => (currentTraits[activeTab] = idx)}
-                    >
-                        <span class="option-title">{trait.name}</span>
-                    </button>
-                {/each}
+                {#if activeTab === "ring"}
+                    {#each RING_OPTIONS as ringOption, idx}
+                        <button
+                            class="trait-option"
+                            class:selected={currentRing === idx}
+                            onclick={() => (currentRing = idx)}
+                        >
+                            <span class="option-title">{ringOption.name}</span>
+                        </button>
+                    {/each}
+                {:else}
+                    {#each TRAITS[activeTab] as trait, idx}
+                        <button
+                            class="trait-option"
+                            class:selected={currentTraits[activeTab] === idx}
+                            onclick={() => (currentTraits[activeTab] = idx)}
+                        >
+                            <span class="option-title">{trait.name}</span>
+                        </button>
+                    {/each}
+                {/if}
             </div>
         </div>
     </div>
@@ -459,30 +298,6 @@
     .action-row button {
         flex: 1;
     }
-    .win98-checkbox-label {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #ffffff #000000 #000000 #ffffff;
-        padding: 0 10px;
-        font-weight: bold;
-        font-size: 0.9rem;
-        cursor: pointer;
-        flex-shrink: 0;
-    }
-
-    .win98-checkbox-label input[type="checkbox"] {
-        margin: 0;
-        cursor: pointer;
-        width: 14px;
-        height: 14px;
-    }
-
-    .win98-checkbox-label:active {
-        border-color: #000000 #ffffff #ffffff #000000;
-    }
 
     .control-box {
         width: 320px;
@@ -545,6 +360,19 @@
         border-right: 2px solid #c0c0c0;
         margin-right: -2px;
         padding-right: 14px;
+    }
+
+    /* Styles specifically for the new distinct Ring Tab */
+    .tab-separator {
+        height: 2px;
+        background: #808080;
+        border-bottom: 1px solid #ffffff;
+        margin: 4px 4px 4px 0;
+    }
+
+    .ring-tab button {
+        color: #000080;
+        background: #d4d0c8;
     }
 
     .tab-panel {
@@ -654,6 +482,16 @@
             white-space: nowrap;
             flex-shrink: 0;
             width: 100%;
+        }
+
+        /* Adjust the separator for mobile's horizontal scroll layout */
+        .tab-separator {
+            height: auto;
+            width: 2px;
+            background: #808080;
+            border-bottom: none;
+            border-right: 1px solid #ffffff;
+            margin: 0 4px 0 4px;
         }
 
         .win98-tabs button {
