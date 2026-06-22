@@ -9,96 +9,131 @@
         "eyewear",
         "hair",
         "costume",
-        "headgear",
         "accessory",
+        "headgear",
         "horn",
     ];
 
-    // 1. The Vite Magic: Auto-discover every PNG in the static folder
+    // 1. The Vite Magic: Auto-discover every PNG
     const allTraitFiles = import.meta.glob("/static/traits/**/*.png");
     const filePaths = Object.keys(allTraitFiles);
 
-    // 2. Initialize dynamic objects
     const TRAITS: Record<string, any[]> = {};
     const RING_OPTIONS: any[] = [{ name: "None", id: null }];
 
-    // Set up base arrays (Add 'None' to everything except body)
     LAYER_ORDER.forEach((layer) => {
         TRAITS[layer] = layer === "body" ? [] : [{ name: "None", src: null }];
     });
 
-    // 3. Parse file paths into names and URLs automatically
     filePaths.forEach((path) => {
-        // Example path: "/static/traits/body/alien.png"
         const parts = path.split("/");
-        const fileName = parts.pop() as string; // "alien.png"
-        const folderName = parts.pop() as string; // "body"
+        const fileName = parts.pop() as string;
+        const folderName = parts.pop() as string;
 
-        // Format name: "cool glasses.png" -> "Cool glasses"
         let cleanName = fileName.replace(".png", "").replace(/[-_]/g, " ");
         cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-
-        // The public URL the browser needs to load the image
         const publicUrl = path.replace("/static", "");
 
         if (folderName === "ring") {
-            // Only count 'top-ring' files so we don't double-count the colors
             if (fileName.startsWith("top-ring")) {
-                // Extracts "1" from "top-ring-1.png"
                 const colorId = fileName
                     .replace("top-ring-", "")
                     .replace(".png", "");
                 RING_OPTIONS.push({ name: `Color ${colorId}`, id: colorId });
             }
         } else if (TRAITS[folderName]) {
-            // Push the auto-generated trait into its folder's array
             TRAITS[folderName].push({ name: cleanName, src: publicUrl });
         }
     });
 
-    // Ensure rings are sorted numerically just in case Vite read them randomly
     RING_OPTIONS.sort((a, b) => {
         if (!a.id) return -1;
         if (!b.id) return 1;
         return parseInt(a.id) - parseInt(b.id);
     });
 
-    // 4. Set Initial State dynamically based on available files
+    // --- 🚀 PERFORMANCE OPTIMIZATION: IN-MEMORY CACHE ---
+    // This stores fully decoded image objects. Svelte doesn't need to track this,
+    // so we intentionally leave out $state to keep it blazing fast.
+    const imageCache = new Map<string, HTMLImageElement>();
+
+    function getCachedImage(src: string): Promise<HTMLImageElement | null> {
+        if (!src) return Promise.resolve(null);
+
+        // Instant return if we already decoded this image!
+        if (imageCache.has(src)) {
+            return Promise.resolve(imageCache.get(src)!);
+        }
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                imageCache.set(src, img); // Save it for next time
+                resolve(img);
+            };
+            img.onerror = () => {
+                console.warn(`Failed to load: ${src}`);
+                resolve(null);
+            };
+            img.src = src;
+        });
+    }
+
+    // Silently loads all assets into memory in the background
+    function preloadAllAssets() {
+        console.log("🚀 Preloading assets in background...");
+        // Preload standard traits
+        Object.values(TRAITS).forEach((traitCategory) => {
+            traitCategory.forEach((trait) => {
+                if (trait.src) getCachedImage(trait.src);
+            });
+        });
+        // Preload rings
+        RING_OPTIONS.forEach((ring) => {
+            if (ring.id) {
+                getCachedImage(`/traits/ring/top-ring-${ring.id}.png`);
+                getCachedImage(`/traits/ring/bottom-ring-${ring.id}.png`);
+            }
+        });
+    }
+
+    // Set Initial State
     let currentTraits: Record<string, number> = $state({});
     LAYER_ORDER.forEach((layer) => {
-        // Default to index 1 (the first real trait) so character isn't naked on load
-        // Unless it's body, which starts at index 0.
         currentTraits[layer] =
             layer !== "body" && TRAITS[layer].length > 1 ? 1 : 0;
     });
 
     let activeTab = $state("body");
-    let canvasElement: any = $state(null);
+    let canvasElement: HTMLCanvasElement | null = $state(null);
     let isRendering = $state(false);
     let currentRing = $state(0);
 
     async function renderPfp() {
         if (!canvasElement) return;
 
+        // Only show the loading blur if the image ISN'T in the cache yet.
+        // Once the background preloader catches up, this will be instantaneous.
         isRendering = true;
         const ctx = canvasElement.getContext("2d");
+        if (!ctx) return;
 
         const imagePathsToLoad: string[] = [];
 
         LAYER_ORDER.forEach((layerName) => {
-            // RING BACK: "top-ring" goes at the bottom layer (behind body)
             if (layerName === "body" && currentRing > 0) {
-                const ringId = RING_OPTIONS[currentRing].id;
-                imagePathsToLoad.push(`/traits/ring/top-ring-${ringId}.png`);
+                imagePathsToLoad.push(
+                    `/traits/ring/top-ring-${RING_OPTIONS[currentRing].id}.png`,
+                );
             }
 
-            // RING FRONT: "bottom-ring" goes right behind accessory (over costume)
             if (layerName === "accessory" && currentRing > 0) {
-                const ringId = RING_OPTIONS[currentRing].id;
-                imagePathsToLoad.push(`/traits/ring/bottom-ring-${ringId}.png`);
+                imagePathsToLoad.push(
+                    `/traits/ring/bottom-ring-${RING_OPTIONS[currentRing].id}.png`,
+                );
             }
 
-            // Standard trait layer
             const selectedTraitIndex = currentTraits[layerName];
             const traitObj = TRAITS[layerName][selectedTraitIndex];
 
@@ -107,24 +142,12 @@
             }
         });
 
-        const images = await Promise.all(
-            imagePathsToLoad.map((src) => {
-                return new Promise((resolve) => {
-                    const img = new Image();
-                    img.crossOrigin = "anonymous";
-                    img.onload = () => resolve(img);
-                    img.onerror = () => {
-                        console.warn(`Failed to load: ${src}`);
-                        resolve(null);
-                    };
-                    img.src = src;
-                });
-            }),
-        );
+        // Use our new caching engine!
+        const images = await Promise.all(imagePathsToLoad.map(getCachedImage));
 
         ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-        images.forEach((img: any) => {
+        images.forEach((img) => {
             if (img) {
                 ctx.drawImage(
                     img,
@@ -145,11 +168,12 @@
 
     onMount(() => {
         renderPfp();
+        // Start the background preloader 500ms after the initial load
+        // so it doesn't block the first render!
+        setTimeout(preloadAllAssets, 500);
     });
 
     function randomize() {
-        // True randomizer: Picks a valid index based on the actual length
-        // of the dynamically generated arrays!
         LAYER_ORDER.forEach((layer) => {
             currentTraits[layer] = Math.floor(
                 Math.random() * TRAITS[layer].length,
@@ -158,6 +182,7 @@
     }
 
     function exportPng() {
+        if (!canvasElement) return;
         const link = document.createElement("a");
         link.download = "win98-avatar.png";
         link.href = canvasElement.toDataURL();
