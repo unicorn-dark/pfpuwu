@@ -9,8 +9,8 @@
         "eyewear",
         "hair",
         "costume",
-        "accessory",
         "headgear",
+        "accessory",
         "horn",
     ];
 
