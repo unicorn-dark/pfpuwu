@@ -146,35 +146,50 @@
     );
 
     onMount(async () => {
-        // 1. Instantly fire off the background image cache warmer
-        preloadPaths.forEach((src) => {
-            const img = new Image();
-            img.src = src;
-        });
-
-        // 2. Start the visual glitch
+        // 1. Start the visual glitch
         glitchInterval = setInterval(() => {
             displayHtml = generateFrame(true);
         }, 50);
 
-        // 3. Dump the text to the screen instantly (no typewriter effect, no delays)
+        // 2. Dump the initial text so the user isn't staring at a blank screen
         lines = [
             "Unicorn Mememtic Warfare LLC 2026.",
             "SVELTEKIT OS ACPI BIOS Revision 3105",
-            `[OK] ${preloadPaths.length} visual assets cached to VRAM.`,
             "Mounting Virtual File System...",
+            "Loading graphical subsystems into VRAM (Please wait)...",
+        ];
+
+        // 3. 🚀 THE REAL BLOCKER 🚀
+        // We create an array of promises, one for every single image.
+        const imagePromises = preloadPaths.map((src) => {
+            return new Promise((resolve) => {
+                const img = new Image();
+                // Resolve the promise ONLY when the image is fully downloaded by the browser
+                img.onload = resolve;
+                // If a file is corrupted/missing, resolve anyway so the OS doesn't hang forever
+                img.onerror = resolve;
+                img.src = src;
+            });
+        });
+
+        // The BIOS screen will intentionally hold here until every file is cached!
+        await Promise.all(imagePromises);
+
+        // 4. Update the screen to show we finished downloading
+        lines = [
+            ...lines,
+            `[OK] ${preloadPaths.length} visual assets cached to VRAM.`,
             "Starting Desktop Environment...",
         ];
 
-        // 4. Wait strictly for the browser to finish rendering the basic HTML/CSS
+        // 5. Wait strictly for the browser to finish rendering the basic HTML/CSS
         if (document.readyState !== "complete") {
             await new Promise((resolve) =>
                 window.addEventListener("load", resolve),
             );
         }
 
-        // 5. A tiny 300ms pause just so the user's brain registers the cool boot screen,
-        // then immediately open the OS.
+        // 6. A tiny 300ms cinematic pause, then instantly boot into the OS.
         await new Promise((r) => setTimeout(r, 300));
         isBooting.set(false);
     });
