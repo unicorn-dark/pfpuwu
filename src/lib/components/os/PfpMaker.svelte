@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
+    // REMOVED: "background" from the top of the order
     const LAYER_ORDER = [
-        "background",
         "body",
         "face_accessory",
         "eyes",
@@ -148,7 +148,9 @@
 
         const images = await Promise.all(imagePathsToLoad.map(getCachedImage));
 
-        ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        // NEW: Paint the entire canvas pitch black before drawing the traits
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
         images.forEach((img) => {
             if (img) {
@@ -326,7 +328,7 @@
         flex-grow: 1;
         width: 100%;
         min-height: 0;
-        background: #000;
+        background: #000; /* Maintains the black background visually while loading */
         border: 2px solid;
         border-color: #000000 #ffffff #ffffff #000000;
         display: flex;
@@ -446,7 +448,6 @@
         transition: all 0.1s ease;
     }
 
-    /* NEW: Diagonal stroke pattern for locked trait tabs */
     .tab-name-btn.locked {
         color: #555555;
         text-shadow: 1px 1px 0px #e0e0e0;
@@ -465,14 +466,11 @@
     }
 
     .win98-tabs li[aria-selected="true"] .tab-name-btn {
-        /* When selected, overwrite the background gradient if locked to ensure it overlaps panel correctly,
-           or maintain it if you prefer. Setting border-right ensures the seamless blend into the panel. */
         border-right: 2px solid #c0c0c0;
         margin-right: -2px;
         padding-right: 14px;
     }
 
-    /* Important: Override border right color if it's locked AND selected, so it blends with the panel properly */
     .win98-tabs li[aria-selected="true"] .tab-name-btn.locked {
         border-right-color: transparent;
     }
@@ -501,7 +499,6 @@
         position: relative;
     }
 
-    /* NEW: Adds diagonal strokes over the entire grid when locked */
     .locked-overlay {
         position: absolute;
         top: 0;
@@ -685,7 +682,6 @@
             padding-bottom: 8px;
         }
 
-        /* Prevent bottom border from looking weird when selected and locked on mobile */
         .win98-tabs li[aria-selected="true"] .tab-name-btn.locked {
             border-bottom-color: transparent;
             border-right-color: #000000;
