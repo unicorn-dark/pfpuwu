@@ -1,15 +1,13 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
-    // REMOVED: "background" from the top of the order
+    // UPDATED: Simplified trait list and new render order
     const LAYER_ORDER = [
         "body",
-        "face_accessory",
+        "face",
         "eyes",
-        "eyewear",
-        "hair",
+        "head",
         "costume",
-        "headgear",
         "accessory",
         "horn",
     ];
@@ -148,7 +146,7 @@
 
         const images = await Promise.all(imagePathsToLoad.map(getCachedImage));
 
-        // NEW: Paint the entire canvas pitch black before drawing the traits
+        // Paint the entire canvas pitch black before drawing the traits
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
@@ -328,7 +326,7 @@
         flex-grow: 1;
         width: 100%;
         min-height: 0;
-        background: #000; /* Maintains the black background visually while loading */
+        background: #000;
         border: 2px solid;
         border-color: #000000 #ffffff #ffffff #000000;
         display: flex;
