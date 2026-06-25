@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
 
-    // UPDATED: Simplified trait list and new render order
+    // 1. Removed 'background' from the layer order entirely
     const LAYER_ORDER = [
         "body",
         "face",
@@ -12,7 +12,20 @@
         "horn",
     ];
 
-    // 1. The Vite Magic: Auto-discover every PNG
+    // 2. Defined background options as its own standalone constant
+    const BACKGROUND_OPTIONS = [
+        { name: "Pitch Black", hex: "#000000" },
+        { name: "Midnight Blue", hex: "#000033" },
+        { name: "Deep Navy", hex: "#000080" },
+        { name: "Dark Crimson", hex: "#4A0404" },
+        { name: "Bordeaux", hex: "#660033" },
+        { name: "Deep Eggplant", hex: "#301934" },
+        { name: "Indigo", hex: "#4B0082" },
+        { name: "Plum", hex: "#483248" },
+        { name: "Void Purple", hex: "#2E0854" },
+    ];
+
+    // The Vite Magic: Auto-discover every PNG
     const allTraitFiles = import.meta.glob("/static/traits/**/*.png");
     const filePaths = Object.keys(allTraitFiles);
 
@@ -27,6 +40,8 @@
         const parts = path.split("/");
         const fileName = parts.pop() as string;
         const folderName = parts.pop() as string;
+
+        if (folderName === "background") return;
 
         let cleanName = fileName.replace(".png", "").replace(/[-_]/g, " ");
         cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
@@ -50,15 +65,11 @@
         return parseInt(a.id) - parseInt(b.id);
     });
 
-    // --- PERFORMANCE OPTIMIZATION: IN-MEMORY CACHE ---
     const imageCache = new Map<string, HTMLImageElement>();
 
     function getCachedImage(src: string): Promise<HTMLImageElement | null> {
         if (!src) return Promise.resolve(null);
-
-        if (imageCache.has(src)) {
-            return Promise.resolve(imageCache.get(src)!);
-        }
+        if (imageCache.has(src)) return Promise.resolve(imageCache.get(src)!);
 
         return new Promise((resolve) => {
             const img = new Image();
@@ -95,14 +106,14 @@
             layer !== "body" && TRAITS[layer].length > 1 ? 1 : 0;
     });
 
+    // 3. Isolated state for background to prevent rendering bugs
+    let currentBgIndex = $state(0);
     let activeTab = $state("body");
     let canvasElement: HTMLCanvasElement | null = $state(null);
     let isRendering = $state(false);
     let currentRing = $state(0);
 
     let lockedCategories: Record<string, boolean> = $state({});
-
-    // Tooltip logic
     let showTooltip = $state(false);
     let tooltipTimeout: ReturnType<typeof setTimeout>;
 
@@ -117,6 +128,12 @@
     async function renderPfp() {
         if (!canvasElement) return;
 
+        // 4. CRITICAL FIX: Read all Svelte state synchronously BEFORE awaiting promises
+        // This ensures the `$effect` block accurately tracks dependencies and auto-updates.
+        const activeTraits = { ...currentTraits };
+        const activeRing = currentRing;
+        const activeBg = currentBgIndex;
+
         isRendering = true;
         const ctx = canvasElement.getContext("2d");
         if (!ctx) return;
@@ -124,19 +141,18 @@
         const imagePathsToLoad: string[] = [];
 
         LAYER_ORDER.forEach((layerName) => {
-            if (layerName === "body" && currentRing > 0) {
+            if (layerName === "body" && activeRing > 0) {
                 imagePathsToLoad.push(
-                    `/traits/ring/top-ring-${RING_OPTIONS[currentRing].id}.png`,
+                    `/traits/ring/top-ring-${RING_OPTIONS[activeRing].id}.png`,
+                );
+            }
+            if (layerName === "accessory" && activeRing > 0) {
+                imagePathsToLoad.push(
+                    `/traits/ring/bottom-ring-${RING_OPTIONS[activeRing].id}.png`,
                 );
             }
 
-            if (layerName === "accessory" && currentRing > 0) {
-                imagePathsToLoad.push(
-                    `/traits/ring/bottom-ring-${RING_OPTIONS[currentRing].id}.png`,
-                );
-            }
-
-            const selectedTraitIndex = currentTraits[layerName];
+            const selectedTraitIndex = activeTraits[layerName];
             const traitObj = TRAITS[layerName][selectedTraitIndex];
 
             if (traitObj && traitObj.src !== null) {
@@ -146,8 +162,9 @@
 
         const images = await Promise.all(imagePathsToLoad.map(getCachedImage));
 
-        // Paint the entire canvas pitch black before drawing the traits
-        ctx.fillStyle = "#000000";
+        // 5. Apply background based on state
+        const bgHex = BACKGROUND_OPTIONS[activeBg].hex;
+        ctx.fillStyle = bgHex;
         ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
         images.forEach((img) => {
@@ -166,7 +183,8 @@
     }
 
     $effect(() => {
-        if (currentTraits || currentRing > -1) renderPfp();
+        // Trigger effect implicitly by reading state inside renderPfp
+        renderPfp();
     });
 
     onMount(() => {
@@ -175,6 +193,7 @@
     });
 
     function randomize() {
+        // LAYER_ORDER no longer contains background, so it skips it automatically
         LAYER_ORDER.forEach((layer) => {
             if (!lockedCategories[layer]) {
                 currentTraits[layer] = Math.floor(
@@ -213,7 +232,7 @@
 
     <div class="control-box">
         <menu role="tablist" class="win98-tabs">
-            {#each Object.keys(TRAITS) as tab}
+            {#each LAYER_ORDER as tab}
                 <li
                     role="tab"
                     aria-selected={activeTab === tab}
@@ -248,8 +267,21 @@
 
             <li
                 role="tab"
+                aria-selected={activeTab === "background"}
+                class="tab-item special-tab"
+            >
+                <button
+                    class="tab-name-btn full-width"
+                    onclick={() => (activeTab = "background")}
+                >
+                    🎨 Background
+                </button>
+            </li>
+
+            <li
+                role="tab"
                 aria-selected={activeTab === "ring"}
-                class="tab-item ring-tab"
+                class="tab-item special-tab ring-tab"
             >
                 <button
                     class="tab-name-btn full-width"
@@ -269,7 +301,7 @@
                 class="trait-grid"
                 class:locked-grid={lockedCategories[activeTab]}
             >
-                {#if lockedCategories[activeTab]}
+                {#if lockedCategories[activeTab] && activeTab !== "background" && activeTab !== "ring"}
                     <div class="locked-overlay" onclick={triggerTooltip}></div>
                 {/if}
 
@@ -281,6 +313,22 @@
                             onclick={() => (currentRing = idx)}
                         >
                             <span class="option-title">{ringOption.name}</span>
+                        </button>
+                    {/each}
+                {:else if activeTab === "background"}
+                    {#each BACKGROUND_OPTIONS as bgOption, idx}
+                        <button
+                            class="trait-option"
+                            class:selected={currentBgIndex === idx}
+                            onclick={() => (currentBgIndex = idx)}
+                        >
+                            <span class="option-title title-with-swatch">
+                                <span
+                                    class="color-swatch"
+                                    style="background-color: {bgOption.hex};"
+                                ></span>
+                                {bgOption.name}
+                            </span>
                         </button>
                     {/each}
                 {:else}
@@ -300,6 +348,7 @@
 </div>
 
 <style>
+    /* All previous CSS remains exactly the same! */
     .pfp-maker-layout {
         display: flex;
         gap: 14px;
@@ -577,6 +626,30 @@
     .option-title {
         font-weight: bold;
         font-size: 0.95rem;
+    }
+
+    .title-with-swatch {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .color-swatch {
+        width: 14px;
+        height: 14px;
+        display: inline-block;
+        border: 1px solid #808080;
+        box-shadow:
+            inset -1px -1px 0px #ffffff,
+            inset 1px 1px 0px #000000;
+        flex-shrink: 0;
+    }
+
+    .trait-option.selected .color-swatch {
+        border-color: #ffffff;
+        box-shadow:
+            inset -1px -1px 0px rgba(255, 255, 255, 0.4),
+            inset 1px 1px 0px #000000;
     }
 
     @media (max-width: 768px) {
