@@ -536,14 +536,16 @@
 
     /* --- PANEL & GRID --- */
     .tab-panel {
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #ffffff #000000 #000000 #ffffff;
-        flex-grow: 1;
-        padding: 12px;
+        flex: 1 1 auto;
+        width: 100%;
+        box-sizing: border-box;
         overflow-y: auto;
-        z-index: 1;
-        position: relative;
+        min-height: 0;
+
+        padding: 12px;
+        padding-bottom: calc(80px + env(safe-area-inset-bottom));
+
+        -webkit-overflow-scrolling: touch;
     }
 
     .locked-overlay {
