@@ -111,7 +111,7 @@
     let activeTab = $state("body");
     let canvasElement: HTMLCanvasElement | null = $state(null);
     let isRendering = $state(false);
-    let currentRing = $state(0);
+    let currentRing = $state(Math.max(0, RING_OPTIONS.length - 1));
 
     let lockedCategories: Record<string, boolean> = $state({});
     let showTooltip = $state(false);
