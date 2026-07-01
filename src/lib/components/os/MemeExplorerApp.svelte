@@ -387,16 +387,12 @@
                         class="grid-item {selectedMeme?.id === meme.id
                             ? 'selected'
                             : ''}"
-                        id={meme.id}
-                        role="option"
-                        aria-selected={selectedMeme?.id === meme.id}
-                        data-meme-id={meme.id}
                         onclick={() => selectMeme(meme)}
                     >
                         {#if meme.type === "photo"}
                             <img src={meme.url} alt="Thumbnail" />
                         {:else}
-                            <div class="video-icon">🎬 VIDEO</div>
+                            <video src={meme.url} muted preload="metadata" />
                         {/if}
                     </button>
                 {/each}
@@ -460,12 +456,14 @@
                 onclick={downloadMeme}>Download</button
             >
 
-            <button
-                id="random-btn"
-                class="win-btn action-btn"
-                disabled={memes.length === 0}
-                onclick={pickRandom}>Random</button
-            >
+            {#if filterType === "photo"}
+                <button
+                    id="random-btn"
+                    class="win-btn action-btn"
+                    disabled={memes.length === 0}
+                    onclick={pickRandom}>Random</button
+                >
+            {/if}
 
             {#if selectedMeme?.type === "photo"}
                 <button
@@ -655,10 +653,13 @@
             0 0 0 2px #ffff00;
     }
 
-    .grid-item img {
+    .grid-item img,
+    .grid-item video {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        /* Change cover to contain to prevent zooming/cropping */
+        object-fit: contain;
+        background: #000;
     }
 
     .grid-item.selected img {
