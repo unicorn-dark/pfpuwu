@@ -1,24 +1,38 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
-    import { activeWindows, openWindow, restoreWindow, focusWindow, minimizeWindow } from '$lib/stores/os';
+    import { onMount, onDestroy } from "svelte";
+    import {
+        activeWindows,
+        openWindow,
+        restoreWindow,
+        focusWindow,
+        minimizeWindow,
+    } from "$lib/stores/os";
 
     let startMenuOpen = $state(false);
-    let time = $state('');
+    let time = $state("");
     let clockInterval: any;
 
     // Hardcoded list of apps for the Start Menu
     const apps = [
-        { id: 'pfp-app', title: 'PFP Maker', icon: '🎨', w: 960, h: 690 },
-        { id: 'jspaint', title: 'JS Paint', icon: '🖌️', w: 800, h: 600 },
-        { id: 'minesweeper', title: 'Minesweeper', icon: '💣', w: 260, h: 320 },
-        { id: 'privateers-blog', title: 'Privateer Blog', icon: '🌐', w: 480, h: 600 },
-        { id: 'notepad', title: 'Notepad', icon: '📝', w: 500, h: 400 }
-        
+        { id: "pfp-app", title: "PFP Maker", icon: "🎨", w: 960, h: 690 },
+        { id: "jspaint", title: "JS Paint", icon: "🖌️", w: 800, h: 600 },
+        { id: "minesweeper", title: "Minesweeper", icon: "💣", w: 260, h: 320 },
+        {
+            id: "privateers-blog",
+            title: "Privateer Blog",
+            icon: "🌐",
+            w: 480,
+            h: 600,
+        },
+        { id: "notepad", title: "Notepad", icon: "📝", w: 500, h: 400 },
     ];
 
     onMount(() => {
         const updateTime = () => {
-            time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            time = new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+            });
         };
         updateTime();
         clockInterval = setInterval(updateTime, 1000);
@@ -28,8 +42,8 @@
         if (clockInterval) clearInterval(clockInterval);
     });
 
-    const toggleStartMenu = () => startMenuOpen = !startMenuOpen;
-    const closeMenu = () => startMenuOpen = false;
+    const toggleStartMenu = () => (startMenuOpen = !startMenuOpen);
+    const closeMenu = () => (startMenuOpen = false);
 
     const launchApp = (app: any) => {
         openWindow(app.id, app.title, app.w, app.h);
@@ -40,7 +54,7 @@
         if (win.isMinimized) {
             restoreWindow(win.id);
         } else {
-            // In a real OS, clicking an already focused app minimizes it. 
+            // In a real OS, clicking an already focused app minimizes it.
             // For now, we will just ensure it comes to the front.
             focusWindow(win.id);
         }
@@ -52,8 +66,8 @@
 {/if}
 
 <div class="taskbar">
-    <button 
-        class="start-button {startMenuOpen ? 'active' : ''}" 
+    <button
+        class="start-button {startMenuOpen ? 'active' : ''}"
         onclick={toggleStartMenu}
     >
         <span class="windows-logo">⊞</span> Start
@@ -62,8 +76,8 @@
     <div class="taskbar-apps">
         {#each $activeWindows as win}
             {#if win.isOpen}
-                <button 
-                    class="taskbar-app-btn {win.isMinimized ? '' : 'active'}" 
+                <button
+                    class="taskbar-app-btn {win.isMinimized ? '' : 'active'}"
                     onclick={() => handleTaskbarClick(win)}
                 >
                     {win.title}
@@ -97,10 +111,10 @@
     .taskbar {
         position: fixed;
         /* 1. Tell the browser to lift the taskbar above the gesture line */
-        bottom: env(safe-area-inset-bottom, 0px); 
+        bottom: env(safe-area-inset-bottom, 0px);
         left: 0;
         /* 2. Use 100% instead of 100vw to prevent weird mobile scrollbar offsets */
-        width: 100%; 
+        width: 100%;
         height: 35px;
         background: #c0c0c0;
         border-top: 2px solid #ffffff;
@@ -109,7 +123,7 @@
         padding: 2px;
         box-sizing: border-box;
         /* 3. Add an extra 9 just to absolutely guarantee nothing covers it */
-        z-index: 99999; 
+        z-index: 99999;
     }
 
     /* Start Button */
@@ -127,7 +141,8 @@
         cursor: pointer;
     }
 
-    .start-button.active, .start-button:active {
+    .start-button.active,
+    .start-button:active {
         border-color: #000000 #ffffff #ffffff #000000;
         background: #e0e0e0;
         padding: 5px 7px 3px 9px; /* Push-in effect */
@@ -167,7 +182,13 @@
     .taskbar-app-btn.active {
         border-color: #000000 #ffffff #ffffff #000000;
         background: #d3d3d3;
-        background-image: repeating-linear-gradient(45deg, transparent, transparent 2px, #c0c0c0 2px, #c0c0c0 4px);
+        background-image: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 2px,
+            #c0c0c0 2px,
+            #c0c0c0 4px
+        );
     }
 
     /* System Tray */
@@ -206,7 +227,7 @@
         display: flex;
         flex-direction: row;
         z-index: 10000;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5);
     }
 
     .start-menu-sidebar {
@@ -262,31 +283,31 @@
        ========================================= */
     @media (max-width: 768px) {
         .taskbar-apps {
-            display: none; 
+            display: none;
         }
 
         .start-menu {
             flex-direction: column;
             width: 100%; /* Changed from 100vw to prevent horizontal bleed */
-            height: calc(100vh - 35px); 
-            height: calc(100dvh - 35px); 
+            height: calc(100vh - 35px);
+            height: calc(100dvh - 35px);
             bottom: 35px;
             left: 0;
-            background: #008080; 
+            background: #008080;
             border: none;
             box-shadow: none;
-            overflow-y: auto; 
+            overflow-y: auto;
             box-sizing: border-box; /* Ensures padding stays inside the screen */
         }
 
         .start-menu-sidebar {
-            display: none; 
+            display: none;
         }
 
         .start-menu-items {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 8px; 
+            gap: 8px;
             padding: 12px;
             box-sizing: border-box;
             width: 100%;
@@ -298,17 +319,17 @@
             justify-content: center;
             align-items: center;
             width: 100%;
-            aspect-ratio: 1; 
+            aspect-ratio: 1;
             background: #c0c0c0;
             border: 2px solid;
-            border-color: #ffffff #000000 #000000 #ffffff; 
+            border-color: #ffffff #000000 #000000 #ffffff;
             color: #000;
             padding: 4px;
             box-sizing: border-box;
-            
+
             /* THE MAGIC FIX: Forces the button to shrink and traps long text inside */
-            min-width: 0; 
-            overflow: hidden; 
+            min-width: 0;
+            overflow: hidden;
 
             font-size: 0.75rem; /* Scaled down slightly so text fits */
             line-height: 1.1;

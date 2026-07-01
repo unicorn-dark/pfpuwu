@@ -1,76 +1,63 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import { activeWindows, openWindow } from '$lib/stores/os';
-    import Window from './Window.svelte';
-    import PfpMaker from './PfpMaker.svelte'; 
-    import Taskbar from './Taskbar.svelte';
-    import MinesweeperApp from './MinesweeperApp.svelte';
-    import PrivateersApp from './PrivateersApp.svelte';
-    import NotepadApp from './NotepadApp.svelte';
-    import UwUSidebar from './UwUSidebar.svelte';
-    import VideoPlayerApp from './VideoPlayerApp.svelte';
+    import { onMount } from "svelte";
+    import { activeWindows, openWindow } from "$lib/stores/os";
+    import Window from "./Window.svelte";
+    import PfpMaker from "./PfpMaker.svelte";
+    import Taskbar from "./Taskbar.svelte";
+    import MinesweeperApp from "./MinesweeperApp.svelte";
+    import PrivateersApp from "./PrivateersApp.svelte";
+    import NotepadApp from "./NotepadApp.svelte";
+    import UwUSidebar from "./UwUSidebar.svelte";
+    import VideoPlayerApp from "./VideoPlayerApp.svelte";
+    import MemeExplorerApp from "./MemeExplorerApp.svelte";
 
     const desktopVideos = [
-        { 
-            id: 'vid-demo1', 
-            title: 'neuralink.mov', 
-            src: 'video/nerw.mp4', 
-            width: 640, 
-            height: 360 
-        },
-        { 
-            id: 'vid-demo2', 
-            title: 'truth_nuke.mov', 
-            src: 'video/IMG_3359.MP4', 
-            width: 1280, 
-            height: 960 
-        },
-        { 
-            id: 'vid-demo3', 
-            title: 'unicorn?.mov', 
-            src: 'video/what.mp4', 
-            width: 720, 
-            height: 720 
-        },
-        { 
-            id: 'vid-demo4', 
-            title: 'pizza.mov', 
-            src: 'video/pizza.mp4', 
-            width: 720, 
-            height: 1280 
+        {
+            id: "vid-demo4",
+            title: "pizza.mov",
+            src: "video/pizza.mp4",
+            width: 720,
+            height: 1280,
         },
     ];
 
     const launchPfpApp = () => {
         // Boost size to 720x480 for better layout presentation on desktop
-        openWindow('pfp-app', 'PFP Generator v1.0', 960, 690); 
+        openWindow("pfp-app", "PFP Generator v1.0", 960, 690);
     };
     const launchJSPaint = () => {
-        openWindow('jspaint', 'untitled - Paint', 800, 600);
+        openWindow("jspaint", "untitled - Paint", 800, 600);
     };
     const launchMinesweeper = () => {
-        openWindow('minesweeper', 'Minesweeper', 260, 320);
+        openWindow("minesweeper", "Minesweeper", 260, 320);
     };
     const launchBlog = () => {
-        openWindow('privateers-blog', 'Internet Explorer - PrivateerSA', 840, 780);
+        openWindow(
+            "privateers-blog",
+            "Internet Explorer - PrivateerSA",
+            840,
+            780,
+        );
     };
     const launchNotepad = () => {
-        openWindow('notepad', 'untitled - Notepad', 500, 400);
+        openWindow("notepad", "untitled - Notepad", 500, 400);
     };
     const launchVideo = (vid: any) => {
         // 1. Determine the safe available space on the user's screen
         const isDesktop = window.innerWidth > 768;
         // Subtract sidebar (320px) and a safety margin (40px)
-        const maxSafeWidth = isDesktop ? window.innerWidth - 360 : window.innerWidth - 40; 
+        const maxSafeWidth = isDesktop
+            ? window.innerWidth - 360
+            : window.innerWidth - 40;
         // Subtract taskbar (35px) and a safety margin (60px)
-        const maxSafeHeight = window.innerHeight - 95; 
+        const maxSafeHeight = window.innerHeight - 95;
 
         // 2. Calculate the scale factor to fit the video into the safe space
         const widthScale = maxSafeWidth / vid.width;
         const heightScale = maxSafeHeight / vid.height;
-        
+
         // Use the smallest scale to maintain aspect ratio (and never scale > 1)
-        const scale = Math.min(1, widthScale, heightScale); 
+        const scale = Math.min(1, widthScale, heightScale);
 
         // 3. Apply the scale to the video dimensions
         const finalWidth = Math.floor(vid.width * scale);
@@ -80,95 +67,138 @@
         openWindow(vid.id, vid.title, finalWidth + 12, finalHeight + 40);
     };
     onMount(() => {
-        launchPfpApp()
-    })
+        launchPfpApp();
+    });
 </script>
 
 <div class="desktop">
-
     <div class="workspace">
         <div class="shortcuts">
-            <button class="shortcut" onclick={launchPfpApp} ondblclick={launchPfpApp}>
+            <button
+                class="shortcut"
+                onclick={launchPfpApp}
+                ondblclick={launchPfpApp}
+            >
                 <div class="icon-placeholder">🎨</div>
                 <span>PFP Maker</span>
             </button>
-            <button class="shortcut" onclick={launchJSPaint} ondblclick={launchJSPaint}>
+            <button
+                class="shortcut"
+                onclick={launchJSPaint}
+                ondblclick={launchJSPaint}
+            >
                 <div class="icon-placeholder">🖌️</div>
                 <span>JS Paint</span>
             </button>
-            <button class="shortcut" onclick={launchMinesweeper} ondblclick={launchMinesweeper}>
+            <button
+                class="shortcut"
+                onclick={launchMinesweeper}
+                ondblclick={launchMinesweeper}
+            >
                 <div class="icon-placeholder">💣</div>
-                <span>Minesweeper</span>        
+                <span>Minesweeper</span>
             </button>
-            <button class="shortcut" onclick={launchBlog} ondblclick={launchBlog}>
+            <button
+                class="shortcut"
+                onclick={launchBlog}
+                ondblclick={launchBlog}
+            >
                 <div class="icon-placeholder">🌐</div>
                 <span>Privateer Blog</span>
             </button>
-            <button class="shortcut" onclick={launchNotepad} ondblclick={launchNotepad}>
+            <button
+                class="shortcut"
+                onclick={launchNotepad}
+                ondblclick={launchNotepad}
+            >
                 <div class="icon-placeholder">📝</div>
                 <span>Notepad</span>
             </button>
-            {#each desktopVideos as vid}
-            <button class="shortcut" onclick={() => launchVideo(vid)} ondblclick={() => launchVideo(vid)}>
-                <div class="icon-placeholder">🎞️</div>
-                <span>{vid.title}</span>
+            <button
+                class="shortcut"
+                onclick={() =>
+                    openWindow("meme-explorer", "Meme Explorer", 960, 690)}
+                ondblclick={() =>
+                    openWindow("meme-explorer", "Meme Explorer", 960, 690)}
+            >
+                <div class="icon-placeholder">🦄</div>
+                <span>Meme Explorer</span>
             </button>
-        {/each}
+            {#each desktopVideos as vid}
+                <button
+                    class="shortcut"
+                    onclick={() => launchVideo(vid)}
+                    ondblclick={() => launchVideo(vid)}
+                >
+                    <div class="icon-placeholder">🎞️</div>
+                    <span>{vid.title}</span>
+                </button>
+            {/each}
         </div>
 
-       {#each $activeWindows as win (win.id)}
+        {#each $activeWindows as win (win.id)}
             {#if win.isOpen}
-                <Window 
-                    id={win.id} 
-                    title={win.title} 
+                <Window
+                    id={win.id}
+                    title={win.title}
                     zIndex={win.zIndex}
                     initialWidth={win.width}
                     initialHeight={win.height}
                     isMinimized={win.isMinimized}
-                    minWidth={win.id === 'pfp-app' ? 640 : 250}  
-                    minHeight={win.id === 'pfp-app' ? 440 : 150} 
+                    minWidth={win.id === "pfp-app" ? 640 : 250}
+                    minHeight={win.id === "pfp-app" ? 440 : 150}
                 >
-                    {#if win.id === 'pfp-app'}
+                    {#if win.id === "pfp-app"}
                         <div class="app-content">
-                            <PfpMaker /> 
+                            <PfpMaker />
                         </div>
-                    {:else if win.id === 'jspaint'}
-                        <iframe 
-                            src="https://jspaint.app" 
-                            title="JS Paint" 
+                    {:else if win.id === "jspaint"}
+                        <iframe
+                            src="https://jspaint.app"
+                            title="JS Paint"
                             class="app-iframe"
                         ></iframe>
-                    {:else if win.id === 'minesweeper'}
+                    {:else if win.id === "meme-explorer"}
+                        <div class="app-content">
+                            <MemeExplorerApp />
+                        </div>
+                    {:else if win.id === "minesweeper"}
                         <div class="app-content">
                             <MinesweeperApp />
                         </div>
-                    {:else if win.id === 'privateers-blog'}
+                    {:else if win.id === "privateers-blog"}
                         <div class="app-content">
                             <PrivateersApp />
                         </div>
-                    {:else if win.id === 'notepad'}
+                    {:else if win.id === "notepad"}
                         <div class="app-content">
                             <NotepadApp />
                         </div>
-                    {:else if win.id.startsWith('vid-')}
-                    {@const videoData = desktopVideos.find(v => v.id === win.id)}
-                    <div class="app-content" style="padding: 0; background: #000;">
-                        {#if videoData}
-                            <VideoPlayerApp src={videoData.src} />
-                        {/if}
-                    </div>
+                    {:else if win.id.startsWith("vid-")}
+                        {@const videoData = desktopVideos.find(
+                            (v) => v.id === win.id,
+                        )}
+                        <div
+                            class="app-content"
+                            style="padding: 0; background: #000;"
+                        >
+                            {#if videoData}
+                                <VideoPlayerApp src={videoData.src} />
+                            {/if}
+                        </div>
                     {/if}
                 </Window>
             {/if}
         {/each}
-    </div> <UwUSidebar />
+    </div>
+    <UwUSidebar />
     <Taskbar />
 </div>
 
 <style>
     .desktop {
-        width : 100%; 
-        height : 100%;
+        width: 100%;
+        height: 100%;
         height: 100dvh; /* Dynamic height for modern browsers */
         background-color: #008080;
         position: relative;
@@ -176,10 +206,10 @@
         box-sizing: border-box;
     }
     .maximized {
-    width: 100% !important;
-    height: 100% !important;
-    top: 0 !important;
-    left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        top: 0 !important;
+        left: 0 !important;
     }
     .workspace {
         position: absolute;
@@ -203,7 +233,7 @@
     /* On mobile, remove the right boundary since the sidebar is hidden */
     @media (max-width: 768px) {
         .workspace {
-            right: 0px; 
+            right: 0px;
         }
     }
 
