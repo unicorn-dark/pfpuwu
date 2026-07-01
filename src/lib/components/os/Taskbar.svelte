@@ -24,7 +24,14 @@
             w: 480,
             h: 600,
         },
-        { id: "notepad", title: "Notepad", icon: "📝", w: 500, h: 400 },
+        { id: "notepad", title: "Notepad", icon: "📝", w: 960, h: 690 },
+        {
+            id: "meme-explorer",
+            title: "Meme Explorer",
+            icon: "🦄",
+            w: 500,
+            h: 400,
+        },
     ];
 
     onMount(() => {
