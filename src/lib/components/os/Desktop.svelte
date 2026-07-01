@@ -20,7 +20,9 @@
             height: 1280,
         },
     ];
-
+    const launchMemeExpApp = () => {
+        openWindow("meme-explorer", "Meme Explorer", 900, 600);
+    };
     const launchPfpApp = () => {
         // Boost size to 720x480 for better layout presentation on desktop
         openWindow("pfp-app", "PFP Generator v1.0", 960, 690);
@@ -68,6 +70,7 @@
     };
     onMount(() => {
         launchPfpApp();
+        launchMemeExpApp();
     });
 </script>
 
