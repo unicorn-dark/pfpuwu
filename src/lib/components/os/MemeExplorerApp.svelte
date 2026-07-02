@@ -480,7 +480,15 @@
         </div>
         {#if filterType === "photo"}
             <div class="search-container">
-                <span class="search-label">Search:</span>
+                <!-- Group the label and the button together above the input -->
+                <div class="search-header">
+                    <span class="search-label">Search:</span>
+                    <button
+                        class="win-btn surprise-btn"
+                        onclick={surpriseMe}
+                        title="Auto-fill a random idea">🎲 Random Idea</button
+                    >
+                </div>
                 <input
                     type="text"
                     class="win-input"
@@ -488,9 +496,6 @@
                     bind:value={searchQuery}
                     oninput={handleSearch}
                 />
-                <button class="win-btn surprise-btn" onclick={surpriseMe}
-                    >✨ Surprise Me!</button
-                >
             </div>
         {/if}
     </div>
@@ -760,16 +765,27 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
+        padding-top: 4px;
+    }
+
+    /* NEW: Aligns the label and the button on the same row */
+    .search-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
     }
 
     .search-label {
         font-size: 12px;
+        padding-bottom: 2px;
     }
 
+    /* FIX: Make it look like a tiny helper utility, not a main action button */
     .surprise-btn {
-        margin-top: 4px;
-        font-weight: bold;
-        padding: 6px;
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: normal;
+        min-height: 20px;
     }
 
     .preview-display {
