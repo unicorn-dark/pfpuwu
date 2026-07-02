@@ -22,7 +22,6 @@
     let clipboardMessage = $state("");
     let hasMore = $state(true);
 
-    // NEW: Store exact database counts
     let photoCount = $state(0);
     let videoCount = $state(0);
 
@@ -33,13 +32,88 @@
     let activeFetchId = 0;
     let mediaGrid: HTMLDivElement;
 
+    // A massive pool of concepts to feed the semantic AI
+    const surpriseConcepts = [
+        "majestic animal",
+        "dangerous weapon",
+        "crying and sad",
+        "eating food",
+        "funny text",
+        "chaotic energy",
+        "floating in space",
+        "wearing sunglasses",
+        "angry glaring",
+        "deep fried meme",
+        "laser eyes",
+        "holding a gun",
+        "drinking coffee",
+        "driving a car",
+        "glitchy matrix",
+        "pixel art style",
+        "screaming loudly",
+        "confused math lady",
+        "this is fine dog",
+        "pepe the frog vibes",
+        "chad energy",
+        "doomer vibes",
+        "nostalgic 90s",
+        "vaporwave aesthetic",
+        "creepy cursed image",
+        "blurry cryptid",
+        "glowing aura",
+        "holding a sword",
+        "riding a skateboard",
+        "doing a kickflip",
+        "in a bubble",
+        "wearing a hat",
+        "smoking a cigar",
+        "boss music playing",
+        "anime betrayal",
+        "epic handshake",
+        "spider-man pointing",
+        "cat sitting on keyboard",
+        "doge stare",
+        "stonks going up",
+        "panik kalm",
+        "brain expanding",
+        "hiding in the bushes",
+        "looking through window",
+        "pointing at screen",
+        "sweating nervously",
+        "galaxy brain",
+        "sigma male grindset",
+        "typing fast",
+        "hacker man",
+        "sleeping peacefully",
+        "waking up in a cold sweat",
+        "disgusted face",
+        "smug grin",
+        "t-posing to assert dominance",
+        "running away",
+        "chasing someone",
+        "explosion in the background",
+        "wearing medieval armor",
+        "cyberpunk neon city",
+        "wizard casting a spell",
+        "goth aesthetic",
+        "cottagecore vibes",
+        "money flying everywhere",
+        "police lights",
+        "alien invasion",
+        "romantic sunset",
+        "rainy day window",
+        "dancing aggressively",
+        "playing a guitar",
+        "reading a book",
+        "stuck in a box",
+    ];
+
     const selectedIndex = $derived(
         selectedMeme
             ? memes.findIndex((meme) => meme.id === selectedMeme?.id)
             : -1,
     );
 
-    // Formats numbers like 1500 to "1.5k"
     function formatCount(num: number) {
         if (num === 0) return "...";
         return num > 999 ? (num / 1000).toFixed(1) + "k" : num.toString();
@@ -49,7 +123,6 @@
         return `${filterType}:${searchQuery.trim().toLowerCase()}:${offset}`;
     }
 
-    // NEW: Fetch total stats on load
     async function fetchStats() {
         try {
             const res = await fetch("/api/memes/stats");
@@ -89,11 +162,8 @@
                 const res = await fetch(url);
                 if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
-                // (New Code)
                 const rawData = await res.json();
                 if (!Array.isArray(rawData)) {
-                    // This will convert whatever weird object SvelteKit sent back into text
-                    // and splash it directly onto your screen!
                     const weirdDataString = JSON.stringify(rawData);
                     throw new Error(
                         rawData?.error ??
@@ -153,6 +223,17 @@
         searchTimeout = setTimeout(() => fetchMemes(), 350);
     }
 
+    // Instantly selects a random vibe and searches it
+    function surpriseMe() {
+        const randomConcept =
+            surpriseConcepts[
+                Math.floor(Math.random() * surpriseConcepts.length)
+            ];
+        searchQuery = randomConcept;
+        clearTimeout(searchTimeout); // Bypass the debounce delay
+        fetchMemes();
+    }
+
     function setFilter(type: "photo" | "video") {
         if (filterType === type) return;
 
@@ -176,22 +257,17 @@
         });
     }
 
-    // NEW: True Database Random Pick
     async function pickRandom() {
         const total = filterType === "photo" ? photoCount : videoCount;
         if (total === 0) return;
 
-        // NEW: Instantly trigger the blur effect BEFORE talking to the database
         isMediaLoading = true;
-
-        // Generate a mathematically random offset within your database bounds
         const randomOffset = Math.floor(Math.random() * total);
 
         const btn = document.getElementById("random-btn");
         if (btn) btn.innerText = "Rolling...";
 
         try {
-            // Fetch exactly 1 item bypassing the search query, using the random offset
             const url = `/api/memes?type=${filterType}&limit=1&offset=${randomOffset}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Random fetch failed");
@@ -199,7 +275,6 @@
             const [randomMeme] = await res.json();
 
             if (randomMeme) {
-                // If it's not currently loaded in the UI grid, secretly slip it into the #1 slot so it renders!
                 if (!memes.some((m) => m.id === randomMeme.id)) {
                     memes = [randomMeme, ...memes];
                 }
@@ -339,7 +414,7 @@
     }
 
     onMount(() => {
-        fetchStats(); // Grab total counts immediately
+        fetchStats();
         fetchMemes();
     });
 
@@ -413,6 +488,9 @@
                     bind:value={searchQuery}
                     oninput={handleSearch}
                 />
+                <button class="win-btn surprise-btn" onclick={surpriseMe}
+                    >✨ Surprise Me!</button
+                >
             </div>
         {/if}
     </div>
@@ -657,7 +735,6 @@
     .grid-item video {
         width: 100%;
         height: 100%;
-        /* Change cover to contain to prevent zooming/cropping */
         object-fit: contain;
         background: #000;
     }
@@ -687,6 +764,12 @@
 
     .search-label {
         font-size: 12px;
+    }
+
+    .surprise-btn {
+        margin-top: 4px;
+        font-weight: bold;
+        padding: 6px;
     }
 
     .preview-display {
@@ -746,35 +829,32 @@
     @media (max-width: 768px) {
         .explorer-layout {
             flex-direction: column;
-
-            /* Leave room for the taskbar */
             height: calc(100dvh - 35px);
             padding-bottom: 35px;
-
             overflow: hidden;
             box-sizing: border-box;
         }
 
         .gallery-pane {
             flex: none;
-            height: 45%; /* Use percentage of the safe workspace, not the whole screen */
+            height: 45%;
             min-height: 200px;
         }
 
         .preview-pane {
-            flex: 1; /* Dynamically fill the exact remaining space above the taskbar */
+            flex: 1;
             display: flex;
             flex-direction: column;
             min-height: 0;
         }
 
         .preview-display {
-            flex: 1; /* Force the image viewer to absorb the space so buttons stay at the bottom */
+            flex: 1;
             min-height: 0;
         }
 
         .action-bar {
-            flex-shrink: 0; /* Never allow the buttons to be squished or hidden */
+            flex-shrink: 0;
             justify-content: stretch;
             padding-bottom: 4px;
         }
