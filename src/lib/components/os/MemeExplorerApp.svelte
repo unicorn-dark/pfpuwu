@@ -875,7 +875,11 @@
 
     .grid-item img,
     .grid-item video {
-        pointer-events: none; /* makes it purely decorative */
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #000;
+        pointer-events: none;
     }
 
     .grid-item.selected img {
