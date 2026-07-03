@@ -534,10 +534,11 @@
                             <img src={meme.url} alt="Thumbnail" />
                         {:else}
                             <video
-                                src={meme.url}
+                                src={`${meme.url}#t=0.001`}
                                 muted
-                                playsinline
                                 preload="metadata"
+                                playsinline
+                                webkit-playsinline
                             />
                         {/if}
                         {#if meme.score && meme.score > 0}
@@ -874,10 +875,7 @@
 
     .grid-item img,
     .grid-item video {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-        background: #000;
+        pointer-events: none; /* makes it purely decorative */
     }
 
     .grid-item.selected img {
