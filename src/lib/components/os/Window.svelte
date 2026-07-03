@@ -15,13 +15,11 @@
     let width = $state(initialWidth);
     let height = $state(initialHeight);
 
-    // Calculate the actual available workspace by ignoring the 320px sidebar on desktop
     const isDesktop = window.innerWidth > 768;
     const availableWidth = isDesktop
         ? window.innerWidth - 320
         : window.innerWidth;
 
-    // Center the window within the AVAILABLE space, pushing it perfectly to the left
     let left = $state(availableWidth / 2 - initialWidth / 2);
     let top = $state(window.innerHeight / 2 - initialHeight / 2);
 
@@ -31,17 +29,13 @@
 
     function toggleMaximize() {
         if (!isMaximized) {
-            // 1. Save the exact current state before maximizing
             preMaxState = { top, left, width, height };
-
-            // 2. Snap to full screen (accounting for the 35px taskbar)
             top = 0;
             left = 0;
             width = window.innerWidth;
             height = window.innerHeight - 35;
             isMaximized = true;
         } else {
-            // 3. Restore down to previous size and position
             top = preMaxState.top;
             left = preMaxState.left;
             width = preMaxState.width;
@@ -58,7 +52,6 @@
         initialTop: number;
 
     function onDragStart(e: MouseEvent) {
-        // Prevent dragging if the window is maximized!
         if (e.button !== 0 || isMaximized) return;
 
         isDragging = true;
@@ -85,20 +78,28 @@
         window.removeEventListener("mouseup", onDragEnd);
     }
 
-    // --- RESIZE LOGIC ---
+    // --- OMNI-RESIZE LOGIC ---
     let isResizing = false;
+    let activeHandle = "";
     let resizeStartW: number, resizeStartH: number;
+    let resizeStartLeft: number, resizeStartTop: number;
 
-    function onResizeStart(e: MouseEvent) {
+    function onResizeStart(e: MouseEvent, handle: string) {
         e.stopPropagation();
-        // Prevent resizing if the window is maximized!
         if (e.button !== 0 || isMaximized) return;
 
         isResizing = true;
+        activeHandle = handle;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
+
+        // Capture initial dimensions AND positions
         resizeStartW = width;
         resizeStartH = height;
+        resizeStartLeft = left;
+        resizeStartTop = top;
+
+        focusWindow(id);
 
         window.addEventListener("mousemove", onResize);
         window.addEventListener("mouseup", onResizeEnd);
@@ -106,12 +107,50 @@
 
     function onResize(e: MouseEvent) {
         if (!isResizing) return;
-        width = Math.max(minWidth, resizeStartW + (e.clientX - dragStartX));
-        height = Math.max(minHeight, resizeStartH + (e.clientY - dragStartY));
+
+        const deltaX = e.clientX - dragStartX;
+        const deltaY = e.clientY - dragStartY;
+
+        // RIGHT edge (East)
+        if (activeHandle.includes("e")) {
+            width = Math.max(minWidth, resizeStartW + deltaX);
+        }
+
+        // BOTTOM edge (South)
+        if (activeHandle.includes("s")) {
+            height = Math.max(minHeight, resizeStartH + deltaY);
+        }
+
+        // LEFT edge (West) -> Affects both Width AND X-Coordinate
+        if (activeHandle.includes("w")) {
+            const newWidth = Math.max(minWidth, resizeStartW - deltaX);
+            if (newWidth > minWidth) {
+                left = resizeStartLeft + deltaX;
+                width = newWidth;
+            } else {
+                // Lock coordinate if minimum width is hit
+                left = resizeStartLeft + (resizeStartW - minWidth);
+                width = minWidth;
+            }
+        }
+
+        // TOP edge (North) -> Affects both Height AND Y-Coordinate
+        if (activeHandle.includes("n")) {
+            const newHeight = Math.max(minHeight, resizeStartH - deltaY);
+            if (newHeight > minHeight) {
+                top = resizeStartTop + deltaY;
+                height = newHeight;
+            } else {
+                // Lock coordinate if minimum height is hit
+                top = resizeStartTop + (resizeStartH - minHeight);
+                height = minHeight;
+            }
+        }
     }
 
     function onResizeEnd() {
         isResizing = false;
+        activeHandle = "";
         window.removeEventListener("mousemove", onResize);
         window.removeEventListener("mouseup", onResizeEnd);
     }
@@ -130,11 +169,48 @@
     "
     onmousedown={() => focusWindow(id)}
 >
+    {#if !isMaximized}
+        <div
+            class="resize-handle n"
+            onmousedown={(e) => onResizeStart(e, "n")}
+        ></div>
+        <div
+            class="resize-handle s"
+            onmousedown={(e) => onResizeStart(e, "s")}
+        ></div>
+        <div
+            class="resize-handle e"
+            onmousedown={(e) => onResizeStart(e, "e")}
+        ></div>
+        <div
+            class="resize-handle w"
+            onmousedown={(e) => onResizeStart(e, "w")}
+        ></div>
+
+        <div
+            class="resize-handle ne"
+            onmousedown={(e) => onResizeStart(e, "ne")}
+        ></div>
+        <div
+            class="resize-handle nw"
+            onmousedown={(e) => onResizeStart(e, "nw")}
+        ></div>
+        <div
+            class="resize-handle se"
+            onmousedown={(e) => onResizeStart(e, "se")}
+        ></div>
+        <div
+            class="resize-handle sw"
+            onmousedown={(e) => onResizeStart(e, "sw")}
+        ></div>
+    {/if}
+
     <div class="title-bar" onmousedown={onDragStart}>
         <div class="title-bar-text">{title}</div>
         <div class="title-bar-controls">
             <button
                 aria-label="Minimize"
+                onmousedown={(e) => e.stopPropagation()}
                 onclick={(e) => {
                     e.stopPropagation();
                     minimizeWindow(id);
@@ -143,6 +219,7 @@
 
             <button
                 aria-label="Maximize"
+                onmousedown={(e) => e.stopPropagation()}
                 onclick={(e) => {
                     e.stopPropagation();
                     toggleMaximize();
@@ -151,7 +228,10 @@
                 {isMaximized ? "❐" : "☐"}
             </button>
 
-            <button aria-label="Close" onclick={() => closeWindow(id)}>X</button
+            <button
+                aria-label="Close"
+                onmousedown={(e) => e.stopPropagation()}
+                onclick={() => closeWindow(id)}>X</button
             >
         </div>
     </div>
@@ -159,8 +239,6 @@
     <div class="window-body">
         <slot></slot>
     </div>
-
-    <div class="resize-handle" onmousedown={onResizeStart}></div>
 </div>
 
 <style>
@@ -171,18 +249,82 @@
         border-color: #ffffff #000000 #000000 #ffffff;
         display: flex;
         flex-direction: column;
-        /* Adds a subtle classic shadow to floating windows */
         box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
     }
+
     .maximized {
         top: 0 !important;
         left: 0 !important;
-
-        /* 1. Viewport width MINUS the 320px UwU Sidebar */
-        width: calc(100vw - 320px) !important;
-
-        /* 2. Viewport height MINUS the 35px Taskbar */
+        width: calc(100vw - var(--sidebar-width, 320px)) !important;
         height: calc(100dvh - 35px) !important;
+        transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* === RESIZE HANDLES === */
+    .resize-handle {
+        position: absolute;
+        z-index: 100;
+        /* Background is transparent so you only see the cursors */
+        background: transparent;
+    }
+    /* Edges */
+    .resize-handle.n {
+        top: -4px;
+        left: 4px;
+        right: 4px;
+        height: 8px;
+        cursor: n-resize;
+    }
+    .resize-handle.s {
+        bottom: -4px;
+        left: 4px;
+        right: 4px;
+        height: 8px;
+        cursor: s-resize;
+    }
+    .resize-handle.e {
+        top: 4px;
+        bottom: 4px;
+        right: -4px;
+        width: 8px;
+        cursor: e-resize;
+    }
+    .resize-handle.w {
+        top: 4px;
+        bottom: 4px;
+        left: -4px;
+        width: 8px;
+        cursor: w-resize;
+    }
+
+    /* Corners */
+    .resize-handle.ne {
+        top: -4px;
+        right: -4px;
+        width: 12px;
+        height: 12px;
+        cursor: ne-resize;
+    }
+    .resize-handle.nw {
+        top: -4px;
+        left: -4px;
+        width: 12px;
+        height: 12px;
+        cursor: nw-resize;
+    }
+    .resize-handle.se {
+        bottom: -4px;
+        right: -4px;
+        width: 12px;
+        height: 12px;
+        cursor: se-resize;
+    }
+    .resize-handle.sw {
+        bottom: -4px;
+        left: -4px;
+        width: 12px;
+        height: 12px;
+        cursor: sw-resize;
     }
 
     .title-bar {
@@ -193,7 +335,6 @@
         justify-content: space-between;
         align-items: center;
         font-weight: bold;
-        /* Indicates to the user that this area is grab-able */
         cursor: default;
     }
 
@@ -214,60 +355,45 @@
 
     .title-bar-controls button:active {
         border-color: #000000 #ffffff #ffffff #000000;
-        /* Classic 98 push-in effect */
         padding: 1px 3px 0 5px;
     }
 
     .window-body {
         padding: 10px;
         flex-grow: 1;
-        overflow: auto; /* Adds scrollbars if content gets too big */
-    }
-
-    .resize-handle {
-        position: absolute;
-        right: 0;
-        bottom: 0;
-        width: 12px;
-        height: 12px;
-        cursor: nwse-resize; /* The diagonal resize arrow */
-        z-index: 10;
-        /* A classic ridged texture could be added here later, for now it's an invisible hit-box */
+        overflow: auto;
+        /* Ensure the body doesn't cover up our custom edge borders */
+        position: relative;
+        z-index: 1;
     }
 
     /* =========================================
-       MOBILE OVERRIDES (Cleaned up and merged)
+       MOBILE OVERRIDES
        ========================================= */
     @media (max-width: 768px) {
         .win98-window {
-            /* Force to absolute bounds of the screen, overriding inline styles */
             top: 0 !important;
             left: 0 !important;
             width: 100vw !important;
             height: 100vh !important;
-            /* Remove the 3D border and shadow since it fills the screen */
             border: none;
             box-shadow: none;
         }
 
         .resize-handle {
-            /* Disable resizing entirely */
             display: none !important;
         }
 
         .title-bar {
-            /* Remove dragging cursor implication & give breathing room */
             cursor: default;
             padding: 6px 4px 6px 6px !important;
         }
 
-        /* Hide the minimize button entirely */
         button[aria-label="Minimize"],
         button[aria-label="Maximize"] {
             display: none !important;
         }
 
-        /* Make the close button a much larger, touch-friendly target */
         button[aria-label="Close"] {
             padding: 4px 16px !important;
             font-size: 1.2rem !important;

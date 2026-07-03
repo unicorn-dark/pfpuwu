@@ -219,8 +219,14 @@
         top: 0;
         left: 0;
         bottom: 35px; /* Stops exactly at the Taskbar */
-        right: 320px; /* Stops exactly at the Sidebar */
+
+        /* FIX: Listen to the CSS variable controlled by the sidebar button */
+        right: var(--sidebar-width, 320px);
+
         overflow: hidden; /* Prevents windows from dragging outside */
+
+        /* Add the transition so the workspace resizes smoothly alongside the sidebar */
+        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .shortcuts {
         height: 100%; /* 1. Tells the container exactly where the bottom is */

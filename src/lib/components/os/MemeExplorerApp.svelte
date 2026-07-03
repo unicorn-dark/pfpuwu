@@ -9,6 +9,9 @@
         caption?: string | null;
         tags?: string[] | null;
         created_at?: string;
+        score?: number;
+        upvotes?: number;
+        downvotes?: number;
     };
 
     let memes = $state<Meme[]>([]);
@@ -18,12 +21,17 @@
     let isMediaLoading = $state(false);
     let searchQuery = $state("");
     let filterType = $state<"photo" | "video">("photo");
+    let sortBy = $state("popular"); // NEW: Sort state
     let errorMessage = $state("");
     let clipboardMessage = $state("");
     let hasMore = $state(true);
 
     let photoCount = $state(0);
     let videoCount = $state(0);
+
+    // NEW: Vote tracking
+    let localVotes = $state<Record<string, number>>({});
+    let deviceId = "";
 
     const pageSize = 30;
     const pageCache = new Map<string, Meme[]>();
@@ -32,7 +40,6 @@
     let activeFetchId = 0;
     let mediaGrid: HTMLDivElement;
 
-    // A massive pool of concepts to feed the semantic AI
     const surpriseConcepts = [
         "majestic animal",
         "dangerous weapon",
@@ -120,7 +127,7 @@
     }
 
     function getCacheKey(offset: number) {
-        return `${filterType}:${searchQuery.trim().toLowerCase()}:${offset}`;
+        return `${filterType}:${sortBy}:${searchQuery.trim().toLowerCase()}:${offset}`;
     }
 
     async function fetchStats() {
@@ -154,7 +161,7 @@
             let nextBatch = pageCache.get(cacheKey);
 
             if (!nextBatch) {
-                let url = `/api/memes?type=${filterType}&limit=${pageSize}&offset=${offset}`;
+                let url = `/api/memes?type=${filterType}&sort=${sortBy}&limit=${pageSize}&offset=${offset}`;
                 if (searchQuery.trim()) {
                     url += `&search=${encodeURIComponent(searchQuery.trim())}`;
                 }
@@ -205,7 +212,6 @@
             }
         } catch (err) {
             if (fetchId !== activeFetchId) return;
-            console.error("[MemeExplorer] Error:", err);
             memes = [];
             selectedMeme = null;
             errorMessage =
@@ -223,26 +229,28 @@
         searchTimeout = setTimeout(() => fetchMemes(), 350);
     }
 
-    // Instantly selects a random vibe and searches it
     function surpriseMe() {
         const randomConcept =
             surpriseConcepts[
                 Math.floor(Math.random() * surpriseConcepts.length)
             ];
         searchQuery = randomConcept;
-        clearTimeout(searchTimeout); // Bypass the debounce delay
+        clearTimeout(searchTimeout);
         fetchMemes();
     }
 
     function setFilter(type: "photo" | "video") {
         if (filterType === type) return;
-
         filterType = type;
+        if (type === "video") searchQuery = "";
+        memes = [];
+        pageCache.clear();
+        fetchMemes();
+    }
 
-        if (type === "video") {
-            searchQuery = "";
-        }
-
+    function onSortChange() {
+        memes = [];
+        pageCache.clear();
         fetchMemes();
     }
 
@@ -257,13 +265,64 @@
         });
     }
 
+    // NEW: Handle Voting Interactions
+    async function castVote(value: number) {
+        if (!selectedMeme) return;
+        const memeId = selectedMeme.id;
+
+        // Ensure Device ID exists
+        if (!deviceId) {
+            deviceId = crypto.randomUUID
+                ? crypto.randomUUID()
+                : Math.random().toString(36).substring(2);
+            localStorage.setItem("uwu_device_id", deviceId);
+        }
+
+        // Toggle vote off if clicking the same button
+        const isRemoving = localVotes[memeId] === value;
+        const finalValue = isRemoving ? 0 : value;
+        const previousVote = localVotes[memeId] || 0;
+
+        // Optimistic State Update
+        localVotes[memeId] = finalValue;
+        localStorage.setItem("uwu_votes", JSON.stringify(localVotes));
+
+        // Adjust visible counts instantly
+        if (previousVote === 1)
+            selectedMeme.upvotes = Math.max(0, (selectedMeme.upvotes || 1) - 1);
+        if (previousVote === -1)
+            selectedMeme.downvotes = Math.max(
+                0,
+                (selectedMeme.downvotes || 1) - 1,
+            );
+        if (finalValue === 1)
+            selectedMeme.upvotes = (selectedMeme.upvotes || 0) + 1;
+        if (finalValue === -1)
+            selectedMeme.downvotes = (selectedMeme.downvotes || 0) + 1;
+        selectedMeme.score =
+            (selectedMeme.upvotes || 0) - (selectedMeme.downvotes || 0);
+
+        try {
+            await fetch("/api/memes/vote", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    meme_id: memeId,
+                    device_id: deviceId,
+                    vote_value: finalValue,
+                }),
+            });
+        } catch (err) {
+            console.error("Vote transmission failed", err);
+        }
+    }
+
     async function pickRandom() {
         const total = filterType === "photo" ? photoCount : videoCount;
         if (total === 0) return;
 
         isMediaLoading = true;
         const randomOffset = Math.floor(Math.random() * total);
-
         const btn = document.getElementById("random-btn");
         if (btn) btn.innerText = "Rolling...";
 
@@ -271,13 +330,10 @@
             const url = `/api/memes?type=${filterType}&limit=1&offset=${randomOffset}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Random fetch failed");
-
             const [randomMeme] = await res.json();
-
             if (randomMeme) {
-                if (!memes.some((m) => m.id === randomMeme.id)) {
+                if (!memes.some((m) => m.id === randomMeme.id))
                     memes = [randomMeme, ...memes];
-                }
                 selectMeme(randomMeme);
             }
         } catch (err) {
@@ -291,18 +347,15 @@
         if (!selectedMeme) return;
         const btn = document.getElementById("download-btn");
         if (btn) btn.innerText = "Downloading...";
-
         try {
             const res = await fetch(selectedMeme.url);
             const blob = await res.blob();
             const blobUrl = window.URL.createObjectURL(blob);
-
             const link = document.createElement("a");
             link.style.display = "none";
             link.href = blobUrl;
             const ext = selectedMeme.type === "photo" ? "png" : "mp4";
             link.download = `file_${selectedMeme.id.substring(0, 6)}.${ext}`;
-
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -323,7 +376,6 @@
                 blob.type === "image/png"
                     ? blob
                     : await convertImageToPng(blob);
-
             await navigator.clipboard.write([
                 new ClipboardItem({ [imageBlob.type]: imageBlob }),
             ]);
@@ -338,7 +390,6 @@
         return new Promise<Blob>((resolve, reject) => {
             const img = new Image();
             const objectUrl = URL.createObjectURL(blob);
-
             img.onload = () => {
                 const canvas = document.createElement("canvas");
                 canvas.width = img.naturalWidth;
@@ -375,27 +426,22 @@
             mediaGrid.scrollHeight -
             mediaGrid.scrollTop -
             mediaGrid.clientHeight;
-        if (distanceFromBottom < 160) {
-            fetchMemes({ append: true });
-        }
+        if (distanceFromBottom < 160) fetchMemes({ append: true });
     }
 
     async function moveSelection(direction: 1 | -1) {
         if (memes.length === 0) return;
         const currentIndex = selectedIndex === -1 ? 0 : selectedIndex;
         const nextIndex = currentIndex + direction;
-
         if (nextIndex >= 0 && nextIndex < memes.length) {
             selectMeme(memes[nextIndex]);
             return;
         }
-
         if (direction === 1 && hasMore && !isLoadingMore) {
             const previousLength = memes.length;
             await fetchMemes({ append: true });
-            if (memes.length > previousLength) {
+            if (memes.length > previousLength)
                 selectMeme(memes[previousLength]);
-            }
         }
     }
 
@@ -408,12 +454,16 @@
         };
         const direction = keyMap[event.key];
         if (!direction) return;
-
         event.preventDefault();
         moveSelection(direction);
     }
 
     onMount(() => {
+        // Load local tracking data
+        deviceId = localStorage.getItem("uwu_device_id") || "";
+        const storedVotes = localStorage.getItem("uwu_votes");
+        if (storedVotes) localVotes = JSON.parse(storedVotes);
+
         fetchStats();
         fetchMemes();
     });
@@ -427,16 +477,32 @@
 <div class="explorer-layout">
     <div class="gallery-pane win-panel">
         <div class="toolbar">
-            <button
-                class="win-btn tab-btn {filterType === 'photo' ? 'active' : ''}"
-                onclick={() => setFilter("photo")}
-                >Photos ({formatCount(photoCount)})</button
+            <div class="tab-group">
+                <button
+                    class="win-btn tab-btn {filterType === 'photo'
+                        ? 'active'
+                        : ''}"
+                    onclick={() => setFilter("photo")}
+                    >Photos ({formatCount(photoCount)})</button
+                >
+                <button
+                    class="win-btn tab-btn {filterType === 'video'
+                        ? 'active'
+                        : ''}"
+                    onclick={() => setFilter("video")}
+                    >Videos ({formatCount(videoCount)})</button
+                >
+            </div>
+
+            <select
+                class="win-input sort-dropdown"
+                bind:value={sortBy}
+                onchange={onSortChange}
             >
-            <button
-                class="win-btn tab-btn {filterType === 'video' ? 'active' : ''}"
-                onclick={() => setFilter("video")}
-                >Videos ({formatCount(videoCount)})</button
-            >
+                <option value="popular">⭐ Popular</option>
+                <option value="newest">🕒 Newest</option>
+                <option value="oldest">🕰️ Oldest</option>
+            </select>
         </div>
 
         <div
@@ -469,6 +535,9 @@
                         {:else}
                             <video src={meme.url} muted preload="metadata" />
                         {/if}
+                        {#if meme.score && meme.score > 0}
+                            <div class="mini-score">⭐ {meme.score}</div>
+                        {/if}
                     </button>
                 {/each}
                 {#if isLoadingMore}
@@ -480,7 +549,6 @@
         </div>
         {#if filterType === "photo"}
             <div class="search-container">
-                <!-- Group the label and the button together above the input -->
                 <div class="search-header">
                     <span class="search-label">Search:</span>
                     <button
@@ -532,21 +600,37 @@
         </div>
 
         <div class="action-bar">
+            <div class="vote-controls">
+                <button
+                    class="win-btn vote-btn {selectedMeme &&
+                    localVotes[selectedMeme.id] === 1
+                        ? 'active-up'
+                        : ''}"
+                    disabled={!selectedMeme}
+                    onclick={() => castVote(1)}
+                    title="Upvote"
+                >
+                    ▲ {selectedMeme?.upvotes || 0}
+                </button>
+                <button
+                    class="win-btn vote-btn {selectedMeme &&
+                    localVotes[selectedMeme.id] === -1
+                        ? 'active-down'
+                        : ''}"
+                    disabled={!selectedMeme}
+                    onclick={() => castVote(-1)}
+                    title="Downvote"
+                >
+                    ▼ {selectedMeme?.downvotes || 0}
+                </button>
+            </div>
+
             <button
                 id="download-btn"
                 class="win-btn action-btn"
                 disabled={!selectedMeme}
                 onclick={downloadMeme}>Download</button
             >
-
-            {#if filterType === "photo"}
-                <button
-                    id="random-btn"
-                    class="win-btn action-btn"
-                    disabled={memes.length === 0}
-                    onclick={pickRandom}>Random</button
-                >
-            {/if}
 
             {#if selectedMeme?.type === "photo"}
                 <button
@@ -644,7 +728,13 @@
     .toolbar {
         display: flex;
         width: 100%;
+        gap: 6px;
+    }
+
+    .tab-group {
+        display: flex;
         gap: 4px;
+        flex: 1;
     }
 
     .tab-btn {
@@ -659,11 +749,52 @@
         box-shadow: inset 2px 2px #000040;
     }
 
+    /* NEW: Sort Dropdown */
+    .sort-dropdown {
+        width: auto;
+        padding: 0 4px;
+        height: 25px; /* Matches tab height */
+        font-size: 11px;
+        cursor: pointer;
+        background: #ffffff;
+    }
+
     .action-bar {
         display: flex;
         width: 100%;
         gap: 6px;
         padding: 4px 0 0;
+    }
+
+    /* NEW: Vote UI Controls */
+    .vote-controls {
+        display: flex;
+        gap: 4px;
+        margin-right: auto; /* Pushes the rest of the buttons to the right */
+    }
+
+    .vote-btn {
+        font-size: 11px;
+        padding: 6px 10px;
+        font-weight: bold;
+    }
+
+    /* Green Upvote Active State */
+    .vote-btn.active-up {
+        border-color: #000000 #ffffff #ffffff #000000;
+        box-shadow: inset 1px 1px #808080;
+        background: #dfdfdf;
+        color: #008000;
+        padding: 7px 9px 5px 11px;
+    }
+
+    /* Red Downvote Active State */
+    .vote-btn.active-down {
+        border-color: #000000 #ffffff #ffffff #000000;
+        box-shadow: inset 1px 1px #808080;
+        background: #dfdfdf;
+        color: #b22222;
+        padding: 7px 9px 5px 11px;
     }
 
     .action-btn {
@@ -748,6 +879,17 @@
         opacity: 0.76;
     }
 
+    .mini-score {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: rgba(0, 0, 0, 0.6);
+        color: yellow;
+        font-size: 9px;
+        padding: 1px 4px;
+        font-weight: bold;
+    }
+
     .video-icon {
         font-size: 12px;
         font-weight: bold;
@@ -768,7 +910,6 @@
         padding-top: 4px;
     }
 
-    /* NEW: Aligns the label and the button on the same row */
     .search-header {
         display: flex;
         justify-content: space-between;
@@ -780,7 +921,6 @@
         padding-bottom: 2px;
     }
 
-    /* FIX: Make it look like a tiny helper utility, not a main action button */
     .surprise-btn {
         padding: 2px 6px;
         font-size: 10px;
@@ -835,13 +975,6 @@
         text-align: center;
     }
 
-    .loading-overlay {
-        background: rgba(255, 255, 255, 0.7);
-        padding: 4px 8px;
-        border: 1px solid #000;
-        color: #000;
-    }
-
     @media (max-width: 768px) {
         .explorer-layout {
             flex-direction: column;
@@ -873,6 +1006,7 @@
             flex-shrink: 0;
             justify-content: stretch;
             padding-bottom: 4px;
+            flex-wrap: wrap; /* Allows voting buttons to wrap on tiny screens if needed */
         }
 
         .action-btn {

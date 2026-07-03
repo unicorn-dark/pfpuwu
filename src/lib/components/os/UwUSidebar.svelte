@@ -1,42 +1,133 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount } from "svelte";
 
     const CA = "UWUy7J86LUiBv5SjAUZ53LMGhtnqvbQ7QNSSkyupump";
-    
+
     let price = $state("0.0000");
     let change24h = $state(0);
     let copied = $state(false);
-    
+
     let candles: any[] = $state([]);
     let chartHighStr = $state("0");
     let chartLowStr = $state("0");
     let currentPricePct = $state(50);
 
+    // --- SIDEBAR STATE & LOGIC ---
+    let isSidebarOpen = $state(true);
+    let resizeInterval: ReturnType<typeof setInterval>;
+
+    function toggleSidebar() {
+        isSidebarOpen = !isSidebarOpen;
+
+        // Update global CSS variable for your desktop/OS layout logic
+        document.body.style.setProperty(
+            "--sidebar-width",
+            isSidebarOpen ? "320px" : "0px",
+        );
+
+        // Fire resize events at 60fps during the CSS transition
+        // This ensures full-screen apps seamlessly expand/shrink with the sidebar
+        let start = Date.now();
+        if (resizeInterval) clearInterval(resizeInterval);
+        resizeInterval = setInterval(() => {
+            window.dispatchEvent(new Event("resize"));
+            if (Date.now() - start > 350) clearInterval(resizeInterval);
+        }, 16);
+    }
+
     // --- CUSTOM MEDIA PLAYER STATE ---
     let audioRef: any;
     let isPlaying = $state(false);
     let currentTrackIndex = $state(0);
-    
+
     const playlist = [
-    // --- RAVE / ELECTRONIC / SYNTHWAVE (Royalty Free Streams) ---
-    { title: "Synthwave Test 1", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
-    { title: "Cyberpunk City", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3" },
-    { title: "Neon Nights", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
-    { title: "Trance State", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3" },
-    { title: "Acid Bassline", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3" },
-    { title: "Retro Future", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3" },
-    { title: "Warehouse Rave 1998", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3" },
-    { title: "Digital Horizon", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3" },
-    { title: "Matrix Upload", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3" },
-    { title: "Vaporwave Mall", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3" },
-    { title: "Eurodance Anthem", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3" },
-    { title: "BPM 160", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3" },
-    { title: "Laser Grid", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3" },
-    { title: "Hacker's Den", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3" },
-    { title: "Dial-up Connection", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3" },
-    { title: "System Override", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3" },
-    { title: "Terminal Velocity", artist: "SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3" },
-];
+        // --- RAVE / ELECTRONIC / SYNTHWAVE (Royalty Free Streams) ---
+        {
+            title: "Synthwave Test 1",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        },
+        {
+            title: "Cyberpunk City",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+        },
+        {
+            title: "Neon Nights",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+        },
+        {
+            title: "Trance State",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+        },
+        {
+            title: "Acid Bassline",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
+        },
+        {
+            title: "Retro Future",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3",
+        },
+        {
+            title: "Warehouse Rave 1998",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
+        },
+        {
+            title: "Digital Horizon",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
+        },
+        {
+            title: "Matrix Upload",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3",
+        },
+        {
+            title: "Vaporwave Mall",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
+        },
+        {
+            title: "Eurodance Anthem",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3",
+        },
+        {
+            title: "BPM 160",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3",
+        },
+        {
+            title: "Laser Grid",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3",
+        },
+        {
+            title: "Hacker's Den",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3",
+        },
+        {
+            title: "Dial-up Connection",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3",
+        },
+        {
+            title: "System Override",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3",
+        },
+        {
+            title: "Terminal Velocity",
+            artist: "SoundHelix",
+            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3",
+        },
+    ];
 
     let currentTrack = $derived(playlist[currentTrackIndex]);
 
@@ -69,14 +160,19 @@
     // ---------------------------------
 
     onMount(async () => {
+        // Initialize OS CSS variable
+        document.body.style.setProperty("--sidebar-width", "320px");
+
         let currentPriceNum = 0.0068;
 
         // 1. Dexscreener Fetch
         try {
-            const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${CA}`);
+            const res = await fetch(
+                `https://api.dexscreener.com/latest/dex/tokens/${CA}`,
+            );
             const data = await res.json();
             if (data.pairs && data.pairs.length > 0) {
-                const pair = data.pairs[0]; 
+                const pair = data.pairs[0];
                 currentPriceNum = parseFloat(pair.priceUsd);
                 price = currentPriceNum.toPrecision(5);
                 change24h = Number(pair.priceChange.h24);
@@ -87,7 +183,7 @@
 
         // 2. Birdeye Secure Fetch
         try {
-            const serverRes = await fetch('/api/uwu-chart');
+            const serverRes = await fetch("/api/uwu-chart");
             const birdeyeData = await serverRes.json();
 
             if (birdeyeData?.data?.items && birdeyeData.data.items.length > 0) {
@@ -104,21 +200,22 @@
     const copyCA = () => {
         navigator.clipboard.writeText(CA);
         copied = true;
-        setTimeout(() => copied = false, 2000);
+        setTimeout(() => (copied = false), 2000);
     };
 
     function processRealChartData(items: any[], livePrice: number) {
         const chartData = items.slice(-14);
-        const minLow = Math.min(...chartData.map(c => c.l), livePrice);
-        const maxHigh = Math.max(...chartData.map(c => c.h), livePrice);
+        const minLow = Math.min(...chartData.map((c) => c.l), livePrice);
+        const maxHigh = Math.max(...chartData.map((c) => c.h), livePrice);
         const range = maxHigh - minLow || 0.00001;
 
         chartHighStr = maxHigh.toPrecision(5);
         chartLowStr = minLow.toPrecision(5);
         currentPricePct = ((livePrice - minLow) / range) * 80 + 10;
 
-        candles = chartData.map(c => {
-            const bodyBottom = ((Math.min(c.o, c.c) - minLow) / range) * 80 + 10;
+        candles = chartData.map((c) => {
+            const bodyBottom =
+                ((Math.min(c.o, c.c) - minLow) / range) * 80 + 10;
             const bodyTop = ((Math.max(c.o, c.c) - minLow) / range) * 80 + 10;
             const wickBottom = ((c.l - minLow) / range) * 80 + 10;
             const wickTop = ((c.h - minLow) / range) * 80 + 10;
@@ -128,7 +225,7 @@
                 bodyBottom: bodyBottom,
                 bodyHeight: Math.max(bodyTop - bodyBottom, 1),
                 wickBottom: wickBottom,
-                wickHeight: Math.max(wickTop - wickBottom, 1)
+                wickHeight: Math.max(wickTop - wickBottom, 1),
             };
         });
     }
@@ -136,49 +233,69 @@
     function generateFallbackChart(currentPrice: number, changePct: number) {
         const numCandles = 14;
         let generated = [];
-        const startPrice = currentPrice / (1 + (changePct / 100));
+        const startPrice = currentPrice / (1 + changePct / 100);
         let lastClose = startPrice;
 
         for (let i = 0; i < numCandles - 1; i++) {
-            const volatility = currentPrice * 0.06; 
+            const volatility = currentPrice * 0.06;
             const open = lastClose;
             const progress = i / numCandles;
-            const targetPrice = startPrice + ((currentPrice - startPrice) * progress);
+            const targetPrice =
+                startPrice + (currentPrice - startPrice) * progress;
             const close = targetPrice + (Math.random() - 0.5) * volatility;
-            const high = Math.max(open, close) + (Math.random() * volatility * 0.5);
-            const low = Math.min(open, close) - (Math.random() * volatility * 0.5);
+            const high =
+                Math.max(open, close) + Math.random() * volatility * 0.5;
+            const low =
+                Math.min(open, close) - Math.random() * volatility * 0.5;
             generated.push({ o: open, h: high, l: low, c: close });
             lastClose = close;
         }
 
-        generated.push({ 
-            o: lastClose, 
-            h: Math.max(lastClose, currentPrice) + (currentPrice * 0.02), 
-            l: Math.min(lastClose, currentPrice) - (currentPrice * 0.02), 
-            c: currentPrice 
+        generated.push({
+            o: lastClose,
+            h: Math.max(lastClose, currentPrice) + currentPrice * 0.02,
+            l: Math.min(lastClose, currentPrice) - currentPrice * 0.02,
+            c: currentPrice,
         });
 
         processRealChartData(generated, currentPrice);
     }
 </script>
 
-<aside class="win98-sidebar">
+<aside class="win98-sidebar {isSidebarOpen ? '' : 'collapsed'}">
+    <button
+        class="win98-btn sidebar-toggle"
+        onclick={toggleSidebar}
+        title={isSidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+    >
+        {isSidebarOpen ? "▶" : "◀"}
+    </button>
+
     <div class="win98-titlebar">
         <span class="title-text">🦄 Unicorn</span>
         <div class="title-controls">
             <button class="control-btn">?</button>
-            <button class="control-btn">×</button>
+            <button class="control-btn" onclick={toggleSidebar}>×</button>
         </div>
     </div>
 
     <div class="sidebar-content">
         <div class="logo-row">
             <div class="logo-inset">
-                <img src="/unicorn.png" alt="Unicorn" class="unicorn-pixel" onerror={(e: any) => e.target.style.display = 'none'} />
+                <img
+                    src="/unicorn.png"
+                    alt="Unicorn"
+                    class="unicorn-pixel"
+                    onerror={(e: any) => (e.target.style.display = "none")}
+                />
             </div>
             <div class="header-right">
                 <h1 class="token-title">UwU Token</h1>
-                <button class="win98-btn action-btn" onclick={() => window.open('https://x.com/unicornandmemes', '_blank')}>
+                <button
+                    class="win98-btn action-btn"
+                    onclick={() =>
+                        window.open("https://x.com/unicornandmemes", "_blank")}
+                >
                     It's in the name
                 </button>
             </div>
@@ -189,7 +306,7 @@
             <div class="ca-container">
                 <input type="text" readonly value={CA} class="win98-input" />
                 <button class="win98-btn copy-btn" onclick={copyCA}>
-                    {copied ? 'Copied!' : 'Copy'}
+                    {copied ? "Copied!" : "Copy"}
                 </button>
             </div>
         </fieldset>
@@ -201,8 +318,11 @@
             </div>
             <div class="data-well">
                 <div class="well-label">24HR CHANGE</div>
-                <div class="well-value numerical" style="color: {change24h >= 0 ? '#00F0FF' : '#FF007F'}">
-                    {change24h >= 0 ? '+' : ''}{change24h}%
+                <div
+                    class="well-value numerical"
+                    style="color: {change24h >= 0 ? '#00F0FF' : '#FF007F'}"
+                >
+                    {change24h >= 0 ? "+" : ""}{change24h}%
                 </div>
             </div>
         </div>
@@ -219,12 +339,18 @@
                 <div class="scale-line" style="bottom: 10%">
                     <span class="scale-label">L: ${chartLowStr}</span>
                 </div>
-                
+
                 <div class="candles-container">
                     {#each candles as candle}
                         <div class="candle-wrapper">
-                            <div class="wick" style="bottom: {candle.wickBottom}%; height: {candle.wickHeight}%;"></div>
-                            <div class="body {candle.isGreen ? 'green' : 'red'}" style="bottom: {candle.bodyBottom}%; height: {candle.bodyHeight}%;"></div>
+                            <div
+                                class="wick"
+                                style="bottom: {candle.wickBottom}%; height: {candle.wickHeight}%;"
+                            ></div>
+                            <div
+                                class="body {candle.isGreen ? 'green' : 'red'}"
+                                style="bottom: {candle.bodyBottom}%; height: {candle.bodyHeight}%;"
+                            ></div>
                         </div>
                     {/each}
                 </div>
@@ -233,45 +359,96 @@
 
         <fieldset class="win98-fieldset player-fieldset">
             <legend>Media Player</legend>
-            
-            <audio bind:this={audioRef} src={playlist[0].url} onended={nextTrack}></audio>
-            
+
+            <audio
+                bind:this={audioRef}
+                src={playlist[0].url}
+                onended={nextTrack}
+            ></audio>
+
             <div class="player-lcd">
-                <div class="lcd-status">{isPlaying ? '▶ PLAYING' : '⏸ PAUSED'}</div>
+                <div class="lcd-status">
+                    {isPlaying ? "▶ PLAYING" : "⏸ PAUSED"}
+                </div>
                 <div class="lcd-track-marquee">
                     <span>{currentTrack.artist} - {currentTrack.title}</span>
                 </div>
             </div>
 
             <div class="player-controls">
-                <button class="win98-btn ctrl-btn" onclick={prevTrack} title="Previous">⏮</button>
-                <button class="win98-btn ctrl-btn" onclick={togglePlay} title="Play/Pause">
-                    {isPlaying ? '⏸' : '▶'}
+                <button
+                    class="win98-btn ctrl-btn"
+                    onclick={prevTrack}
+                    title="Previous">⏮</button
+                >
+                <button
+                    class="win98-btn ctrl-btn"
+                    onclick={togglePlay}
+                    title="Play/Pause"
+                >
+                    {isPlaying ? "⏸" : "▶"}
                 </button>
-                <button class="win98-btn ctrl-btn" onclick={nextTrack} title="Next">⏭</button>
+                <button
+                    class="win98-btn ctrl-btn"
+                    onclick={nextTrack}
+                    title="Next">⏭</button
+                >
             </div>
 
             <div class="player-playlist">
                 {#each playlist as track, i}
-                    <div 
-                        class="playlist-item {i === currentTrackIndex ? 'active' : ''}"
+                    <div
+                        class="playlist-item {i === currentTrackIndex
+                            ? 'active'
+                            : ''}"
                         onclick={() => playTrack(i)}
+                        role="button"
+                        tabindex="0"
+                        onkeydown={(e) => e.key === "Enter" && playTrack(i)}
                     >
-                        <span class="track-num">{i + 1}.</span> {track.title}
+                        <span class="track-num">{i + 1}.</span>
+                        {track.title}
                     </div>
                 {/each}
             </div>
         </fieldset>
 
         <div class="hyperlink-matrix">
-            <a href="https://x.com/unicornandmemes" target="_blank" class="win98-btn link-btn" title="X (Twitter)">
-                <img src="https://www.google.com/s2/favicons?domain=x.com&sz=32" alt="X" class="app-icon" />
+            <a
+                href="https://x.com/unicornandmemes"
+                target="_blank"
+                class="win98-btn link-btn"
+                title="X (Twitter)"
+            >
+                <img
+                    src="https://www.google.com/s2/favicons?domain=x.com&sz=32"
+                    alt="X"
+                    class="app-icon"
+                />
             </a>
-            <a href="https://t.me/UnicornItsInTheName/1" target="_blank" class="win98-btn link-btn" title="Telegram">
-                <img src="https://www.google.com/s2/favicons?domain=t.me&sz=32" alt="Telegram" class="app-icon" />
+            <a
+                href="https://t.me/UnicornItsInTheName/1"
+                target="_blank"
+                class="win98-btn link-btn"
+                title="Telegram"
+            >
+                <img
+                    src="https://www.google.com/s2/favicons?domain=t.me&sz=32"
+                    alt="Telegram"
+                    class="app-icon"
+                />
             </a>
-            <a href="https://dexscreener.com/solana/7v2kmgkqktt4xu9dpzkjfmtngqbbwbvxy4ubxtt1zfng" target="_blank" class="win98-btn link-btn" title="Dexscreener">
-                <img src="https://www.google.com/s2/favicons?domain=dexscreener.com&sz=32" alt="Dexscreener" class="app-icon" />
+            <a
+                href="https://dexscreener.com/solana/7v2kmgkqktt4xu9dpzkjfmtngqbbwbvxy4ubxtt1zfng"
+                target="_blank"
+                class="win98-btn link-btn"
+                title="Dexscreener"
+            >
+                <img
+                    src="https://www.google.com/s2/favicons?domain=dexscreener.com&sz=32"
+                    alt="Dexscreener"
+                    class="app-icon"
+                />
             </a>
         </div>
     </div>
@@ -286,19 +463,78 @@
         width: 320px;
         background: #c0c0c0;
         border-left: 2px solid #ffffff;
-        box-shadow: inset 1px 0 0 #dfdfdf, -2px 0 4px rgba(0,0,0,0.3);
+        box-shadow:
+            inset 1px 0 0 #dfdfdf,
+            -2px 0 4px rgba(0, 0, 0, 0.3);
         display: flex;
         flex-direction: column;
         box-sizing: border-box;
-        font-family: 'Tahoma', 'MS Sans Serif', Geneva, sans-serif;
+        font-family: "Tahoma", "MS Sans Serif", Geneva, sans-serif;
         font-size: 11px;
         color: #000000;
         z-index: 9998;
+
+        /* Smooth Slide Animation */
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transform: translateX(0);
     }
 
-    .sidebar-content::-webkit-scrollbar { width: 16px; }
-    .sidebar-content::-webkit-scrollbar-track { background: #e6e6e6; box-shadow: inset 1px 1px 0 #808080; }
-    .sidebar-content::-webkit-scrollbar-thumb { background: #c0c0c0; border: 2px solid; border-color: #fff #5a5a5a #5a5a5a #fff; }
+    /* Target state for sliding off-screen */
+    .win98-sidebar.collapsed {
+        transform: translateX(100%);
+    }
+
+    /* Collapsible Toggle Tab attached to the left */
+    /* Toggle Tab - Default Open State */
+    .sidebar-toggle {
+        position: absolute;
+        /* Rests flush inside the left edge when open */
+        left: -10px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 24px;
+        height: 48px;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        background: #c0c0c0;
+
+        /* Standard Win98 button border when open */
+        border: 2px solid;
+        border-color: #ffffff #000000 #000000 #ffffff;
+        box-shadow:
+            inset 1px 1px 0 #ffffff,
+            inset -1px -1px 0 #808080;
+
+        /* Smoothly animate the position change alongside the sidebar */
+        transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Toggle Tab - Collapsed State */
+    .win98-sidebar.collapsed .sidebar-toggle {
+        /* Pops out past the edge when the sidebar hides */
+        left: -24px;
+
+        /* Remove the right border to blend seamlessly against the screen edge */
+        border-right: none;
+        box-shadow:
+            inset 1px 1px 0 #ffffff,
+            inset 0px -1px 0 #808080;
+    }
+    .sidebar-content::-webkit-scrollbar {
+        width: 16px;
+    }
+    .sidebar-content::-webkit-scrollbar-track {
+        background: #e6e6e6;
+        box-shadow: inset 1px 1px 0 #808080;
+    }
+    .sidebar-content::-webkit-scrollbar-thumb {
+        background: #c0c0c0;
+        border: 2px solid;
+        border-color: #fff #5a5a5a #5a5a5a #fff;
+    }
 
     .win98-titlebar {
         background: linear-gradient(90deg, #000080, #1080d0);
@@ -307,8 +543,16 @@
         justify-content: space-between;
         align-items: center;
     }
-    .title-text { color: #ffffff; font-weight: bold; font-size: 11px; letter-spacing: 0.5px; }
-    .title-controls { display: flex; gap: 2px; }
+    .title-text {
+        color: #ffffff;
+        font-weight: bold;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+    }
+    .title-controls {
+        display: flex;
+        gap: 2px;
+    }
     .control-btn {
         background: #c0c0c0;
         border: 1px solid;
@@ -328,7 +572,11 @@
         gap: 10px;
     }
 
-    .logo-row { display: flex; gap: 10px; align-items: center; }
+    .logo-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
     .logo-inset {
         width: 54px;
         height: 54px;
@@ -339,15 +587,32 @@
         align-items: center;
         justify-content: center;
     }
-    .unicorn-pixel { width: 48px; height: 48px; image-rendering: pixelated; }
-    .header-right { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
-    .token-title { margin: 0; font-size: 16px; font-weight: bold; color: #000080; text-transform: uppercase; }
+    .unicorn-pixel {
+        width: 48px;
+        height: 48px;
+        image-rendering: pixelated;
+    }
+    .header-right {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex-grow: 1;
+    }
+    .token-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: bold;
+        color: #000080;
+        text-transform: uppercase;
+    }
 
     .win98-btn {
         background: #c0c0c0;
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
-        box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080;
+        box-shadow:
+            inset 1px 1px 0 #ffffff,
+            inset -1px -1px 0 #808080;
         color: #000000;
         font-family: inherit;
         font-size: 11px;
@@ -362,7 +627,10 @@
         padding: 5px 5px 3px 7px;
     }
 
-    .action-btn { width: 100%; text-transform: uppercase; }
+    .action-btn {
+        width: 100%;
+        text-transform: uppercase;
+    }
 
     .win98-fieldset {
         border: 2px solid;
@@ -370,9 +638,15 @@
         margin: 0;
         padding: 8px;
     }
-    .win98-fieldset legend { font-weight: bold; padding: 0 4px; }
+    .win98-fieldset legend {
+        font-weight: bold;
+        padding: 0 4px;
+    }
 
-    .ca-container { display: flex; gap: 4px; }
+    .ca-container {
+        display: flex;
+        gap: 4px;
+    }
     .win98-input {
         flex-grow: 1;
         background: #ffffff;
@@ -384,9 +658,14 @@
         padding: 3px;
         outline: none;
     }
-    .copy-btn { min-width: 60px; }
+    .copy-btn {
+        min-width: 60px;
+    }
 
-    .ticker-grid { display: flex; gap: 6px; }
+    .ticker-grid {
+        display: flex;
+        gap: 6px;
+    }
     .data-well {
         flex: 1;
         background: #000000;
@@ -394,15 +673,27 @@
         border-color: #808080 #fff #fff #808080;
         padding: 4px 6px;
     }
-    .well-label { color: #808080; font-size: 9px; font-weight: bold; }
-    .well-value { color: #ffffff; font-size: 14px; font-weight: bold; margin-top: 2px; }
-    .numerical { font-family: 'Courier New', Courier, monospace; letter-spacing: -0.5px; }
+    .well-label {
+        color: #808080;
+        font-size: 9px;
+        font-weight: bold;
+    }
+    .well-value {
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: bold;
+        margin-top: 2px;
+    }
+    .numerical {
+        font-family: "Courier New", Courier, monospace;
+        letter-spacing: -0.5px;
+    }
 
     .retro-chart-box {
         background: #2d1b47;
         border: 2px solid;
         border-color: #808080 #fff #fff #808080;
-        height: 180px; 
+        height: 180px;
         position: relative;
         overflow: hidden;
     }
@@ -411,18 +702,18 @@
         position: absolute;
         left: 0;
         width: 100%;
-        border-bottom: 1px dotted #FFFF00; 
+        border-bottom: 1px dotted #ffff00;
         z-index: 0;
     }
     .scale-label {
         position: absolute;
         right: 4px;
         bottom: 2px;
-        color: #FFFF00;
+        color: #ffff00;
         font-size: 9px;
         font-weight: bold;
-        font-family: 'Courier New', Courier, monospace;
-        background: #2d1b47; 
+        font-family: "Courier New", Courier, monospace;
+        background: #2d1b47;
         padding: 0 2px;
     }
 
@@ -433,9 +724,9 @@
         width: 100%;
         height: 100%;
         display: flex;
-        justify-content: space-evenly; 
+        justify-content: space-evenly;
         align-items: flex-end;
-        padding: 0 40px 0 10px; 
+        padding: 0 40px 0 10px;
         box-sizing: border-box;
     }
     .candle-wrapper {
@@ -446,8 +737,8 @@
     .wick {
         position: absolute;
         width: 1px;
-        background: #FFFFFF;
-        left: 5px; 
+        background: #ffffff;
+        left: 5px;
         z-index: 1;
     }
     .body {
@@ -457,62 +748,58 @@
         border: 1px solid #ffffff;
         box-sizing: border-box;
     }
-    .body.green { background: #00F0FF; border-color: #00F0FF; }
-    .body.red { background: #FF007F; border-color: #FF007F; }
+    .body.green {
+        background: #00f0ff;
+        border-color: #00f0ff;
+    }
+    .body.red {
+        background: #ff007f;
+        border-color: #ff007f;
+    }
 
-    /* --- NATIVE SVELTE MEDIA PLAYER --- */
-    /* --- NATIVE SVELTE MEDIA PLAYER --- */
     .player-fieldset {
-        /* 1. Tell the entire player to stretch and fill the remaining sidebar space */
-        flex-grow: 1; 
+        flex-grow: 1;
         display: flex;
         flex-direction: column;
         gap: 6px;
-        /* 2. Critical for nested flex scrolling: tells the box it's allowed to shrink if needed */
-        min-height: 0; 
-        margin-bottom: 10px; /* Adds a little breathing room above the external links */
+        min-height: 0;
+        margin-bottom: 10px;
     }
-    
+
     .player-lcd {
         background: #000000;
         border: 2px solid;
-        border-color: #808080 #fff #fff #808080; 
+        border-color: #808080 #fff #fff #808080;
         padding: 4px 6px;
         display: flex;
         flex-direction: column;
         gap: 2px;
         height: 32px;
-        /* Prevent the LCD from stretching */
-        flex-shrink: 0; 
+        flex-shrink: 0;
         overflow: hidden;
     }
-    /* ... keep your existing .lcd-status and .lcd-track-marquee rules ... */
-
-    /* ... keep your existing .player-controls and .ctrl-btn rules ... */
 
     .player-playlist {
         background: #ffffff;
         border: 2px solid;
         border-color: #808080 #fff #fff #808080;
-        /* 3. Tell the white playlist box to stretch to fill the newly expanded fieldset */
-        flex-grow: 1; 
+        flex-grow: 1;
         overflow-y: auto;
-        display: block; /* Block handles vertical scrolling better than flex */
-        min-height: 60px; /* Keep a minimum size just in case */
+        display: block;
+        min-height: 60px;
     }
     .lcd-status {
-        color: #00ff00; /* Classic Winamp Green */
+        color: #00ff00;
         font-size: 9px;
         font-weight: bold;
-        font-family: 'Courier New', Courier, monospace;
+        font-family: "Courier New", Courier, monospace;
     }
     .lcd-track-marquee {
         color: #00ff00;
         font-size: 11px;
         font-weight: bold;
         white-space: nowrap;
-        font-family: 'Courier New', Courier, monospace;
-        /* Simple static scroll fallback */
+        font-family: "Courier New", Courier, monospace;
         overflow: hidden;
         text-overflow: ellipsis;
     }
@@ -524,11 +811,10 @@
     }
     .ctrl-btn {
         flex: 1;
-        font-size: 14px; /* Slightly larger symbols */
+        font-size: 14px;
         padding: 2px 0;
     }
 
-    
     .playlist-item {
         padding: 2px 4px;
         cursor: pointer;
@@ -541,7 +827,7 @@
         background: #e0e0e0;
     }
     .playlist-item.active {
-        background: #000080; /* Classic Windows Selection Blue */
+        background: #000080;
         color: #ffffff;
     }
     .track-num {
@@ -550,11 +836,27 @@
         color: inherit;
     }
 
-    .hyperlink-matrix { display: flex; flex-direction: row; gap: 8px; }
-    .link-btn { flex: 1; display: flex; justify-content: center; align-items: center; padding: 6px 0; }
-    .app-icon { width: 18px; height: 18px; image-rendering: -webkit-optimize-contrast; }
+    .hyperlink-matrix {
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+    }
+    .link-btn {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 6px 0;
+    }
+    .app-icon {
+        width: 18px;
+        height: 18px;
+        image-rendering: -webkit-optimize-contrast;
+    }
 
     @media (max-width: 768px) {
-        .win98-sidebar { display: none !important; }
+        .win98-sidebar {
+            display: none !important;
+        }
     }
 </style>

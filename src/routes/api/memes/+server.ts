@@ -5,24 +5,33 @@ import { pipeline } from "@xenova/transformers";
 export async function GET({ url }) {
   const search = url.searchParams.get("search");
   const type = url.searchParams.get("type") || "photo";
+  const sort = url.searchParams.get("sort") || "popular"; // NEW: Capture sort method
 
   const limit = parseInt(url.searchParams.get("limit") || "30", 10);
   const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
   if (!search) {
-    const { data, error } = await supabase
-      .from("memes")
-      .select("*")
-      .eq("type", type)
-      .order("created_at", { ascending: false })
+    let query = supabase.from("memes_with_scores").select("*").eq("type", type);
+
+    // Apply sorting logic
+    if (sort === "popular") query = query.order("score", { ascending: false });
+    else if (sort === "newest")
+      query = query.order("created_at", { ascending: false });
+    else if (sort === "oldest")
+      query = query.order("created_at", { ascending: true });
+
+    // Fallback tie-breaker
+    query = query
+      .order("id", { ascending: false })
       .range(offset, offset + limit - 1);
 
+    const { data, error } = await query;
     return json(error ? { error: error.message } : data);
   }
 
   try {
     const { data: keywordMatches } = await supabase
-      .from("memes")
+      .from("memes_with_scores")
       .select("*")
       .eq("type", type)
       .contains("tags", [search.toLowerCase()]);
@@ -37,6 +46,7 @@ export async function GET({ url }) {
     });
     const queryEmbedding = Array.from(output.data);
 
+    // Semantic matches will now inherit scores thanks to our updated SQL function!
     const { data: semanticMatches, error } = await supabase.rpc("match_memes", {
       query_embedding: queryEmbedding,
       match_threshold: 0.15,

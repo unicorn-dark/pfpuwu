@@ -77,7 +77,8 @@
         class="start-button {startMenuOpen ? 'active' : ''}"
         onclick={toggleStartMenu}
     >
-        <span class="windows-logo">⊞</span> Start
+        <img src="/win-98.png" class="windows-logo-img" alt="Win98 Logo" />
+        Start
     </button>
 
     <div class="taskbar-apps">
@@ -115,6 +116,14 @@
 </div>
 
 <style>
+    .windows-logo-img {
+        width: 16px;
+        height: 16px;
+        margin-right: 2px;
+        /* Forces the browser to keep the edges sharp instead of blurring them */
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+    }
     .taskbar {
         position: fixed;
         /* 1. Tell the browser to lift the taskbar above the gesture line */
