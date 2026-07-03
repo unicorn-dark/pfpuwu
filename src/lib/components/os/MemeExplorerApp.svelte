@@ -533,7 +533,12 @@
                         {#if meme.type === "photo"}
                             <img src={meme.url} alt="Thumbnail" />
                         {:else}
-                            <video src={meme.url} muted preload="metadata" />
+                            <video
+                                src={meme.url}
+                                muted
+                                playsinline
+                                preload="metadata"
+                            />
                         {/if}
                         {#if meme.score && meme.score > 0}
                             <div class="mini-score">⭐ {meme.score}</div>
