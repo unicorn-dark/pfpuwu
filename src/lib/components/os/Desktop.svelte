@@ -69,7 +69,6 @@
         openWindow(vid.id, vid.title, finalWidth + 12, finalHeight + 40);
     };
     onMount(() => {
-        launchPfpApp();
         launchMemeExpApp();
     });
 </script>

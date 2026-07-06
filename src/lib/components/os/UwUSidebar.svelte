@@ -195,6 +195,7 @@
             console.error("Secure fetch failed, falling back to mock", e);
             generateFallbackChart(currentPriceNum, change24h);
         }
+        toggleSidebar();
     });
 
     const copyCA = () => {

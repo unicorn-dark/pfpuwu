@@ -14,6 +14,7 @@
         downvotes?: number;
     };
 
+    // State
     let memes = $state<Meme[]>([]);
     let selectedMeme = $state<Meme | null>(null);
     let isLoading = $state(true);
@@ -21,17 +22,27 @@
     let isMediaLoading = $state(false);
     let searchQuery = $state("");
     let filterType = $state<"photo" | "video">("photo");
-    let sortBy = $state("popular"); // NEW: Sort state
+    let sortBy = $state("popular");
     let errorMessage = $state("");
     let clipboardMessage = $state("");
     let hasMore = $state(true);
 
+    // Export state
+    let isExporting = $state(false);
+    let exportProgress = $state(0);
+    let exportStatusText = $state("");
+    let totalExportCount = $state(0);
+
     let photoCount = $state(0);
     let videoCount = $state(0);
-
-    // NEW: Vote tracking
     let localVotes = $state<Record<string, number>>({});
     let deviceId = "";
+
+    // Tagging System
+    let isEditorAuthenticated = $state(false);
+    let editingTagIndex = $state<number | null>(null);
+    let editingTagValue = $state("");
+    let tagInputRef: HTMLInputElement | null = $state(null);
 
     const pageSize = 30;
     const pageCache = new Map<string, Meme[]>();
@@ -75,45 +86,104 @@
         "wearing a hat",
         "smoking a cigar",
         "boss music playing",
-        "anime betrayal",
-        "epic handshake",
-        "spider-man pointing",
-        "cat sitting on keyboard",
-        "doge stare",
-        "stonks going up",
-        "panik kalm",
-        "brain expanding",
-        "hiding in the bushes",
-        "looking through window",
-        "pointing at screen",
-        "sweating nervously",
-        "galaxy brain",
-        "sigma male grindset",
-        "typing fast",
-        "hacker man",
-        "sleeping peacefully",
-        "waking up in a cold sweat",
-        "disgusted face",
-        "smug grin",
-        "t-posing to assert dominance",
-        "running away",
-        "chasing someone",
-        "explosion in the background",
-        "wearing medieval armor",
-        "cyberpunk neon city",
-        "wizard casting a spell",
-        "goth aesthetic",
-        "cottagecore vibes",
-        "money flying everywhere",
-        "police lights",
-        "alien invasion",
-        "romantic sunset",
-        "rainy day window",
-        "dancing aggressively",
-        "playing a guitar",
-        "reading a book",
-        "stuck in a box",
     ];
+
+    // === Bulk Export ===
+    async function triggerBulkExport() {
+        if (isExporting) return;
+
+        isExporting = true;
+        exportProgress = 0;
+        exportStatusText = "Fetching list...";
+        totalExportCount = 0;
+
+        const btn = document.querySelector(".menu-btn");
+        if (btn) btn.innerHTML = `<u>F</u>ile ▸ Zipping...`;
+
+        try {
+            const { downloadZip } = await import("client-zip");
+
+            const allMemes: Meme[] = [];
+            let offset = 0;
+            const batchSize = 1000;
+
+            while (true) {
+                const url = `/api/memes?type=${filterType}&limit=${batchSize}&offset=${offset}`;
+                const res = await fetch(url);
+                if (!res.ok)
+                    throw new Error(
+                        `Failed to fetch batch at offset ${offset}`,
+                    );
+
+                const batch: Meme[] = await res.json();
+                if (batch.length === 0) break;
+
+                allMemes.push(...batch);
+                offset += batch.length;
+                exportStatusText = `Fetching list... (${allMemes.length} loaded)`;
+            }
+
+            totalExportCount = allMemes.length;
+            exportStatusText = `Starting export of ${totalExportCount} files...`;
+
+            if (totalExportCount === 0) {
+                alert("No files to export.");
+                return;
+            }
+
+            let processed = 0;
+
+            async function* getFiles() {
+                for (const meme of allMemes) {
+                    processed++;
+                    exportProgress = Math.round(
+                        (processed / totalExportCount) * 100,
+                    );
+                    exportStatusText = `Downloading ${processed}/${totalExportCount}`;
+
+                    try {
+                        const proxyUrl = `/api/proxy?url=${encodeURIComponent(meme.url)}`;
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) continue;
+
+                        yield {
+                            name: `${meme.id}.${meme.type === "photo" ? "jpg" : "mp4"}`,
+                            input: response,
+                        };
+                    } catch (e) {
+                        console.warn("Skipped:", meme.url);
+                    }
+                }
+            }
+
+            exportStatusText = "Zipping files...";
+            const zipResponse = downloadZip(getFiles());
+            const blob = await zipResponse.blob();
+
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `uwu_${filterType}_archive.zip`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(link.href);
+
+            exportStatusText = "Done!";
+            exportProgress = 100;
+            await new Promise((r) => setTimeout(r, 1200));
+        } catch (err) {
+            console.error("Export failed:", err);
+            alert("Export failed. Check console.");
+        } finally {
+            isExporting = false;
+            exportProgress = 0;
+            exportStatusText = "";
+            totalExportCount = 0;
+            if (btn) {
+                btn.innerHTML = `<u>F</u>ile ▸ Export All ${filterType === "photo" ? "Photos" : "Videos"}`;
+            }
+        }
+    }
 
     const selectedIndex = $derived(
         selectedMeme
@@ -138,9 +208,7 @@
                 photoCount = data.photo;
                 videoCount = data.video;
             }
-        } catch (err) {
-            console.error("Failed to load stats", err);
-        }
+        } catch (err) {}
     }
 
     async function fetchMemes({ append = false } = {}) {
@@ -155,6 +223,7 @@
             isLoading = true;
             hasMore = true;
         }
+
         errorMessage = "";
 
         try {
@@ -169,16 +238,7 @@
                 const res = await fetch(url);
                 if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
-                const rawData = await res.json();
-                if (!Array.isArray(rawData)) {
-                    const weirdDataString = JSON.stringify(rawData);
-                    throw new Error(
-                        rawData?.error ??
-                            `API sent bad data: ${weirdDataString}`,
-                    );
-                }
-
-                nextBatch = rawData;
+                nextBatch = await res.json();
                 pageCache.set(cacheKey, nextBatch);
             }
 
@@ -230,11 +290,10 @@
     }
 
     function surpriseMe() {
-        const randomConcept =
+        searchQuery =
             surpriseConcepts[
                 Math.floor(Math.random() * surpriseConcepts.length)
             ];
-        searchQuery = randomConcept;
         clearTimeout(searchTimeout);
         fetchMemes();
     }
@@ -242,7 +301,7 @@
     function setFilter(type: "photo" | "video") {
         if (filterType === type) return;
         filterType = type;
-        if (type === "video") searchQuery = "";
+        searchQuery = ""; // Clear search when switching tabs
         memes = [];
         pageCache.clear();
         fetchMemes();
@@ -257,7 +316,10 @@
     function selectMeme(meme: Meme) {
         if (selectedMeme?.id === meme.id) return;
         isMediaLoading = true;
+        meme.tags = meme.tags || [];
         selectedMeme = meme;
+        editingTagIndex = null;
+
         requestAnimationFrame(() => {
             mediaGrid
                 ?.querySelector(`[data-meme-id="${meme.id}"]`)
@@ -265,12 +327,119 @@
         });
     }
 
-    // NEW: Handle Voting Interactions
+    // === Tagging Logic ===
+    async function authenticateEditor() {
+        if (isEditorAuthenticated) return true;
+        const pwd = prompt("Enter the Editor Password to modify tags:");
+        if (!pwd) return false;
+
+        try {
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: pwd }),
+            });
+            if (res.ok) {
+                isEditorAuthenticated = true;
+                localStorage.setItem("uwu_editor_authed", "true");
+                return true;
+            } else {
+                alert("Incorrect Password.");
+                return false;
+            }
+        } catch (err) {
+            alert("Authentication failed.");
+            return false;
+        }
+    }
+
+    async function startTagEdit(index: number) {
+        const authed = await authenticateEditor();
+        if (!authed || !selectedMeme) return;
+
+        editingTagIndex = index;
+        editingTagValue = selectedMeme.tags?.[index] || "";
+        setTimeout(() => tagInputRef?.focus(), 10);
+    }
+
+    async function addBlankTag() {
+        const authed = await authenticateEditor();
+        if (!authed || !selectedMeme) return;
+
+        selectedMeme.tags = selectedMeme.tags || [];
+        selectedMeme.tags.push("");
+        editingTagIndex = selectedMeme.tags.length - 1;
+        editingTagValue = "";
+        setTimeout(() => tagInputRef?.focus(), 10);
+    }
+
+    async function saveTag() {
+        if (editingTagIndex === null || !selectedMeme) return;
+
+        const updatedTags = [...(selectedMeme.tags || [])];
+        const trimmedVal = editingTagValue.trim();
+
+        if (trimmedVal === "") {
+            updatedTags.splice(editingTagIndex, 1);
+        } else {
+            updatedTags[editingTagIndex] = trimmedVal;
+        }
+
+        selectedMeme.tags = updatedTags;
+        editingTagIndex = null;
+
+        try {
+            await fetch("/api/memes/tags", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    meme_id: selectedMeme.id,
+                    tags: updatedTags,
+                }),
+            });
+        } catch (err) {
+            console.error("Failed to save tags");
+        }
+    }
+
+    async function deleteTag(index: number) {
+        const authed = await authenticateEditor();
+        if (!authed || !selectedMeme || !selectedMeme.tags) return;
+
+        const updatedTags = [...selectedMeme.tags];
+        updatedTags.splice(index, 1);
+        selectedMeme.tags = updatedTags;
+        editingTagIndex = null;
+
+        try {
+            await fetch("/api/memes/tags", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    meme_id: selectedMeme.id,
+                    tags: updatedTags,
+                }),
+            });
+        } catch (err) {
+            console.error("Failed to delete tag");
+        }
+    }
+
+    function handleTagKeydown(e: KeyboardEvent) {
+        if (e.key === "Enter") saveTag();
+        if (e.key === "Escape") {
+            if (selectedMeme?.tags?.[editingTagIndex!] === "") {
+                selectedMeme.tags.splice(editingTagIndex!, 1);
+            }
+            editingTagIndex = null;
+        }
+    }
+
+    // === Voting ===
     async function castVote(value: number) {
         if (!selectedMeme) return;
-        const memeId = selectedMeme.id;
 
-        // Ensure Device ID exists
+        const memeId = selectedMeme.id;
         if (!deviceId) {
             deviceId = crypto.randomUUID
                 ? crypto.randomUUID()
@@ -278,16 +447,13 @@
             localStorage.setItem("uwu_device_id", deviceId);
         }
 
-        // Toggle vote off if clicking the same button
         const isRemoving = localVotes[memeId] === value;
         const finalValue = isRemoving ? 0 : value;
         const previousVote = localVotes[memeId] || 0;
 
-        // Optimistic State Update
         localVotes[memeId] = finalValue;
         localStorage.setItem("uwu_votes", JSON.stringify(localVotes));
 
-        // Adjust visible counts instantly
         if (previousVote === 1)
             selectedMeme.upvotes = Math.max(0, (selectedMeme.upvotes || 1) - 1);
         if (previousVote === -1)
@@ -299,6 +465,7 @@
             selectedMeme.upvotes = (selectedMeme.upvotes || 0) + 1;
         if (finalValue === -1)
             selectedMeme.downvotes = (selectedMeme.downvotes || 0) + 1;
+
         selectedMeme.score =
             (selectedMeme.upvotes || 0) - (selectedMeme.downvotes || 0);
 
@@ -312,9 +479,7 @@
                     vote_value: finalValue,
                 }),
             });
-        } catch (err) {
-            console.error("Vote transmission failed", err);
-        }
+        } catch (err) {}
     }
 
     async function pickRandom() {
@@ -329,7 +494,6 @@
         try {
             const url = `/api/memes?type=${filterType}&limit=1&offset=${randomOffset}`;
             const res = await fetch(url);
-            if (!res.ok) throw new Error("Random fetch failed");
             const [randomMeme] = await res.json();
             if (randomMeme) {
                 if (!memes.some((m) => m.id === randomMeme.id))
@@ -337,7 +501,6 @@
                 selectMeme(randomMeme);
             }
         } catch (err) {
-            console.error("[MemeExplorer] Random pick failed:", err);
         } finally {
             if (btn) btn.innerText = "Random";
         }
@@ -347,18 +510,15 @@
         if (!selectedMeme) return;
         const btn = document.getElementById("download-btn");
         if (btn) btn.innerText = "Downloading...";
+
         try {
             const res = await fetch(selectedMeme.url);
             const blob = await res.blob();
             const blobUrl = window.URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.style.display = "none";
             link.href = blobUrl;
-            const ext = selectedMeme.type === "photo" ? "png" : "mp4";
-            link.download = `file_${selectedMeme.id.substring(0, 6)}.${ext}`;
-            document.body.appendChild(link);
+            link.download = `file_${selectedMeme.id.substring(0, 6)}.${selectedMeme.type === "photo" ? "png" : "mp4"}`;
             link.click();
-            link.remove();
             window.URL.revokeObjectURL(blobUrl);
         } catch (err) {
             window.open(selectedMeme.url, "_blank");
@@ -369,6 +529,7 @@
 
     async function copyToClipboard() {
         if (!selectedMeme || selectedMeme.type !== "photo") return;
+
         try {
             const response = await fetch(selectedMeme.url);
             const blob = await response.blob();
@@ -398,16 +559,11 @@
                 URL.revokeObjectURL(objectUrl);
                 canvas.toBlob(
                     (pngBlob) =>
-                        pngBlob
-                            ? resolve(pngBlob)
-                            : reject(new Error("Could not prepare image.")),
+                        pngBlob ? resolve(pngBlob) : reject(new Error("Err")),
                     "image/png",
                 );
             };
-            img.onerror = () => {
-                URL.revokeObjectURL(objectUrl);
-                reject(new Error("Could not load image."));
-            };
+            img.onerror = () => reject(new Error("Err"));
             img.src = objectUrl;
         });
     }
@@ -430,13 +586,16 @@
     }
 
     async function moveSelection(direction: 1 | -1) {
-        if (memes.length === 0) return;
+        if (memes.length === 0 || editingTagIndex !== null) return;
+
         const currentIndex = selectedIndex === -1 ? 0 : selectedIndex;
         const nextIndex = currentIndex + direction;
+
         if (nextIndex >= 0 && nextIndex < memes.length) {
             selectMeme(memes[nextIndex]);
             return;
         }
+
         if (direction === 1 && hasMore && !isLoadingMore) {
             const previousLength = memes.length;
             await fetchMemes({ append: true });
@@ -446,23 +605,28 @@
     }
 
     function handleKeydown(event: KeyboardEvent) {
+        if (editingTagIndex !== null) return;
+
         const keyMap: Record<string, 1 | -1> = {
             ArrowRight: 1,
             ArrowDown: 1,
             ArrowLeft: -1,
             ArrowUp: -1,
         };
+
         const direction = keyMap[event.key];
         if (!direction) return;
+
         event.preventDefault();
         moveSelection(direction);
     }
 
     onMount(() => {
-        // Load local tracking data
         deviceId = localStorage.getItem("uwu_device_id") || "";
         const storedVotes = localStorage.getItem("uwu_votes");
         if (storedVotes) localVotes = JSON.parse(storedVotes);
+        isEditorAuthenticated =
+            localStorage.getItem("uwu_editor_authed") === "true";
 
         fetchStats();
         fetchMemes();
@@ -474,192 +638,384 @@
     });
 </script>
 
-<div class="explorer-layout">
-    <div class="gallery-pane win-panel">
-        <div class="toolbar">
-            <div class="tab-group">
-                <button
-                    class="win-btn tab-btn {filterType === 'photo'
-                        ? 'active'
-                        : ''}"
-                    onclick={() => setFilter("photo")}
-                    >Photos ({formatCount(photoCount)})</button
-                >
-                <button
-                    class="win-btn tab-btn {filterType === 'video'
-                        ? 'active'
-                        : ''}"
-                    onclick={() => setFilter("video")}
-                    >Videos ({formatCount(videoCount)})</button
-                >
-            </div>
-
-            <select
-                class="win-input sort-dropdown"
-                bind:value={sortBy}
-                onchange={onSortChange}
-            >
-                <option value="popular">⭐ Popular</option>
-                <option value="newest">🕒 Newest</option>
-                <option value="oldest">🕰️ Oldest</option>
-            </select>
-        </div>
-
-        <div
-            class="media-grid win-inset"
-            bind:this={mediaGrid}
-            tabindex="0"
-            role="listbox"
-            onscroll={handleGridScroll}
-            onkeydown={handleKeydown}
-            aria-label="Media files"
-            aria-activedescendant={selectedMeme?.id}
+<div class="app-container">
+    <!-- Menubar -->
+    <div class="win98-menubar">
+        <button
+            class="menu-btn"
+            onclick={triggerBulkExport}
+            disabled={isExporting}
         >
-            {#if isLoading}
-                <div class="loading-state" in:fade>Loading...</div>
-            {:else if errorMessage}
-                <div class="loading-state">{errorMessage}</div>
-            {:else if memes.length === 0}
-                <div class="loading-state">No files found.</div>
-            {:else}
-                {#each memes as meme (meme.id)}
-                    <button
-                        type="button"
-                        class="grid-item {selectedMeme?.id === meme.id
-                            ? 'selected'
-                            : ''}"
-                        onclick={() => selectMeme(meme)}
+            <u>F</u>ile ▸ {isExporting
+                ? "Zipping..."
+                : `Export All ${filterType === "photo" ? "Photos" : "Videos"}`}
+        </button>
+
+        {#if isExporting}
+            <div class="win98-progress-container">
+                <div class="win98-progress">
+                    <div
+                        class="win98-progress-fill"
+                        style="width: {exportProgress}%"
+                    ></div>
+                    <div
+                        class="win98-progress-text"
+                        class:white-text={exportProgress > 55}
                     >
-                        {#if meme.type === "photo"}
-                            <img src={meme.url} alt="Thumbnail" />
-                        {:else}
-                            <video
-                                src={`${meme.url}#t=0.001`}
-                                muted
-                                preload="metadata"
-                                playsinline
-                                webkit-playsinline
-                            />
-                        {/if}
-                        {#if meme.score && meme.score > 0}
-                            <div class="mini-score">⭐ {meme.score}</div>
-                        {/if}
-                    </button>
-                {/each}
-                {#if isLoadingMore}
-                    <div class="loading-more">Loading more...</div>
-                {:else if !hasMore}
-                    <div class="loading-more">End of folder</div>
-                {/if}
-            {/if}
-        </div>
-        {#if filterType === "photo"}
-            <div class="search-container">
-                <div class="search-header">
-                    <span class="search-label">Search:</span>
-                    <button
-                        class="win-btn surprise-btn"
-                        onclick={surpriseMe}
-                        title="Auto-fill a random idea">🎲 Random Idea</button
-                    >
+                        {exportStatusText} ({exportProgress}%)
+                    </div>
                 </div>
-                <input
-                    type="text"
-                    class="win-input"
-                    placeholder="e.g. funny cat wearing glasses..."
-                    bind:value={searchQuery}
-                    oninput={handleSearch}
-                />
             </div>
         {/if}
     </div>
 
-    <div class="preview-pane win-panel {selectedMeme ? 'has-selection' : ''}">
-        <div class="preview-display win-inset">
-            {#if selectedMeme}
-                <div class="media-wrapper">
-                    {#if selectedMeme.type === "photo"}
-                        <img
-                            class:is-blur={isMediaLoading}
-                            src={selectedMeme.url}
-                            alt="Selected media"
-                            onload={() => (isMediaLoading = false)}
-                        />
-                    {:else}
-                        <video
-                            class:is-blur={isMediaLoading}
-                            src={selectedMeme.url}
-                            controls
-                            autoplay
-                            loop
-                            onloadeddata={() => (isMediaLoading = false)}
-                        ></video>
-                    {/if}
+    <div class="explorer-layout">
+        <!-- Gallery Pane -->
+        <div class="gallery-pane win-panel">
+            <div class="toolbar">
+                <div class="tab-group">
+                    <button
+                        class="win-btn tab-btn {filterType === 'photo'
+                            ? 'active'
+                            : ''}"
+                        onclick={() => setFilter("photo")}
+                    >
+                        Photos ({formatCount(photoCount)})
+                    </button>
+                    <button
+                        class="win-btn tab-btn {filterType === 'video'
+                            ? 'active'
+                            : ''}"
+                        onclick={() => setFilter("video")}
+                    >
+                        Videos ({formatCount(videoCount)})
+                    </button>
                 </div>
-            {:else}
-                <div class="loading-state">Select a file to preview</div>
-            {/if}
-
-            {#if clipboardMessage}
-                <span class="clipboard-status" in:fade>{clipboardMessage}</span>
-            {/if}
-        </div>
-
-        <div class="action-bar">
-            <div class="vote-controls">
-                <button
-                    class="win-btn vote-btn {selectedMeme &&
-                    localVotes[selectedMeme.id] === 1
-                        ? 'active-up'
-                        : ''}"
-                    disabled={!selectedMeme}
-                    onclick={() => castVote(1)}
-                    title="Upvote"
+                <select
+                    class="win-input sort-dropdown"
+                    bind:value={sortBy}
+                    onchange={onSortChange}
                 >
-                    ▲ {selectedMeme?.upvotes || 0}
-                </button>
-                <button
-                    class="win-btn vote-btn {selectedMeme &&
-                    localVotes[selectedMeme.id] === -1
-                        ? 'active-down'
-                        : ''}"
-                    disabled={!selectedMeme}
-                    onclick={() => castVote(-1)}
-                    title="Downvote"
-                >
-                    ▼ {selectedMeme?.downvotes || 0}
-                </button>
+                    <option value="popular">⭐ Popular</option>
+                    <option value="newest">🕒 Newest</option>
+                    <option value="oldest">🕰️ Oldest</option>
+                </select>
             </div>
 
-            <button
-                id="download-btn"
-                class="win-btn action-btn"
-                disabled={!selectedMeme}
-                onclick={downloadMeme}>Download</button
+            <div
+                class="media-grid win-inset"
+                bind:this={mediaGrid}
+                tabindex="0"
+                role="listbox"
+                onscroll={handleGridScroll}
+                onkeydown={handleKeydown}
+                aria-activedescendant={selectedMeme?.id}
             >
+                {#if isLoading}
+                    <div class="loading-state" in:fade>Loading...</div>
+                {:else if errorMessage}
+                    <div class="loading-state">{errorMessage}</div>
+                {:else if memes.length === 0}
+                    <div class="loading-state">No files found.</div>
+                {:else}
+                    {#each memes as meme (meme.id)}
+                        <button
+                            type="button"
+                            class="grid-item {selectedMeme?.id === meme.id
+                                ? 'selected'
+                                : ''}"
+                            onclick={() => selectMeme(meme)}
+                        >
+                            {#if meme.type === "photo"}
+                                <img src={meme.url} alt="Thumbnail" />
+                            {:else}
+                                <video
+                                    src={`${meme.url}#t=0.001`}
+                                    muted
+                                    preload="metadata"
+                                    playsinline
+                                    webkit-playsinline
+                                />
+                            {/if}
+                            {#if meme.score && meme.score > 0}
+                                <div class="mini-score">⭐ {meme.score}</div>
+                            {/if}
+                        </button>
+                    {/each}
+                    {#if isLoadingMore}
+                        <div class="loading-more">Loading more...</div>
+                    {:else if !hasMore}
+                        <div class="loading-more">End of folder</div>
+                    {/if}
+                {/if}
+            </div>
 
-            {#if selectedMeme?.type === "photo"}
+            <!-- Search Bar (Now available for both Photos and Videos) -->
+            <div class="search-container">
+                <div class="search-header">
+                    <span class="search-label">
+                        {filterType === "photo" ? "Search:" : "Search tags:"}
+                    </span>
+
+                    {#if filterType === "photo"}
+                        <button
+                            class="win-btn surprise-btn"
+                            onclick={surpriseMe}
+                            title="Auto-fill a random idea"
+                        >
+                            🎲 Random Idea
+                        </button>
+                    {/if}
+                </div>
+
+                <input
+                    type="text"
+                    class="win-input"
+                    placeholder={filterType === "photo"
+                        ? "e.g. funny cat wearing glasses..."
+                        : "Search by tag (e.g. cat, funny, meme)"}
+                    bind:value={searchQuery}
+                    oninput={handleSearch}
+                />
+            </div>
+        </div>
+
+        <!-- Preview Pane -->
+        <div
+            class="preview-pane win-panel {selectedMeme ? 'has-selection' : ''}"
+        >
+            <div class="preview-display win-inset">
+                {#if selectedMeme}
+                    <div class="media-wrapper">
+                        {#if selectedMeme.type === "photo"}
+                            <img
+                                class:is-blur={isMediaLoading}
+                                src={selectedMeme.url}
+                                alt="Selected media"
+                                onload={() => (isMediaLoading = false)}
+                            />
+                        {:else}
+                            <video
+                                class:is-blur={isMediaLoading}
+                                src={selectedMeme.url}
+                                controls
+                                autoplay
+                                loop
+                                onloadeddata={() => (isMediaLoading = false)}
+                            ></video>
+                        {/if}
+                    </div>
+
+                    <div
+                        class="tags-overlay"
+                        title="Meme Tags: Click a tag to edit, or click '+' to add a new one."
+                    >
+                        {#each selectedMeme.tags || [] as tag, i}
+                            {#if editingTagIndex === i}
+                                <input
+                                    bind:this={tagInputRef}
+                                    type="text"
+                                    class="tag-input"
+                                    bind:value={editingTagValue}
+                                    onblur={saveTag}
+                                    onkeydown={handleTagKeydown}
+                                />
+                            {:else}
+                                <div class="tag-group">
+                                    <button
+                                        class="tag-badge"
+                                        onclick={() => startTagEdit(i)}
+                                        title="Click to edit: {tag}"
+                                    >
+                                        {tag}
+                                    </button>
+                                    <button
+                                        class="tag-delete"
+                                        onclick={() => deleteTag(i)}
+                                        title="Delete tag">×</button
+                                    >
+                                </div>
+                            {/if}
+                        {/each}
+
+                        {#if editingTagIndex !== (selectedMeme.tags?.length || 0)}
+                            <button
+                                class="tag-add-btn"
+                                onclick={addBlankTag}
+                                title="Add new tag">+</button
+                            >
+                        {/if}
+                    </div>
+                {:else}
+                    <div class="loading-state">Select a file to preview</div>
+                {/if}
+
+                {#if clipboardMessage}
+                    <span class="clipboard-status" in:fade
+                        >{clipboardMessage}</span
+                    >
+                {/if}
+            </div>
+
+            <div class="action-bar">
+                <div class="vote-controls">
+                    <button
+                        class="win-btn vote-btn {selectedMeme &&
+                        localVotes[selectedMeme.id] === 1
+                            ? 'active-up'
+                            : ''}"
+                        disabled={!selectedMeme}
+                        onclick={() => castVote(1)}
+                        title="Upvote"
+                    >
+                        ▲ {selectedMeme?.upvotes || 0}
+                    </button>
+                    <button
+                        class="win-btn vote-btn {selectedMeme &&
+                        localVotes[selectedMeme.id] === -1
+                            ? 'active-down'
+                            : ''}"
+                        disabled={!selectedMeme}
+                        onclick={() => castVote(-1)}
+                        title="Downvote"
+                    >
+                        ▼ {selectedMeme?.downvotes || 0}
+                    </button>
+                </div>
+
                 <button
-                    class="win-btn action-btn primary-action"
+                    id="download-btn"
+                    class="win-btn action-btn"
                     disabled={!selectedMeme}
-                    onclick={copyToClipboard}>Copy Image</button
+                    onclick={downloadMeme}
                 >
-            {/if}
+                    Download
+                </button>
+
+                {#if selectedMeme?.type === "photo"}
+                    <button
+                        class="win-btn action-btn primary-action"
+                        disabled={!selectedMeme}
+                        onclick={copyToClipboard}
+                    >
+                        Copy Image
+                    </button>
+                {/if}
+            </div>
         </div>
     </div>
 </div>
 
 <style>
+    /* === Windows 98 Progress Bar === */
+    .win98-progress-container {
+        display: flex;
+        align-items: center;
+        margin-left: 12px;
+        flex: 1;
+        max-width: 280px;
+    }
+
+    .win98-progress {
+        position: relative;
+        width: 100%;
+        max-width: 260px;
+        height: 18px;
+        background: #ffffff;
+        border: 2px solid;
+        border-color: #808080 #ffffff #ffffff #808080;
+        box-shadow: inset 1px 1px #dfdfdf;
+        overflow: hidden;
+        font-family: "Pixelated MS Sans Serif", Arial, sans-serif;
+    }
+
+    .win98-progress-fill {
+        height: 100%;
+        background: #000080;
+        transition: width 120ms linear;
+        box-shadow: inset 0 0 0 1px #4040a0;
+    }
+
+    .win98-progress-text {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: bold;
+        color: #000000;
+        text-shadow: 1px 1px #ffffff;
+        pointer-events: none;
+        white-space: nowrap;
+        padding: 0 4px;
+        transition: color 150ms ease;
+    }
+
+    .win98-progress-text.white-text {
+        color: #ffffff;
+        text-shadow: 1px 1px #000000;
+        mix-blend-mode: difference;
+    }
+
+    .win98-progress::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        box-shadow: inset -1px -1px #c0c0c0;
+        pointer-events: none;
+    }
+
     /* Classic Windows 98 Layout */
+    .app-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        background: #c0c0c0;
+    }
+
+    .win98-menubar {
+        display: flex;
+        padding: 2px 4px;
+        border-bottom: 1px solid #808080;
+        box-shadow: 0 1px 0 #ffffff;
+    }
+
+    .menu-btn {
+        background: transparent;
+        border: none;
+        padding: 2px 6px;
+        font-family: "Pixelated MS Sans Serif", Arial, sans-serif;
+        font-size: 11px;
+        cursor: pointer;
+        color: #000000;
+    }
+
+    .menu-btn:hover:not(:disabled) {
+        background: #000080;
+        color: #ffffff;
+    }
+
+    .menu-btn:disabled {
+        color: #808080;
+        cursor: wait;
+    }
+
     .explorer-layout {
         display: flex;
         flex-direction: row;
-        height: 100%;
+        flex: 1;
         width: 100%;
         gap: 10px;
         padding: 8px;
         box-sizing: border-box;
-        background: #c0c0c0;
         overflow: hidden;
     }
 
@@ -755,11 +1111,10 @@
         box-shadow: inset 2px 2px #000040;
     }
 
-    /* NEW: Sort Dropdown */
     .sort-dropdown {
         width: auto;
         padding: 0 4px;
-        height: 25px; /* Matches tab height */
+        height: 25px;
         font-size: 11px;
         cursor: pointer;
         background: #ffffff;
@@ -772,11 +1127,10 @@
         padding: 4px 0 0;
     }
 
-    /* NEW: Vote UI Controls */
     .vote-controls {
         display: flex;
         gap: 4px;
-        margin-right: auto; /* Pushes the rest of the buttons to the right */
+        margin-right: auto;
     }
 
     .vote-btn {
@@ -785,7 +1139,6 @@
         font-weight: bold;
     }
 
-    /* Green Upvote Active State */
     .vote-btn.active-up {
         border-color: #000000 #ffffff #ffffff #000000;
         box-shadow: inset 1px 1px #808080;
@@ -794,7 +1147,6 @@
         padding: 7px 9px 5px 11px;
     }
 
-    /* Red Downvote Active State */
     .vote-btn.active-down {
         border-color: #000000 #ffffff #ffffff #000000;
         box-shadow: inset 1px 1px #808080;
@@ -879,7 +1231,6 @@
         height: 100%;
         object-fit: contain;
         background: #000;
-        pointer-events: none;
     }
 
     .grid-item.selected img {
@@ -895,19 +1246,6 @@
         font-size: 9px;
         padding: 1px 4px;
         font-weight: bold;
-    }
-
-    .video-icon {
-        font-size: 12px;
-        font-weight: bold;
-        color: #333;
-        display: grid;
-        height: 100%;
-        place-items: center;
-    }
-
-    .grid-item.selected .video-icon {
-        color: white;
     }
 
     .search-container {
@@ -963,12 +1301,13 @@
             filter 0.4s ease-out,
             opacity 0.4s ease-out;
     }
+
     .is-blur {
         filter: blur(15px);
         opacity: 0.4;
     }
-    .loading-state,
-    .loading-overlay {
+
+    .loading-state {
         position: absolute;
         color: #808080;
         font-size: 14px;
@@ -982,40 +1321,138 @@
         text-align: center;
     }
 
+    /* Tags Overlay */
+    .tags-overlay {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        pointer-events: auto;
+    }
+
+    .tag-group {
+        display: flex;
+        opacity: 0.65;
+        transition: opacity 0.15s ease;
+        box-shadow: 1px 1px 0px rgba(0, 0, 0, 0.5);
+    }
+
+    .tag-group:hover {
+        opacity: 1;
+    }
+
+    .tag-badge {
+        background: #ffffcc;
+        border: 1px solid #808000;
+        border-right: none;
+        color: #000000;
+        font-family: monospace;
+        font-size: 11px;
+        padding: 2px 6px;
+        cursor: pointer;
+        transition: background 0.1s;
+    }
+
+    .tag-badge:hover {
+        background: #000080;
+        color: #ffffff;
+        border-color: #ffffff;
+        border-right: none;
+    }
+
+    .tag-delete {
+        background: #ffffcc;
+        border: 1px solid #808000;
+        color: #000000;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: bold;
+        padding: 0 4px;
+        cursor: pointer;
+        transition: background 0.1s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .tag-delete:hover {
+        background: #cc0000;
+        color: #ffffff;
+        border-color: #ffffff;
+    }
+
+    .tag-add-btn {
+        background: #c0c0c0;
+        border: 1px solid #ffffff;
+        border-right-color: #000000;
+        border-bottom-color: #000000;
+        font-weight: bold;
+        padding: 0 6px;
+        cursor: pointer;
+        opacity: 0.5;
+        transition: opacity 0.15s ease;
+    }
+
+    .tag-add-btn:hover {
+        opacity: 1;
+    }
+
+    .tag-add-btn:active {
+        border: 1px solid #000000;
+        border-right-color: #ffffff;
+        border-bottom-color: #ffffff;
+    }
+
+    .tag-input {
+        background: #ffffff;
+        border: 2px solid;
+        border-color: #808080 #ffffff #ffffff #808080;
+        font-family: monospace;
+        font-size: 11px;
+        padding: 1px 4px;
+        width: 80px;
+        outline: none;
+    }
+
+    /* Mobile Overrides */
     @media (max-width: 768px) {
+        .win98-menubar {
+            display: none !important;
+        }
+        .tags-overlay {
+            display: none !important;
+        }
         .explorer-layout {
-            flex-direction: column;
+            flex-direction: column !important;
             height: calc(100dvh - 35px);
             padding-bottom: 35px;
             overflow: hidden;
             box-sizing: border-box;
         }
-
         .gallery-pane {
             flex: none;
             height: 45%;
             min-height: 200px;
         }
-
         .preview-pane {
             flex: 1;
             display: flex;
             flex-direction: column;
             min-height: 0;
         }
-
         .preview-display {
             flex: 1;
             min-height: 0;
         }
-
         .action-bar {
             flex-shrink: 0;
             justify-content: stretch;
             padding-bottom: 4px;
-            flex-wrap: wrap; /* Allows voting buttons to wrap on tiny screens if needed */
+            flex-wrap: wrap;
         }
-
         .action-btn {
             flex: 1;
             min-width: 0;
