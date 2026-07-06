@@ -10,6 +10,7 @@
     import UwUSidebar from "./UwUSidebar.svelte";
     import VideoPlayerApp from "./VideoPlayerApp.svelte";
     import MemeExplorerApp from "./MemeExplorerApp.svelte";
+    import Roadmap from "./Roadmap.svelte";
 
     const desktopVideos = [
         {
@@ -32,6 +33,9 @@
     };
     const launchMinesweeper = () => {
         openWindow("minesweeper", "Minesweeper", 260, 320);
+    };
+    const launchRoadmap = () => {
+        openWindow("roadmap", "UwU Roadmap", 850, 700);
     };
     const launchBlog = () => {
         openWindow(
@@ -69,6 +73,7 @@
         openWindow(vid.id, vid.title, finalWidth + 12, finalHeight + 40);
     };
     onMount(() => {
+        launchPfpApp();
         launchMemeExpApp();
     });
 </script>
@@ -118,6 +123,14 @@
             </button>
             <button
                 class="shortcut"
+                onclick={launchRoadmap}
+                ondblclick={launchRoadmap}
+            >
+                <div class="icon-placeholder">🗺️</div>
+                <span>Roadmap</span>
+            </button>
+            <button
+                class="shortcut"
                 onclick={() =>
                     openWindow("meme-explorer", "Meme Explorer", 960, 690)}
                 ondblclick={() =>
@@ -126,6 +139,7 @@
                 <div class="icon-placeholder">🦄</div>
                 <span>Meme Explorer</span>
             </button>
+
             {#each desktopVideos as vid}
                 <button
                     class="shortcut"
@@ -175,6 +189,10 @@
                     {:else if win.id === "notepad"}
                         <div class="app-content">
                             <NotepadApp />
+                        </div>
+                    {:else if win.id === "roadmap"}
+                        <div class="app-content">
+                            <Roadmap />
                         </div>
                     {:else if win.id.startsWith("vid-")}
                         {@const videoData = desktopVideos.find(
