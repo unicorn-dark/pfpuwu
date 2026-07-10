@@ -101,6 +101,7 @@
     }
 
     // --- VIRAL IMAGE GENERATOR ---
+    // --- VIRAL IMAGE GENERATOR ---
     function generateShareImage() {
         const shareCanvas = document.createElement("canvas");
         shareCanvas.width = 1080;
@@ -124,29 +125,7 @@
             sCtx.stroke();
         }
 
-        for (let i = 0; i < 20; i++) {
-            const isGreen = Math.random() > 0.5;
-            sCtx.fillStyle = isGreen
-                ? "rgba(0, 255, 0, 0.3)"
-                : "rgba(255, 0, 0, 0.3)";
-            sCtx.strokeStyle = "rgba(0, 0, 0, 0.3)";
-            sCtx.lineWidth = 6;
-
-            const cx = Math.random() * 1080;
-            const cy = Math.random() * 1080;
-            const cWidth = 40 + Math.random() * 60;
-            const cHeight = 80 + Math.random() * 200;
-            const wickHeight = cHeight + 40 + Math.random() * 100;
-
-            sCtx.fillRect(
-                cx + cWidth / 2 - 4,
-                cy - (wickHeight - cHeight) / 2,
-                8,
-                wickHeight,
-            );
-            sCtx.fillRect(cx, cy, cWidth, cHeight);
-            sCtx.strokeRect(cx, cy, cWidth, cHeight);
-        }
+        // (Candles completely removed from here!)
 
         if (hectocornImg.complete && hectocornImg.naturalHeight !== 0) {
             sCtx.drawImage(hectocornImg, 540 - 250, 120, 500, 500);
