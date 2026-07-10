@@ -4,11 +4,13 @@
 
     // --- STATE ---
     let initialInvestment = $state<number>(100);
-    const CURRENT_UWU_MC = 50_000_000;
-    let targetMarketCap = $state<number>(CURRENT_UWU_MC);
+
+    // We start with fallbacks, but these will update live onMount
+    let currentUwUMc = $state<number>(50_000_000);
+    let targetMarketCap = $state<number>(currentUwUMc);
 
     const currentValue = $derived(
-        (targetMarketCap / CURRENT_UWU_MC) * (initialInvestment || 0),
+        (targetMarketCap / currentUwUMc) * (initialInvestment || 0),
     );
 
     // Graph Dimensions (PC)
@@ -32,7 +34,7 @@
         desc: string;
     };
 
-    const milestones: Milestone[] = [
+    let milestones = $state<Milestone[]>([
         {
             id: "minicorn",
             name: "Minicorn",
@@ -110,21 +112,25 @@
             type: "asset",
             desc: "Digital gold.",
         },
-    ];
+    ]);
 
-    const orderedMilestones: Milestone[] = [
-        {
-            id: "current",
-            name: "UwU Current",
-            mc: CURRENT_UWU_MC,
-            type: "current",
-            desc: "You are early.",
-        },
-        ...milestones,
-    ];
+    // Automatically sorts the combined list so everything sits perfectly on the graph
+    const orderedMilestones = $derived.by(() => {
+        const combined: Milestone[] = [
+            {
+                id: "current",
+                name: "UwU Current",
+                mc: currentUwUMc,
+                type: "current",
+                desc: "You are early.",
+            },
+            ...milestones,
+        ];
+        return combined.sort((a, b) => a.mc - b.mc);
+    });
 
     const MIN_LOG = Math.log10(400_000);
-    const MAX_LOG = Math.log10(2_000_000_000_000);
+    const MAX_LOG = Math.log10(3_000_000_000_000); // Expanded slightly for BTC headroom
 
     function formatNumber(num: number) {
         if (num >= 1e12)
@@ -167,18 +173,18 @@
         isHovering = true;
         const ratio = mouseX / svgWidth;
         const logMC = MIN_LOG + ratio * (MAX_LOG - MIN_LOG);
-        targetMarketCap = Math.max(CURRENT_UWU_MC, Math.pow(10, logMC));
+        targetMarketCap = Math.max(currentUwUMc, Math.pow(10, logMC));
     }
 
     function handleGraphLeave() {
         isHovering = false;
         mouseX = null;
-        targetMarketCap = CURRENT_UWU_MC;
+        targetMarketCap = currentUwUMc;
     }
 
     const activeMilestone = $derived.by(() => {
-        if (!isHovering && targetMarketCap === CURRENT_UWU_MC) return null;
-        const closest = milestones.reduce((prev, curr) =>
+        if (!isHovering && targetMarketCap === currentUwUMc) return null;
+        const closest = orderedMilestones.reduce((prev, curr) =>
             Math.abs(curr.mc - targetMarketCap) <
             Math.abs(prev.mc - targetMarketCap)
                 ? curr
@@ -222,7 +228,7 @@
                     const log2 = Math.log10(orderedMilestones[i + 1].mc);
                     const currentLog = log1 + progress * (log2 - log1);
                     targetMarketCap = Math.max(
-                        CURRENT_UWU_MC,
+                        currentUwUMc,
                         Math.pow(10, currentLog),
                     );
                     break;
@@ -231,27 +237,85 @@
         }
     }
 
-    onMount(() => {
+    // FETCH LIVE DATA
+    onMount(async () => {
+        // 1. Fetch live UwU Market Cap from Dexscreener
+        try {
+            const uwuRes = await fetch(
+                "https://api.dexscreener.com/latest/dex/tokens/UWUy7J86LUiBv5SjAUZ53LMGhtnqvbQ7QNSSkyupump",
+            );
+            const uwuData = await uwuRes.json();
+            if (uwuData?.pairs?.length > 0) {
+                const fetchedMc =
+                    uwuData.pairs[0].fdv || uwuData.pairs[0].marketCap;
+                if (fetchedMc) {
+                    currentUwUMc = fetchedMc;
+                    if (!isHovering) targetMarketCap = currentUwUMc;
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to fetch UwU MC", e);
+        }
+
+        // 2. Fetch major assets from CoinGecko
+        try {
+            const cgRes = await fetch(
+                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,dogecoin,pepe&vs_currencies=usd&include_market_cap=true",
+            );
+            const cgData = await cgRes.json();
+
+            milestones = milestones.map((m) => {
+                let liveMc = null;
+                if (m.id === "btc" && cgData.bitcoin)
+                    liveMc = cgData.bitcoin.usd_market_cap;
+                if (m.id === "eth" && cgData.ethereum)
+                    liveMc = cgData.ethereum.usd_market_cap;
+                if (m.id === "sol" && cgData.solana)
+                    liveMc = cgData.solana.usd_market_cap;
+                if (m.id === "doge" && cgData.dogecoin)
+                    liveMc = cgData.dogecoin.usd_market_cap;
+                if (m.id === "pepe" && cgData.pepe)
+                    liveMc = cgData.pepe.usd_market_cap;
+
+                if (liveMc) m.mc = liveMc;
+                return m;
+            });
+        } catch (e) {
+            console.warn("Failed to fetch CoinGecko Data", e);
+        }
+
+        // Ensure nodes align correctly after async data loads
+        await tick();
         setTimeout(updateNodeOffsets, 150);
+
         window.addEventListener("resize", updateNodeOffsets);
         return () => window.removeEventListener("resize", updateNodeOffsets);
     });
 </script>
 
 <div class="roadmap-app app-container">
+    <!-- MASSIVELY IMPACTFUL, JITTER-FREE HEADER -->
     <div class="win98-menubar sentence-header">
-        <span class="sentence-text">
-            If I invest $<input
-                id="invest-amount"
-                type="number"
-                class="inline-input"
-                bind:value={initialInvestment}
-                min="1"
-            />, it becomes
+        <span class="text-part">If you invest $</span>
+        <input
+            id="invest-amount"
+            type="number"
+            class="inline-input"
+            bind:value={initialInvestment}
+            min="1"
+        />
+        <span class="text-part">now, it becomes</span>
+
+        <!-- Big Number Box (Fixed min-width prevents jumping) -->
+        <div class="massive-result-box">
             <span class="success-text">{formatCurrency(currentValue)}</span>
-            at <span class="mc-value">{formatNumber(targetMarketCap)}</span> Market
-            Cap.
-        </span>
+        </div>
+
+        <span class="text-part">at</span>
+        <div class="mcap-box">
+            <span class="mc-value">{formatNumber(targetMarketCap)}</span>
+        </div>
+        <span class="text-part">mcap.</span>
     </div>
 
     <div class="pc-view win-panel">
@@ -268,125 +332,113 @@
                 height="100%"
                 style="position: absolute; z-index: 1;"
             >
+                <!-- Grid Lines (Now subtle grey for white bg) -->
                 {#each [1e6, 1e9, 1e12] as lineMC}
                     <line
                         x1={getX(lineMC, svgWidth)}
                         y1="0"
                         x2={getX(lineMC, svgWidth)}
                         y2={svgHeight}
-                        stroke="#c0c0c0"
+                        stroke="#e0e0e0"
                         stroke-width="1"
                         stroke-dasharray="4"
                     />
                     <text
                         x={getX(lineMC, svgWidth) + 5}
                         y="15"
-                        fill="#ffffff"
+                        fill="#808080"
                         font-size="10"
                         font-family="monospace"
-                        style="text-shadow: 1px 1px 0px #000;"
                     >
                         {formatNumber(lineMC)}
                     </text>
                 {/each}
 
+                <!-- MAIN DIAGONAL LINE (Navy Blue) -->
                 <line
                     x1={getX(Math.pow(10, MIN_LOG), svgWidth)}
                     y1={getY(Math.pow(10, MIN_LOG), svgHeight)}
                     x2={getX(Math.pow(10, MAX_LOG), svgWidth)}
                     y2={getY(Math.pow(10, MAX_LOG), svgHeight)}
-                    stroke="#ffffff"
-                    stroke-width="5"
+                    stroke="#000080"
+                    stroke-width="4"
                 />
 
-                {#each milestones as milestone}
+                <!-- Dynamically Sorted Nodes -->
+                {#each orderedMilestones as milestone}
                     {@const cx = getX(milestone.mc, svgWidth)}
                     {@const cy = getY(milestone.mc, svgHeight)}
 
                     <circle
                         {cx}
                         {cy}
-                        r="6"
-                        fill={milestone.type === "asset"
-                            ? "#ffff00"
-                            : "#00ff00"}
+                        r={milestone.type === "current" ? 7 : 6}
+                        fill={milestone.type === "current"
+                            ? "#ff0000"
+                            : milestone.type === "asset"
+                              ? "#ffff00"
+                              : "#00ff00"}
                         stroke="#000000"
                         stroke-width="2"
+                        class={milestone.type === "current"
+                            ? "blinking-dot"
+                            : ""}
                     />
 
                     {#if activeMilestone?.id !== milestone.id}
+                        <!-- Offset current label slightly differently -->
                         <text
-                            x={cx}
-                            y={cy - 14}
-                            fill="#ffffff"
-                            font-size="11"
+                            x={milestone.type === "current" ? cx + 14 : cx}
+                            y={milestone.type === "current" ? cy + 4 : cy - 14}
+                            fill={milestone.type === "current"
+                                ? "#ff0000"
+                                : "#000000"}
+                            font-size={milestone.type === "current"
+                                ? "12"
+                                : "11"}
                             font-weight="bold"
                             font-family="monospace"
-                            text-anchor="middle"
-                            style="text-shadow: 1px 1px 0px #000;"
+                            text-anchor={milestone.type === "current"
+                                ? "start"
+                                : "middle"}
                         >
                             {milestone.name}
                         </text>
                     {/if}
                 {/each}
 
-                <circle
-                    cx={getX(CURRENT_UWU_MC, svgWidth)}
-                    cy={getY(CURRENT_UWU_MC, svgHeight)}
-                    r="7"
-                    fill="#ff0000"
-                    class="blinking-dot"
-                />
-                <text
-                    x={getX(CURRENT_UWU_MC, svgWidth) + 14}
-                    y={getY(CURRENT_UWU_MC, svgHeight) + 4}
-                    fill="#ff0000"
-                    font-size="12"
-                    font-weight="bold"
-                    font-family="monospace"
-                    style="text-shadow: 1px 1px 0px #000;"
-                >
-                    YOU ARE HERE
-                </text>
-
+                <!-- ORTHOGONAL CONNECTING LINE (Bottom Right panel) -->
                 {#if activeMilestone && isHovering && mouseX !== null}
                     {@const targetX = getX(activeMilestone.mc, svgWidth)}
                     {@const targetY = getY(activeMilestone.mc, svgHeight)}
-
                     {@const panelLeftX = svgWidth - 175}
                     {@const panelTopY = svgHeight - 165}
 
                     <path
                         d="M {panelLeftX} {panelTopY} L {targetX} {panelTopY} L {targetX} {targetY}"
-                        stroke="#ffffcc"
+                        stroke="#000080"
                         stroke-width="2"
                         fill="none"
                         stroke-dasharray="4"
                     />
                 {/if}
 
+                <!-- HORIZONTAL TRACKING CROSSHAIR -->
                 {#if isHovering && mouseX !== null}
                     {@const curveX = mouseX}
                     {@const curveY = getY(targetMarketCap, svgHeight)}
 
+                    <!-- Horizontal line ONLY (Vertical removed) -->
                     <line
                         x1="0"
                         y1={curveY}
                         x2={curveX}
                         y2={curveY}
-                        stroke="#ffffff"
-                        stroke-width="1"
-                        stroke-dasharray="2"
+                        stroke="#000000"
+                        stroke-width="2"
+                        stroke-dasharray="4"
                     />
-                    <line
-                        x1={curveX}
-                        y1={curveY}
-                        x2={curveX}
-                        y2={svgHeight}
-                        stroke="#ffffff"
-                        stroke-width="1"
-                        stroke-dasharray="2"
-                    />
+
                     <circle
                         cx={curveX}
                         cy={curveY}
@@ -396,6 +448,7 @@
                         stroke-width="2"
                     />
 
+                    <!-- Y-Axis Value -->
                     <rect
                         x="0"
                         y={curveY - 12}
@@ -410,11 +463,13 @@
                         font-size="11"
                         font-weight="bold"
                         font-family="monospace"
-                        >{formatNumber(targetMarketCap)}</text
                     >
+                        {formatNumber(targetMarketCap)}
+                    </text>
                 {/if}
             </svg>
 
+            <!-- FIXED BOTTOM-RIGHT TOOLTIP PANEL -->
             {#if activeMilestone && isHovering && mouseX !== null}
                 <div class="fixed-panel win-panel" in:fade={{ duration: 100 }}>
                     <div class="tooltip-header">
@@ -423,9 +478,11 @@
                         )})
                     </div>
                     <div class="tooltip-image-box win-inset">
+                        <!-- FIX: Added onload handler to clear out stuck display:none from aborted fetch requests -->
                         <img
                             src={`/images/roadmap/${activeMilestone.id}.png`}
                             alt={activeMilestone.name}
+                            onload={(e) => (e.currentTarget.style.display = "")}
                             onerror={(e) =>
                                 (e.currentTarget.style.display = "none")}
                         />
@@ -439,6 +496,7 @@
         </div>
     </div>
 
+    <!-- MOBILE TIMELINE VIEW -->
     <div
         class="mobile-view win-inset"
         bind:this={mobileScrollContainer}
@@ -480,9 +538,13 @@
 
                                 {#if milestone.type !== "current"}
                                     <div class="mobile-image-box win-inset">
+                                        <!-- FIX: Added onload handler here as well for consistency -->
                                         <img
                                             src={`/images/roadmap/${milestone.id}.png`}
                                             alt={milestone.name}
+                                            onload={(e) =>
+                                                (e.currentTarget.style.display =
+                                                    "")}
                                             onerror={(e) =>
                                                 (e.currentTarget.style.display =
                                                     "none")}
@@ -524,25 +586,26 @@
         background: #ffffff;
     }
 
+    /* === JITTER-FREE IMPACT HEADER === */
     .sentence-header {
-        background: #000080;
+        background: #000080; /* Classic Navy */
         color: #ffffff;
-        padding: 12px;
+        padding: 16px 12px;
         text-align: center;
         border-bottom: 2px solid #ffffff;
         display: flex;
+        flex-wrap: wrap;
         justify-content: center;
-        align-items: center;
+        align-items: baseline;
+        gap: 8px;
     }
 
-    .sentence-text {
+    .text-part {
         font-size: 16px;
-        line-height: 1.8;
     }
 
     .inline-input {
-        width: 75px;
-        display: inline-block;
+        width: 65px;
         background: #ffffff;
         color: #000000;
         border: 2px solid;
@@ -552,23 +615,44 @@
         font-size: 16px;
         font-weight: bold;
         text-align: center;
-        margin: 0 6px;
         outline: none;
+        transform: translateY(2px);
+    }
+
+    .massive-result-box {
+        display: inline-block;
+        min-width: 200px; /* Lock width to stop layout shifting */
+        background: #000000;
+        border: 2px inset #dfdfdf;
+        padding: 4px 12px;
+        text-align: center;
+        transform: translateY(4px);
     }
 
     .success-text {
-        color: #00ff00;
+        color: #00ff00; /* Terminal Green */
         font-weight: bold;
         font-family: monospace;
-        font-size: 18px;
+        font-size: 26px; /* Massive impact font */
+        font-variant-numeric: tabular-nums; /* Critical: Stops digit-width jitter */
+        letter-spacing: 1px;
     }
+
+    .mcap-box {
+        display: inline-block;
+        min-width: 70px; /* Lock width */
+        text-align: center;
+    }
+
     .mc-value {
         color: #ffffcc;
         font-weight: bold;
         font-family: monospace;
-        font-size: 18px;
+        font-size: 20px;
+        font-variant-numeric: tabular-nums;
     }
 
+    /* === PC GRAPH === */
     .pc-view {
         flex: 1;
         display: flex;
@@ -576,13 +660,12 @@
         min-height: 0;
     }
 
-    /* NEW: Dark Grey Background for high contrast */
     .graph-container {
         flex: 1;
         position: relative;
         overflow: hidden;
         cursor: crosshair;
-        background: #808080;
+        background: #ffffff; /* Restored to White Canvas */
     }
 
     .blinking-dot {
@@ -634,9 +717,10 @@
     .mobile-image-box img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
         position: absolute;
         z-index: 2;
+        background: #c0c0c0;
     }
     .placeholder-text {
         color: #808080;
@@ -660,14 +744,16 @@
             position: sticky;
             top: 0;
             z-index: 50;
-            padding: 16px 8px;
+            padding: 12px 8px;
+            flex-direction: column; /* Stack vertically on mobile */
+            align-items: center;
         }
 
         .mobile-view {
             display: block;
             flex: 1;
             overflow-y: auto;
-            background: #808080; /* Match PC Dark Grey */
+            background: #ffffff; /* White Canvas on mobile too */
             position: relative;
         }
 
@@ -704,18 +790,18 @@
             top: 0;
             bottom: 0;
             left: 0;
-            width: 6px;
-            background: #404040;
-            border-right: 1px solid #ffffff;
-            border-bottom: 1px solid #ffffff;
+            width: 4px;
+            background: #c0c0c0;
+            border-right: 1px solid #808080;
+            border-bottom: 1px solid #808080;
         }
 
         .timeline-spine-fill {
             position: absolute;
             top: 0;
             left: 0;
-            width: 6px;
-            background: #ffffff; /* Thick White Spine to match PC */
+            width: 4px;
+            background: #000080; /* Navy fill to match PC line */
         }
 
         .timeline-nodes-list {
@@ -731,18 +817,17 @@
             opacity: 0.6;
             transition: opacity 0.3s;
         }
-
         .timeline-node.passed {
             opacity: 1;
         }
 
         .node-marker {
             position: absolute;
-            left: -31px;
+            left: -30px;
             top: 50%;
             transform: translateY(-50%);
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             background: #a0a0a0;
             border: 2px solid #000000;
             border-radius: 50%;
