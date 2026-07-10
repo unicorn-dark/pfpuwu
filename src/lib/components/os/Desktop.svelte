@@ -11,6 +11,7 @@
     import VideoPlayerApp from "./VideoPlayerApp.svelte";
     import MemeExplorerApp from "./MemeExplorerApp.svelte";
     import Roadmap from "./Roadmap.svelte";
+    import FlappyHectacorn from "./FlappyHectacorn.svelte";
 
     const desktopVideos = [
         {
@@ -36,6 +37,9 @@
     };
     const launchRoadmap = () => {
         openWindow("roadmap", "UwU Roadmap", 850, 700);
+    };
+    const launchFlappy = () => {
+        openWindow("flappy", "Flappy Hectocorn", 850, 700);
     };
     const launchBlog = () => {
         openWindow(
@@ -129,6 +133,7 @@
                 <div class="icon-placeholder">🗺️</div>
                 <span>Roadmap</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={() =>
@@ -139,7 +144,18 @@
                 <div class="icon-placeholder">🦄</div>
                 <span>Meme Explorer</span>
             </button>
-
+            <button
+                class="shortcut"
+                onclick={launchFlappy}
+                ondblclick={launchFlappy}
+            >
+                <img
+                    src="/images/hectacorn.jpg"
+                    alt="Pump It Icon"
+                    class="custom-icon"
+                />
+                <span>Pump It</span>
+            </button>
             {#each desktopVideos as vid}
                 <button
                     class="shortcut"
@@ -193,6 +209,13 @@
                     {:else if win.id === "roadmap"}
                         <div class="app-content">
                             <Roadmap />
+                        </div>
+                    {:else if win.id === "flappy"}
+                        <div
+                            class="app-content"
+                            style="padding: 0; background: #000;"
+                        >
+                            <FlappyHectacorn />
                         </div>
                     {:else if win.id.startsWith("vid-")}
                         {@const videoData = desktopVideos.find(
@@ -308,7 +331,14 @@
         background: #c0c0c0;
         display: block;
     }
-
+    .custom-icon {
+        width: 36px;
+        height: 36px;
+        margin-bottom: 5px;
+        object-fit: cover;
+        border-radius: 8px; /* Softens the square edges slightly */
+        box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Optional: gives it a slight 3D pop */
+    }
     /* Remove the sidebar padding on mobile so apps fill the screen */
     @media (max-width: 768px) {
         .desktop {

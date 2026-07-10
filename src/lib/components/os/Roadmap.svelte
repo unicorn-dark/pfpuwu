@@ -86,7 +86,7 @@
         },
         {
             id: "hectacorn",
-            name: "Hectacorn",
+            name: "Hectocorn",
             mc: 100_000_000_000,
             type: "tier",
             desc: "100 Billion milestone.",
