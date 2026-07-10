@@ -15,11 +15,11 @@
     // Audio Context
     let audioCtx: AudioContext | null = null;
 
-    // --- REBALANCED PHYSICS ENGINE ---
+    // Physics Engine
     let birdY = 0;
     let birdVelocity = 0;
-    const gravity = 0.35; // Decreased from 0.5 (much softer drop)
-    const jumpStrength = -6.5; // Decreased from -8 (more controlled pump)
+    const gravity = 0.35;
+    const jumpStrength = -6.5;
     const birdSize = 30;
 
     let pipes: Array<{
@@ -30,8 +30,8 @@
         type: "green" | "red";
     }> = [];
     const pipeWidth = 60;
-    const pipeGap = 190; // Widened from 160 (easier to navigate)
-    const pipeSpeed = 3.0; // Slowed down from 3.5
+    const pipeGap = 190;
+    const pipeSpeed = 3.0;
 
     let score = 0;
     let marketCap = $state(100_000);
@@ -49,13 +49,18 @@
         return Math.floor(100_000 * Math.pow(1.7, pipesPassed));
     }
 
+    // --- MOBILE AUDIO FIX ---
     function initAudio() {
         if (!audioCtx) {
+            // Webkit fallback is required for iOS Safari
             audioCtx = new (
                 window.AudioContext || (window as any).webkitAudioContext
             )();
         }
-        if (audioCtx.state === "suspended") audioCtx.resume();
+        // Apple requires resuming the context directly inside the tap event
+        if (audioCtx.state === "suspended") {
+            audioCtx.resume();
+        }
     }
 
     function playSound(type: "flap" | "score" | "crash") {
@@ -67,11 +72,12 @@
 
         const now = audioCtx.currentTime;
 
+        // Cranked up the gain (volume) so it's audible on mobile speakers
         if (type === "flap") {
             osc.type = "square";
             osc.frequency.setValueAtTime(150, now);
             osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
-            gainNode.gain.setValueAtTime(0.05, now);
+            gainNode.gain.setValueAtTime(0.1, now); // Increased from 0.05
             gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
             osc.start(now);
             osc.stop(now + 0.1);
@@ -79,7 +85,7 @@
             osc.type = "sine";
             osc.frequency.setValueAtTime(1000, now);
             osc.frequency.setValueAtTime(1500, now + 0.05);
-            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.setValueAtTime(0.2, now); // Increased from 0.1
             gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
             osc.start(now);
             osc.stop(now + 0.2);
@@ -87,7 +93,7 @@
             osc.type = "sawtooth";
             osc.frequency.setValueAtTime(150, now);
             osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
-            gainNode.gain.setValueAtTime(0.2, now);
+            gainNode.gain.setValueAtTime(0.4, now); // Increased from 0.2
             gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
             osc.start(now);
             osc.stop(now + 0.3);
@@ -102,11 +108,9 @@
         const sCtx = shareCanvas.getContext("2d");
         if (!sCtx) return;
 
-        // Background
         sCtx.fillStyle = "#00FFFF";
         sCtx.fillRect(0, 0, 1080, 1080);
 
-        // Grid
         sCtx.strokeStyle = "rgba(255, 255, 255, 0.4)";
         sCtx.lineWidth = 4;
         for (let i = 0; i < 1080; i += 60) {
@@ -120,14 +124,36 @@
             sCtx.stroke();
         }
 
-        // Draw Hectocorn
+        for (let i = 0; i < 20; i++) {
+            const isGreen = Math.random() > 0.5;
+            sCtx.fillStyle = isGreen
+                ? "rgba(0, 255, 0, 0.3)"
+                : "rgba(255, 0, 0, 0.3)";
+            sCtx.strokeStyle = "rgba(0, 0, 0, 0.3)";
+            sCtx.lineWidth = 6;
+
+            const cx = Math.random() * 1080;
+            const cy = Math.random() * 1080;
+            const cWidth = 40 + Math.random() * 60;
+            const cHeight = 80 + Math.random() * 200;
+            const wickHeight = cHeight + 40 + Math.random() * 100;
+
+            sCtx.fillRect(
+                cx + cWidth / 2 - 4,
+                cy - (wickHeight - cHeight) / 2,
+                8,
+                wickHeight,
+            );
+            sCtx.fillRect(cx, cy, cWidth, cHeight);
+            sCtx.strokeRect(cx, cy, cWidth, cHeight);
+        }
+
         if (hectocornImg.complete && hectocornImg.naturalHeight !== 0) {
             sCtx.drawImage(hectocornImg, 540 - 250, 120, 500, 500);
         }
 
         sCtx.textAlign = "center";
 
-        // Title
         sCtx.font = 'bold 80px "Courier New", monospace';
         sCtx.fillStyle = "#FFFF00";
         sCtx.shadowColor = "#000";
@@ -135,19 +161,16 @@
         sCtx.shadowOffsetY = 8;
         sCtx.fillText("I PUMPED UWU TO", 540, 700);
 
-        // Score (Massive Text)
         sCtx.font = 'bold 160px "Courier New", monospace';
         sCtx.fillStyle = "#00FF00";
         sCtx.fillText(formatMC(marketCap), 540, 860);
 
-        // Footer CTA
         sCtx.font = 'bold 50px "Courier New", monospace';
         sCtx.fillStyle = "#FFFFFF";
         sCtx.shadowOffsetX = 4;
         sCtx.shadowOffsetY = 4;
         sCtx.fillText("Can you beat me? Play at uwu.meme", 540, 1000);
 
-        // Download
         const link = document.createElement("a");
         link.download = `UwU-Hectocorn-Run.png`;
         link.href = shareCanvas.toDataURL("image/png");
@@ -183,8 +206,10 @@
     }
 
     function flap() {
+        // Must be called on every tap to satisfy Apple's strict audio rules
+        initAudio();
+
         if (gameState === "START" || gameState === "GAMEOVER") {
-            initAudio();
             resetGame();
             return;
         }
@@ -207,11 +232,9 @@
     function gameLoop() {
         if (gameState !== "PLAYING" || !ctx) return;
 
-        // Clear Canvas
         ctx.fillStyle = "#00FFFF";
         ctx.fillRect(0, 0, width, height);
 
-        // Grid Background
         ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
         ctx.lineWidth = 1;
         for (let i = 0; i < width; i += 40) {
@@ -227,9 +250,7 @@
             ctx.stroke();
         }
 
-        // Logic branching based on whether the player has tapped yet
         if (hasStarted) {
-            // Active Game Logic
             birdVelocity += gravity;
             birdY += birdVelocity;
 
@@ -287,11 +308,9 @@
                 spawnPipe(width);
             }
         } else {
-            // Hovering logic before the first tap
             birdY = height / 2 + Math.sin(Date.now() / 150) * 10;
         }
 
-        // Draw Bird (Hectocorn)
         ctx.save();
         ctx.translate(width / 3, birdY);
         const rotation = hasStarted
@@ -327,8 +346,9 @@
         }
     }
 
+    // MOBILE DOUBLE-JUMP FIX: Unified pointerdown handles both touch and mouse safely
     function handleInput(e: Event) {
-        if (e.type === "touchstart") e.preventDefault();
+        e.preventDefault();
         flap();
     }
 
@@ -360,8 +380,7 @@
     class="game-wrapper app-container"
     bind:clientWidth={width}
     bind:clientHeight={height}
-    onmousedown={handleInput}
-    ontouchstart={handleInput}
+    onpointerdown={handleInput}
     role="button"
     tabindex="0"
 >
@@ -396,11 +415,7 @@
             </div>
             <button
                 class="win-btn blink"
-                onmousedown={(e) => {
-                    e.stopPropagation();
-                    flap();
-                }}
-                ontouchstart={(e) => {
+                onpointerdown={(e) => {
                     e.stopPropagation();
                     flap();
                 }}
@@ -437,11 +452,7 @@
             <div class="button-group mt-10">
                 <button
                     class="win-btn share-btn"
-                    onmousedown={(e) => {
-                        e.stopPropagation();
-                        generateShareImage();
-                    }}
-                    ontouchstart={(e) => {
+                    onpointerdown={(e) => {
                         e.stopPropagation();
                         generateShareImage();
                     }}
@@ -451,11 +462,7 @@
 
                 <button
                     class="win-btn blink"
-                    onmousedown={(e) => {
-                        e.stopPropagation();
-                        flap();
-                    }}
-                    ontouchstart={(e) => {
+                    onpointerdown={(e) => {
                         e.stopPropagation();
                         flap();
                     }}
@@ -641,7 +648,7 @@
     }
 
     .share-btn {
-        background: #1da1f2; /* X/Twitter Blue */
+        background: #1da1f2;
         color: white;
         border-color: #a0d8f8 #005080 #005080 #a0d8f8;
     }
