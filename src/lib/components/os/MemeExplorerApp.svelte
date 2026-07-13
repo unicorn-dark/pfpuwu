@@ -401,6 +401,56 @@
             console.error("Failed to save tags");
         }
     }
+    async function deleteMeme() {
+        const authed = await authenticateEditor();
+        if (!authed || !selectedMeme) return;
+
+        if (
+            !confirm(
+                "⚠️ WARNING: This will permanently delete this media from the Database and the Cloudflare R2 Bucket. Are you absolutely sure?",
+            )
+        ) {
+            return;
+        }
+
+        const idToDelete = selectedMeme.id;
+        const btn = document.querySelector(".admin-delete-btn");
+        if (btn) btn.innerHTML = "⏳";
+
+        try {
+            const res = await fetch("/api/memes/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ meme_id: idToDelete }),
+            });
+
+            // Handle Ghost Sessions (401 Unauthorized)
+            if (res.status === 401) {
+                isEditorAuthenticated = false;
+                localStorage.removeItem("uwu_editor_authed");
+                alert(
+                    "Session expired or missing secure cookie. Please click delete again to log in.",
+                );
+                if (btn) btn.innerHTML = "🗑️";
+                return;
+            }
+
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Unknown error");
+            }
+
+            // Remove from local grid without needing a page refresh
+            memes = memes.filter((m) => m.id !== idToDelete);
+            selectedMeme = memes.length > 0 ? memes[0] : null;
+
+            if (filterType === "photo") photoCount--;
+            else videoCount--;
+        } catch (err: any) {
+            alert("Failed to delete: " + err.message);
+            if (btn) btn.innerHTML = "🗑️";
+        }
+    }
 
     async function deleteTag(index: number) {
         const authed = await authenticateEditor();
@@ -786,6 +836,13 @@
         >
             <div class="preview-display win-inset">
                 {#if selectedMeme}
+                    <button
+                        class="admin-delete-btn"
+                        title="Delete Meme (Admin Only)"
+                        onclick={deleteMeme}
+                    >
+                        🗑️
+                    </button>
                     <div class="media-wrapper">
                         {#if selectedMeme.type === "photo"}
                             <img
@@ -1415,6 +1472,33 @@
         padding: 1px 4px;
         width: 80px;
         outline: none;
+    }
+    /* Admin Dustbin Button */
+    .admin-delete-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 20;
+        background: #c0c0c0;
+        border: 2px solid;
+        border-color: #ffffff #000000 #000000 #ffffff;
+        cursor: pointer;
+        padding: 4px;
+        font-size: 16px;
+        opacity: 0.5;
+        transition:
+            opacity 0.2s,
+            background 0.2s;
+    }
+
+    .admin-delete-btn:hover {
+        opacity: 1;
+        background: #dfdfdf;
+    }
+
+    .admin-delete-btn:active {
+        border-color: #000000 #ffffff #ffffff #000000;
+        padding: 5px 3px 3px 5px; /* Creates the hardware 'pushed down' effect */
     }
 
     /* Mobile Overrides */
