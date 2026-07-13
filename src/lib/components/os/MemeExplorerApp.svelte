@@ -407,7 +407,7 @@
 
         if (
             !confirm(
-                "⚠️ WARNING: This will permanently delete this media from the Database and the Cloudflare R2 Bucket. Are you absolutely sure?",
+                "⚠️ WARNING: This will permanently delete this media from the Database. Are you absolutely sure?",
             )
         ) {
             return;
@@ -446,6 +446,9 @@
 
             if (filterType === "photo") photoCount--;
             else videoCount--;
+
+            // Fix: Reset the button back to the dustbin on SUCCESS
+            if (btn) btn.innerHTML = "🗑️";
         } catch (err: any) {
             alert("Failed to delete: " + err.message);
             if (btn) btn.innerHTML = "🗑️";
