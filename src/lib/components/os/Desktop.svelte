@@ -13,6 +13,7 @@
     import Roadmap from "./Roadmap.svelte";
     import FlappyHectacorn from "./FlappyHectacorn.svelte";
     import MemeCoinGuide from "./MemeCoinGuide.svelte";
+    import SoundManager from "./SoundManager.svelte";
 
     const desktopVideos = [
         {
@@ -130,6 +131,7 @@
 </script>
 
 <div class="desktop">
+    <SoundManager />
     <div class="workspace">
         <div class="shortcuts">
             <button

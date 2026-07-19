@@ -5,8 +5,8 @@
         openWindow,
         restoreWindow,
         focusWindow,
-        minimizeWindow,
     } from "$lib/stores/os";
+    import { soundEnabled } from "$lib/utils/audio"; // Import the audio store
 
     let startMenuOpen = $state(false);
     let time = $state("");
@@ -61,8 +61,6 @@
         if (win.isMinimized) {
             restoreWindow(win.id);
         } else {
-            // In a real OS, clicking an already focused app minimizes it.
-            // For now, we will just ensure it comes to the front.
             focusWindow(win.id);
         }
     };
@@ -94,7 +92,15 @@
         {/each}
     </div>
 
+    <!-- System Tray with Sound Toggle -->
     <div class="system-tray">
+        <button
+            class="sound-toggle-btn"
+            onclick={() => $soundEnabled = !$soundEnabled}
+            title={$soundEnabled ? "Mute system sounds" : "Enable system sounds"}
+        >
+            {$soundEnabled ? "🔊" : "🔇"}
+        </button>
         <span class="clock">{time}</span>
     </div>
 
@@ -120,16 +126,13 @@
         width: 16px;
         height: 16px;
         margin-right: 2px;
-        /* Forces the browser to keep the edges sharp instead of blurring them */
         image-rendering: pixelated;
         image-rendering: crisp-edges;
     }
     .taskbar {
         position: fixed;
-        /* 1. Tell the browser to lift the taskbar above the gesture line */
         bottom: env(safe-area-inset-bottom, 0px);
         left: 0;
-        /* 2. Use 100% instead of 100vw to prevent weird mobile scrollbar offsets */
         width: 100%;
         height: 35px;
         background: #c0c0c0;
@@ -138,7 +141,6 @@
         align-items: center;
         padding: 2px;
         box-sizing: border-box;
-        /* 3. Add an extra 9 just to absolutely guarantee nothing covers it */
         z-index: 99999;
     }
 
@@ -161,7 +163,7 @@
     .start-button:active {
         border-color: #000000 #ffffff #ffffff #000000;
         background: #e0e0e0;
-        padding: 5px 7px 3px 9px; /* Push-in effect */
+        padding: 5px 7px 3px 9px;
     }
 
     .windows-logo {
@@ -194,7 +196,6 @@
         text-align: left;
     }
 
-    /* Pushed-in state for currently open/focused windows */
     .taskbar-app-btn.active {
         border-color: #000000 #ffffff #ffffff #000000;
         background: #d3d3d3;
@@ -207,15 +208,32 @@
         );
     }
 
-    /* System Tray */
+    /* System Tray & Sound Toggle */
     .system-tray {
-        padding: 4px 10px;
+        padding: 4px 8px;
         border: 2px solid;
-        border-color: #808080 #ffffff #ffffff #808080; /* Inset border */
+        border-color: #808080 #ffffff #ffffff #808080;
         margin-left: 5px;
         display: flex;
         align-items: center;
+        gap: 6px; /* Spacing between sound icon and clock */
         background: #c0c0c0;
+    }
+
+    .sound-toggle-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 1.1rem; /* Slightly larger to match clock text visually */
+        padding: 0 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        outline: none;
+    }
+
+    .sound-toggle-btn:active {
+        transform: translate(1px, 1px); /* Tactile click effect */
     }
 
     .clock {
@@ -294,9 +312,6 @@
     }
 
     /* Mobile overrides for Taskbar/Start Menu */
-    /* =========================================
-       MOBILE OVERRIDES (Windows CE / Tile UI)
-       ========================================= */
     @media (max-width: 768px) {
         .taskbar-apps {
             display: none;
@@ -304,7 +319,7 @@
 
         .start-menu {
             flex-direction: column;
-            width: 100%; /* Changed from 100vw to prevent horizontal bleed */
+            width: 100%;
             height: calc(100vh - 35px);
             height: calc(100dvh - 35px);
             bottom: 35px;
@@ -313,7 +328,7 @@
             border: none;
             box-shadow: none;
             overflow-y: auto;
-            box-sizing: border-box; /* Ensures padding stays inside the screen */
+            box-sizing: border-box;
         }
 
         .start-menu-sidebar {
@@ -342,12 +357,9 @@
             color: #000;
             padding: 4px;
             box-sizing: border-box;
-
-            /* THE MAGIC FIX: Forces the button to shrink and traps long text inside */
             min-width: 0;
             overflow: hidden;
-
-            font-size: 0.75rem; /* Scaled down slightly so text fits */
+            font-size: 0.75rem;
             line-height: 1.1;
             text-align: center;
         }
@@ -363,7 +375,7 @@
         }
 
         .start-item .icon {
-            font-size: 2rem; /* Scaled down so it doesn't push the text out */
+            font-size: 2rem;
             margin-bottom: 6px;
         }
     }
