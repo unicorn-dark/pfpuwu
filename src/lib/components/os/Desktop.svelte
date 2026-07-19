@@ -12,6 +12,7 @@
     import MemeExplorerApp from "./MemeExplorerApp.svelte";
     import Roadmap from "./Roadmap.svelte";
     import FlappyHectacorn from "./FlappyHectacorn.svelte";
+    import MemeCoinGuide from "./MemeCoinGuide.svelte";
 
     const desktopVideos = [
         {
@@ -22,6 +23,7 @@
             height: 1280,
         },
     ];
+
     const launchMemeExpApp = () => {
         openWindow("meme-explorer", "Meme Explorer", 900, 600);
     };
@@ -41,6 +43,9 @@
     const launchFlappy = () => {
         openWindow("flappy", "Flappy Hectocorn", 850, 700);
     };
+    const launchMemeGuide = () => {
+        openWindow("memeGuide", "Memecoin Guide", 850, 700);
+    };
     const launchBlog = () => {
         openWindow(
             "privateers-blog",
@@ -52,6 +57,7 @@
     const launchNotepad = () => {
         openWindow("notepad", "untitled - Notepad", 500, 400);
     };
+
     const launchVideo = (vid: any) => {
         // 1. Determine the safe available space on the user's screen
         const isDesktop = window.innerWidth > 768;
@@ -76,9 +82,50 @@
         // 4. Open the window with the newly scaled size (plus the window chrome padding)
         openWindow(vid.id, vid.title, finalWidth + 12, finalHeight + 40);
     };
+
+    // Client-side Application Router
     onMount(() => {
-        launchPfpApp();
-        launchMemeExpApp();
+        // Grab the path, normalize to lowercase, and strip any trailing slash
+        let path = window.location.pathname.toLowerCase();
+        if (path.length > 1 && path.endsWith('/')) {
+            path = path.slice(0, -1);
+        }
+
+        switch (path) {
+            case '/memeguide':
+                launchMemeGuide();
+                break;
+            case '/pfp':
+                launchPfpApp();
+                break;
+            case '/explorer':
+                launchMemeExpApp();
+                break;
+            case '/roadmap':
+                launchRoadmap();
+                break;
+            case '/blog':
+                launchBlog();
+                break;
+            case '/pumpit':
+                launchFlappy();
+                break;
+            case '/paint':
+                launchJSPaint();
+                break;
+            case '/minesweeper':
+                launchMinesweeper();
+                break;
+            case '/notepad':
+                launchNotepad();
+                break;
+            case '/':
+            default:
+                // Default root logic or unmapped routes
+                launchPfpApp();
+                launchMemeExpApp();
+                break;
+        }
     });
 </script>
 
@@ -93,6 +140,7 @@
                 <div class="icon-placeholder">🎨</div>
                 <span>PFP Maker</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchJSPaint}
@@ -101,6 +149,7 @@
                 <div class="icon-placeholder">🖌️</div>
                 <span>JS Paint</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchMinesweeper}
@@ -109,6 +158,7 @@
                 <div class="icon-placeholder">💣</div>
                 <span>Minesweeper</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchBlog}
@@ -117,6 +167,7 @@
                 <div class="icon-placeholder">🌐</div>
                 <span>Privateer Blog</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchNotepad}
@@ -125,6 +176,7 @@
                 <div class="icon-placeholder">📝</div>
                 <span>Notepad</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchRoadmap}
@@ -136,14 +188,13 @@
 
             <button
                 class="shortcut"
-                onclick={() =>
-                    openWindow("meme-explorer", "Meme Explorer", 960, 690)}
-                ondblclick={() =>
-                    openWindow("meme-explorer", "Meme Explorer", 960, 690)}
+                onclick={launchMemeExpApp}
+                ondblclick={launchMemeExpApp}
             >
                 <div class="icon-placeholder">🦄</div>
                 <span>Meme Explorer</span>
             </button>
+
             <button
                 class="shortcut"
                 onclick={launchFlappy}
@@ -156,6 +207,16 @@
                 />
                 <span>Pump It</span>
             </button>
+
+            <button
+                class="shortcut"
+                onclick={launchMemeGuide}
+                ondblclick={launchMemeGuide}
+            >
+                <div class="icon-placeholder">📜</div>
+                <span>Meme Guide</span>
+            </button>
+
             {#each desktopVideos as vid}
                 <button
                     class="shortcut"
@@ -217,6 +278,10 @@
                         >
                             <FlappyHectacorn />
                         </div>
+                    {:else if win.id === "memeGuide"}
+                        <div class="app-content">
+                            <MemeCoinGuide />
+                        </div>
                     {:else if win.id.startsWith("vid-")}
                         {@const videoData = desktopVideos.find(
                             (v) => v.id === win.id,
@@ -242,7 +307,7 @@
     .desktop {
         width: 100%;
         height: 100%;
-        height: 100dvh; /* Dynamic height for modern browsers */
+        height: 100dvh;
         background-color: #008080;
         position: relative;
         overflow: hidden;
@@ -258,28 +323,12 @@
         position: absolute;
         top: 0;
         left: 0;
-        bottom: 35px; /* Stops exactly at the Taskbar */
-
-        /* FIX: Listen to the CSS variable controlled by the sidebar button */
+        bottom: 35px;
         right: var(--sidebar-width, 320px);
-
-        overflow: hidden; /* Prevents windows from dragging outside */
-
-        /* Add the transition so the workspace resizes smoothly alongside the sidebar */
+        overflow: hidden;
         transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .shortcuts {
-        height: 100%; /* 1. Tells the container exactly where the bottom is */
-        box-sizing: border-box; /* Ensures padding doesn't push it off-screen */
-        padding: 20px;
-        display: flex;
-        flex-direction: column; /* Stack top-to-bottom */
-        flex-wrap: wrap; /* 2. Force it to wrap into a new column when it hits the bottom! */
-        align-content: flex-start; /* 3. Pack the new columns to the left side */
-        gap: 20px 30px; /* 20px vertical gap, 30px horizontal gap between columns */
-    }
 
-    /* On mobile, remove the right boundary since the sidebar is hidden */
     @media (max-width: 768px) {
         .workspace {
             right: 0px;
@@ -287,10 +336,14 @@
     }
 
     .shortcuts {
+        height: 100%;
+        box-sizing: border-box;
         padding: 20px;
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 20px 30px;
     }
 
     .shortcut {
@@ -331,15 +384,16 @@
         background: #c0c0c0;
         display: block;
     }
+
     .custom-icon {
         width: 36px;
         height: 36px;
         margin-bottom: 5px;
         object-fit: cover;
-        border-radius: 8px; /* Softens the square edges slightly */
-        box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); /* Optional: gives it a slight 3D pop */
+        border-radius: 8px;
+        box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
     }
-    /* Remove the sidebar padding on mobile so apps fill the screen */
+
     @media (max-width: 768px) {
         .desktop {
             padding-right: 0px;
