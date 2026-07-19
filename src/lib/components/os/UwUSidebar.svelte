@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
 
     const CA = "UWUy7J86LUiBv5SjAUZ53LMGhtnqvbQ7QNSSkyupump";
 
@@ -19,14 +19,11 @@
     function toggleSidebar() {
         isSidebarOpen = !isSidebarOpen;
 
-        // Update global CSS variable for your desktop/OS layout logic
         document.body.style.setProperty(
             "--sidebar-width",
             isSidebarOpen ? "320px" : "0px",
         );
 
-        // Fire resize events at 60fps during the CSS transition
-        // This ensures full-screen apps seamlessly expand/shrink with the sidebar
         let start = Date.now();
         if (resizeInterval) clearInterval(resizeInterval);
         resizeInterval = setInterval(() => {
@@ -39,100 +36,17 @@
     let audioRef: any;
     let isPlaying = $state(false);
     let currentTrackIndex = $state(0);
+    let isLoadingMusic = $state(true);
+    let playlist: any[] = $state([]);
 
-    const playlist = [
-        // --- RAVE / ELECTRONIC / SYNTHWAVE (Royalty Free Streams) ---
-        {
-            title: "Synthwave Test 1",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        },
-        {
-            title: "Cyberpunk City",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-        },
-        {
-            title: "Neon Nights",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-        },
-        {
-            title: "Trance State",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
-        },
-        {
-            title: "Acid Bassline",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
-        },
-        {
-            title: "Retro Future",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3",
-        },
-        {
-            title: "Warehouse Rave 1998",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
-        },
-        {
-            title: "Digital Horizon",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
-        },
-        {
-            title: "Matrix Upload",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3",
-        },
-        {
-            title: "Vaporwave Mall",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
-        },
-        {
-            title: "Eurodance Anthem",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3",
-        },
-        {
-            title: "BPM 160",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3",
-        },
-        {
-            title: "Laser Grid",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3",
-        },
-        {
-            title: "Hacker's Den",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3",
-        },
-        {
-            title: "Dial-up Connection",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3",
-        },
-        {
-            title: "System Override",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-16.mp3",
-        },
-        {
-            title: "Terminal Velocity",
-            artist: "SoundHelix",
-            url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-17.mp3",
-        },
-    ];
+    // Seeker State
+    let currentTime = $state(0);
+    let duration = $state(0);
 
-    let currentTrack = $derived(playlist[currentTrackIndex]);
+    let currentTrack = $derived(playlist.length > 0 ? playlist[currentTrackIndex] : null);
 
     function togglePlay() {
-        if (!audioRef) return;
+        if (!audioRef || playlist.length === 0) return;
         if (isPlaying) {
             audioRef.pause();
         } else {
@@ -141,31 +55,74 @@
         isPlaying = !isPlaying;
     }
 
-    function playTrack(index: number) {
-        currentTrackIndex = index;
-        if (audioRef) {
-            audioRef.src = playlist[currentTrackIndex].url;
-            audioRef.play();
-            isPlaying = true;
+    async function playTrack(index: number) {
+            if (playlist.length === 0) return;
+
+            // 1. Tell Svelte to change the track
+            currentTrackIndex = index;
+
+            // 2. Wait for Svelte to update the DOM (the <audio> tag's src)
+            await tick();
+
+            // 3. Now it is safe to hit play!
+            if (audioRef) {
+                audioRef.play().catch((err: any) => console.error("Playback prevented:", err));
+                isPlaying = true;
+            }
         }
-    }
 
     function nextTrack() {
+        if (playlist.length === 0) return;
         playTrack((currentTrackIndex + 1) % playlist.length);
     }
 
     function prevTrack() {
+        if (playlist.length === 0) return;
         playTrack((currentTrackIndex - 1 + playlist.length) % playlist.length);
+    }
+
+    function formatTime(seconds: number) {
+        if (!seconds || isNaN(seconds)) return "00:00";
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    function onSeek(e: any) {
+        if (audioRef) {
+            audioRef.currentTime = Number(e.currentTarget.value);
+        }
     }
     // ---------------------------------
 
     onMount(async () => {
-        // Initialize OS CSS variable
         document.body.style.setProperty("--sidebar-width", "320px");
+
+        // 1. Fetch Cloudflare R2 Music via Dynamic Backend Method
+        try {
+            const musicRes = await fetch("/api/music");
+            const rawData = await musicRes.json();
+
+            if (rawData && rawData.length > 0) {
+                playlist = rawData.map((url: string) => {
+                    const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, "") || "Unknown Track";
+                    return {
+                        title: filename.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                        artist: "UwU Memes",
+                        url: url
+                    };
+                });
+            }
+        } catch (e) {
+            console.error("Failed to fetch music from API", e);
+            playlist = [];
+        } finally {
+            isLoadingMusic = false;
+        }
 
         let currentPriceNum = 0.0068;
 
-        // 1. Dexscreener Fetch
+        // 2. Dexscreener Fetch
         try {
             const res = await fetch(
                 `https://api.dexscreener.com/latest/dex/tokens/${CA}`,
@@ -181,7 +138,7 @@
             console.error("Dexscreener fetch failed", e);
         }
 
-        // 2. Birdeye Secure Fetch
+        // 3. Birdeye Secure Fetch
         try {
             const serverRes = await fetch("/api/uwu-chart");
             const birdeyeData = await serverRes.json();
@@ -361,30 +318,65 @@
         <fieldset class="win98-fieldset player-fieldset">
             <legend>Media Player</legend>
 
-            <audio
-                bind:this={audioRef}
-                src={playlist[0].url}
-                onended={nextTrack}
-            ></audio>
+            {#if currentTrack}
+                <audio
+                    bind:this={audioRef}
+                    src={currentTrack.url}
+                    onended={nextTrack}
+                    bind:currentTime={currentTime}
+                    bind:duration={duration}
+                ></audio>
+            {/if}
 
             <div class="player-lcd">
                 <div class="lcd-status">
-                    {isPlaying ? "▶ PLAYING" : "⏸ PAUSED"}
+                    {#if isLoadingMusic}
+                        ⏳ CONNECTING...
+                    {:else if playlist.length === 0}
+                        ❌ NO AUDIO
+                    {:else}
+                        {isPlaying ? "▶ PLAYING" : "⏸ PAUSED"}
+                    {/if}
                 </div>
                 <div class="lcd-track-marquee">
-                    <span>{currentTrack.artist} - {currentTrack.title}</span>
+                    <div class="marquee-content">
+                        {#if isLoadingMusic}
+                            Fetching from server...
+                        {:else if playlist.length === 0}
+                            Bucket empty or unreachable
+                        {:else if currentTrack}
+                            {currentTrack.artist} - {currentTrack.title}
+                        {/if}
+                    </div>
                 </div>
+            </div>
+
+            <!-- New Seeker UI -->
+            <div class="seeker-container">
+                <span class="seeker-time">{formatTime(currentTime)}</span>
+                <input
+                    type="range"
+                    class="win98-slider"
+                    min="0"
+                    max={duration || 100}
+                    value={currentTime}
+                    oninput={onSeek}
+                    disabled={playlist.length === 0}
+                />
+                <span class="seeker-time">{formatTime(duration)}</span>
             </div>
 
             <div class="player-controls">
                 <button
                     class="win98-btn ctrl-btn"
                     onclick={prevTrack}
+                    disabled={playlist.length === 0}
                     title="Previous">⏮</button
                 >
                 <button
                     class="win98-btn ctrl-btn"
                     onclick={togglePlay}
+                    disabled={playlist.length === 0}
                     title="Play/Pause"
                 >
                     {isPlaying ? "⏸" : "▶"}
@@ -392,25 +384,29 @@
                 <button
                     class="win98-btn ctrl-btn"
                     onclick={nextTrack}
+                    disabled={playlist.length === 0}
                     title="Next">⏭</button
                 >
             </div>
 
             <div class="player-playlist">
-                {#each playlist as track, i}
-                    <div
-                        class="playlist-item {i === currentTrackIndex
-                            ? 'active'
-                            : ''}"
-                        onclick={() => playTrack(i)}
-                        role="button"
-                        tabindex="0"
-                        onkeydown={(e) => e.key === "Enter" && playTrack(i)}
-                    >
-                        <span class="track-num">{i + 1}.</span>
-                        {track.title}
-                    </div>
-                {/each}
+                {#if isLoadingMusic}
+                    <div class="playlist-item">Loading tracks...</div>
+                {:else if playlist.length === 0}
+                    <div class="playlist-item" style="color: red;">Error: No tracks loaded</div>
+                {:else}
+                    {#each playlist as track, i}
+                        <!-- Converted to button for guaranteed single-click registration -->
+                        <button
+                            type="button"
+                            class="playlist-item {i === currentTrackIndex ? 'active' : ''}"
+                            onclick={() => playTrack(i)}
+                        >
+                            <span class="track-num">{i + 1}.</span>
+                            <span class="track-name">{track.title}</span>
+                        </button>
+                    {/each}
+                {/if}
             </div>
         </fieldset>
 
@@ -462,6 +458,7 @@
         right: 0;
         bottom: 35px;
         width: 320px;
+        max-width: 320px;
         background: #c0c0c0;
         border-left: 2px solid #ffffff;
         box-shadow:
@@ -474,22 +471,16 @@
         font-size: 11px;
         color: #000000;
         z-index: 9998;
-
-        /* Smooth Slide Animation */
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         transform: translateX(0);
     }
 
-    /* Target state for sliding off-screen */
     .win98-sidebar.collapsed {
         transform: translateX(100%);
     }
 
-    /* Collapsible Toggle Tab attached to the left */
-    /* Toggle Tab - Default Open State */
     .sidebar-toggle {
         position: absolute;
-        /* Rests flush inside the left edge when open */
         left: -10px;
         top: 50%;
         transform: translateY(-50%);
@@ -501,29 +492,22 @@
         justify-content: center;
         font-size: 10px;
         background: #c0c0c0;
-
-        /* Standard Win98 button border when open */
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
         box-shadow:
             inset 1px 1px 0 #ffffff,
             inset -1px -1px 0 #808080;
-
-        /* Smoothly animate the position change alongside the sidebar */
         transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    /* Toggle Tab - Collapsed State */
     .win98-sidebar.collapsed .sidebar-toggle {
-        /* Pops out past the edge when the sidebar hides */
         left: -24px;
-
-        /* Remove the right border to blend seamlessly against the screen edge */
         border-right: none;
         box-shadow:
             inset 1px 1px 0 #ffffff,
             inset 0px -1px 0 #808080;
     }
+
     .sidebar-content::-webkit-scrollbar {
         width: 16px;
     }
@@ -567,6 +551,7 @@
     .sidebar-content {
         padding: 8px;
         overflow-y: auto;
+        overflow-x: hidden;
         flex-grow: 1;
         display: flex;
         flex-direction: column;
@@ -622,10 +607,15 @@
         cursor: pointer;
         text-align: center;
     }
-    .win98-btn:active {
+    .win98-btn:active, .win98-btn:active:not(:disabled) {
         border-color: #000000 #ffffff #ffffff #000000;
         box-shadow: inset 1px 1px 0 #000000;
         padding: 5px 5px 3px 7px;
+    }
+    .win98-btn:disabled {
+        color: #808080;
+        text-shadow: 1px 1px 0 #ffffff;
+        cursor: not-allowed;
     }
 
     .action-btn {
@@ -638,6 +628,8 @@
         border-color: #808080 #ffffff #ffffff #808080;
         margin: 0;
         padding: 8px;
+        /* CRITICAL: This line forces the fieldset to stay within screen boundaries! */
+        min-width: 0;
     }
     .win98-fieldset legend {
         font-weight: bold;
@@ -658,6 +650,7 @@
         font-size: 11px;
         padding: 3px;
         outline: none;
+        min-width: 0;
     }
     .copy-btn {
         min-width: 60px;
@@ -673,6 +666,7 @@
         border: 2px solid;
         border-color: #808080 #fff #fff #808080;
         padding: 4px 6px;
+        min-width: 0;
     }
     .well-label {
         color: #808080;
@@ -775,19 +769,9 @@
         display: flex;
         flex-direction: column;
         gap: 2px;
-        height: 32px;
+        height: 34px;
         flex-shrink: 0;
         overflow: hidden;
-    }
-
-    .player-playlist {
-        background: #ffffff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        flex-grow: 1;
-        overflow-y: auto;
-        display: block;
-        min-height: 60px;
     }
     .lcd-status {
         color: #00ff00;
@@ -795,14 +779,93 @@
         font-weight: bold;
         font-family: "Courier New", Courier, monospace;
     }
+
+    /* True Marquee Effect */
     .lcd-track-marquee {
+        width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        position: relative;
+        box-sizing: border-box;
+    }
+    .marquee-content {
+        display: inline-block;
+        padding-left: 100%;
         color: #00ff00;
         font-size: 11px;
         font-weight: bold;
-        white-space: nowrap;
         font-family: "Courier New", Courier, monospace;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        animation: marquee 8s linear infinite;
+    }
+    @keyframes marquee {
+        0%   { transform: translate(0, 0); }
+        100% { transform: translate(-100%, 0); }
+    }
+
+    /* Seeker Slider UI */
+    .seeker-container {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .seeker-time {
+        font-family: "Courier New", Courier, monospace;
+        font-size: 10px;
+        font-weight: bold;
+        color: #000;
+        flex-shrink: 0;
+    }
+    .win98-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        background: transparent;
+        margin: 0;
+        height: 20px;
+        flex-grow: 1;
+    }
+    .win98-slider:focus {
+        outline: none;
+    }
+    .win98-slider::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        background: #000;
+        border-bottom: 1px solid #fff;
+        border-right: 1px solid #fff;
+        box-shadow: inset 1px 1px 0 #808080;
+    }
+    .win98-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 16px;
+        width: 10px;
+        background: #c0c0c0;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+        margin-top: -6px;
+        cursor: pointer;
+    }
+    .win98-slider::-moz-range-track {
+        width: 100%;
+        height: 4px;
+        background: #000;
+        border-bottom: 1px solid #fff;
+        border-right: 1px solid #fff;
+        box-shadow: inset 1px 1px 0 #808080;
+    }
+    .win98-slider::-moz-range-thumb {
+        height: 16px;
+        width: 10px;
+        background: #c0c0c0;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+        cursor: pointer;
+        border-radius: 0;
     }
 
     .player-controls {
@@ -816,13 +879,33 @@
         padding: 2px 0;
     }
 
+    .player-playlist {
+        background: #ffffff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        flex-grow: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: block;
+        min-height: 60px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    /* Switched from div to button to fix click mapping */
     .playlist-item {
         padding: 2px 4px;
         cursor: pointer;
         user-select: none;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        background: none;
+        border: none;
+        text-align: left;
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
     }
     .playlist-item:hover {
         background: #e0e0e0;
@@ -833,8 +916,15 @@
     }
     .track-num {
         display: inline-block;
-        width: 15px;
+        width: 18px;
+        flex-shrink: 0;
         color: inherit;
+    }
+    .track-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex-grow: 1;
     }
 
     .hyperlink-matrix {
