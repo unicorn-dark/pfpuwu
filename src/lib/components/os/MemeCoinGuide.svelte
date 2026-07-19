@@ -54,7 +54,6 @@
         }
     }
 
-    // Attempt to pull the image using DexScreener API
     async function searchDexScreenerIcon() {
         if (!searchQuery.trim()) return;
 
@@ -88,7 +87,6 @@
             alert("Please enter a valid asset name!");
             return;
         }
-
         const newAsset: Coin = {
             id: newCoinName.trim().toLowerCase().replace(/\s+/g, "-") + "-" + Date.now(),
             name: newCoinName.trim().toUpperCase(),
@@ -96,10 +94,8 @@
             fallbackEmoji: "🪙",
             matches: [...newCoinMatches]
         };
-
         coins = [...coins, newAsset];
 
-        // Reset states
         newCoinName = "";
         searchQuery = "";
         newCoinImage = null;
@@ -108,8 +104,7 @@
     }
 
     function removeMatch(coinId: string, categoryId: string) {
-        if (coinId === "uwu") return; // Safety check
-
+        if (coinId === "uwu") return;
         coins = coins.map(c => {
             if (c.id === coinId) {
                 return { ...c, matches: c.matches.filter(m => m !== categoryId) };
@@ -118,14 +113,12 @@
         });
     }
 
-    // Clear board strictly preserving UwU
     function clearBoard() {
         if (confirm("Are you sure you want to clear the board? This will remove all assets except UwU.")) {
             coins = coins.filter(c => c.id === "uwu");
         }
     }
 
-    // 4. Reactive Leaderboard
     const leaderboard = $derived.by(() => {
         return coins
             .map(coin => ({
@@ -144,6 +137,7 @@
 </script>
 
 <div class="app-container">
+    <!-- TOOLBAR -->
     <div class="app-toolbar">
         <button class="win-btn menu-trigger" onclick={() => showAddForm = !showAddForm}>
             ➕ {showAddForm ? "Cancel Action" : "Add Custom Asset"}
@@ -153,23 +147,21 @@
         </button>
     </div>
 
+    <!-- ADD ASSET OVERLAY -->
     {#if showAddForm}
         <div class="win-panel form-overlay" in:fade={{ duration: 150 }}>
             <div class="win-inset form-wrapper">
                 <h3>💾 Register New Speculative Asset</h3>
-
                 <div class="fetch-row">
-                    <label for="coin-query">Search (Ticker or CA):</label>
+                    <label for="coin-query">Search (Ticker/CA):</label>
                     <input id="coin-query" type="text" class="win-input search-input" placeholder="0x... or PEPE" bind:value={searchQuery} />
                     <button class="win-btn" onclick={searchDexScreenerIcon} disabled={isFetching}>
                         {isFetching ? "⏳ Searching..." : "🔍 Fetch Icon"}
                     </button>
                 </div>
-
                 <div class="form-row manual-entry-row">
                     <label for="coin-ticker">Token Name:</label>
                     <input id="coin-ticker" type="text" class="win-input short-input" placeholder="Ticker" bind:value={newCoinName} />
-
                     <div class="preview-box">
                         {#if newCoinImage}
                             <img src={newCoinImage} alt="Preview" class="preview-img" />
@@ -178,20 +170,14 @@
                         {/if}
                     </div>
                 </div>
-
                 <p class="checkbox-instruction">Select all metrics this asset natively satisfies:</p>
                 <div class="category-checkbox-grid">
                     {#each categories as cat}
-                        <button
-                            type="button"
-                            class="checkbox-chip {newCoinMatches.includes(cat.id) ? 'checked' : ''}"
-                            onclick={() => toggleCategoryMatch(cat.id)}
-                        >
+                        <button type="button" class="checkbox-chip {newCoinMatches.includes(cat.id) ? 'checked' : ''}" onclick={() => toggleCategoryMatch(cat.id)}>
                             <span class="chip-icon">{cat.icon}</span> {cat.name}
                         </button>
                     {/each}
                 </div>
-
                 <div class="form-actions">
                     <button class="win-btn save-btn" onclick={submitNewCoin}>Execute Injection</button>
                 </div>
@@ -199,57 +185,57 @@
         </div>
     {/if}
 
-    <div class="scrollable-content">
-        <div class="matrix-container win-inset">
-            <div class="matrix-header-row">
-                <div class="header-cell left-col">CATEGORY</div>
-                <div class="header-cell right-col">COINS THAT FIT</div>
-            </div>
+    <!-- MAIN SIDE-BY-SIDE WORKSPACE -->
+    <div class="main-workspace">
 
-            <div class="matrix-body">
-                {#each categories as cat}
-                    <div class="matrix-row">
-                        <div class="category-cell">
-                            <span class="category-graphic">{cat.icon}</span>
-                            <span class="category-title-text">{cat.name}</span>
-                        </div>
+        <!-- LEFT: THE MATRIX (Strict vertical compression on Desktop) -->
+        <div class="matrix-wrapper">
+            <div class="matrix-container win-inset">
+                <div class="matrix-header-row">
+                    <div class="header-cell left-col">CATEGORY</div>
+                    <div class="header-cell right-col">COINS THAT FIT</div>
+                </div>
 
-                        <div class="assets-cell">
-                            {#each coins.filter(c => c.matches.includes(cat.id)) as matchedCoin}
-                                <div class="asset-sticker-wrapper">
-                                    <div class="asset-sticker" title="{matchedCoin.name}">
+                <div class="matrix-body">
+                    {#each categories as cat}
+                        <div class="matrix-row">
+                            <div class="category-cell">
+                                <span class="category-graphic">{cat.icon}</span>
+                                <span class="category-title-text">{cat.name}</span>
+                            </div>
 
-                                        <!-- Delete from row button -->
+                            <div class="assets-cell">
+                                {#each coins.filter(c => c.matches.includes(cat.id)) as matchedCoin}
+                                    <div class="asset-sticker-wrapper">
                                         {#if matchedCoin.id !== 'uwu'}
-                                            <button
-                                                class="remove-match-btn win-btn"
-                                                onclick={() => removeMatch(matchedCoin.id, cat.id)}
-                                                title="Remove from {cat.name}"
-                                            >
-                                                x
-                                            </button>
+                                            <button class="remove-match-btn" onclick={() => removeMatch(matchedCoin.id, cat.id)} title="Remove from {cat.name}">x</button>
                                         {/if}
 
-                                        <div class="sticker-avatar">
-                                            {#if matchedCoin.image}
-                                                <img src={matchedCoin.image} alt={matchedCoin.name} class="coin-img" />
-                                            {:else}
-                                                <span class="emoji-fallback">{matchedCoin.fallbackEmoji}</span>
-                                            {/if}
+                                        <div class="asset-sticker" title="{matchedCoin.name}">
+                                            <div class="sticker-avatar">
+                                                {#if matchedCoin.image}
+                                                    <img src={matchedCoin.image} alt={matchedCoin.name} class="coin-img" />
+                                                {:else}
+                                                    <span class="emoji-fallback">{matchedCoin.fallbackEmoji}</span>
+                                                {/if}
+                                            </div>
+                                            <!-- Gradient overly for text readability -->
+                                            <div class="sticker-overlay"></div>
+                                            <span class="sticker-label">{matchedCoin.name}</span>
                                         </div>
-                                        <span class="sticker-label">{matchedCoin.name}</span>
                                     </div>
-                                </div>
-                            {/each}
+                                {/each}
+                            </div>
                         </div>
-                    </div>
-                {/each}
+                    {/each}
+                </div>
             </div>
         </div>
 
-        <div class="leaderboard-panel mt-10">
-            <div class="panel-header">🎯 Aggregate Evaluation Analysis Matrix</div>
-            <div class="leaderboard-grid win-inset">
+        <!-- RIGHT: THE LEADERBOARD SIDEBAR -->
+        <div class="leaderboard-wrapper win-panel">
+            <div class="panel-header">🎯 Analysis Matrix</div>
+            <div class="leaderboard-list win-inset">
                 {#each leaderboard as item}
                     <div class="leaderboard-pill" style={getScoreColorStyle(item.score)}>
                         <span class="pill-badge">
@@ -260,7 +246,7 @@
                             {/if}
                             {item.name}
                         </span>
-                        <span class="pill-score">Score: {item.score}/{categories.length}</span>
+                        <span class="pill-score">{item.score}/{categories.length}</span>
                     </div>
                 {/each}
             </div>
@@ -280,12 +266,7 @@
         user-select: none;
         background: #c0c0c0;
         box-sizing: border-box;
-    }
-
-    .scrollable-content {
-        flex-grow: 1;
-        overflow-y: auto;
-        padding: 6px;
+        overflow: hidden;
     }
 
     /* Window Elements */
@@ -310,7 +291,7 @@
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
         padding: 2px 8px;
-        font-family: "Pixelated MS Sans Serif", monospace, Arial;
+        font-family: inherit;
         font-size: 11px;
         cursor: pointer;
         font-weight: bold;
@@ -322,16 +303,13 @@
         background: #dfdfdf;
     }
 
-    .danger-btn {
-        color: #a00000;
-    }
-
+    .danger-btn { color: #a00000; }
     .win-input {
         border: 2px solid;
         border-color: #808080 #ffffff #ffffff #808080;
         padding: 4px;
         font-family: inherit;
-        font-size: 12px;
+        font-size: 11px;
         outline: none;
     }
 
@@ -342,302 +320,249 @@
         padding: 6px;
         border-bottom: 2px solid #808080;
         box-shadow: 0 1px 0 #ffffff;
-        font-size: 11px;
         flex-shrink: 0;
     }
 
     /* Form Styles */
     .form-overlay {
-        margin: 6px;
+        margin: 6px 6px 0 6px;
         background: #d4d4d4;
         flex-shrink: 0;
     }
 
-    .form-wrapper {
-        padding: 12px;
-        background: #f1f1f1;
-    }
-
-    .form-wrapper h3 {
-        margin: 0 0 10px 0;
-        font-size: 14px;
-        color: #000080;
-    }
-
+    .form-wrapper { padding: 8px; background: #f1f1f1; }
+    .form-wrapper h3 { margin: 0 0 8px 0; font-size: 13px; color: #000080; }
     .fetch-row, .manual-entry-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 12px;
-        flex-wrap: wrap; /* Allows wrapping on smaller screens */
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
     }
-
-    .search-input {
-        flex-grow: 1;
-        min-width: 150px;
-    }
-
-    .short-input {
-        width: 100px;
-    }
+    .search-input { flex-grow: 1; min-width: 150px; }
+    .short-input { width: 100px; }
 
     .preview-box {
-        width: 28px;
-        height: 28px;
-        border: 2px solid;
-        border-color: #808080 #ffffff #ffffff #808080;
-        background: #fff;
+        width: 24px; height: 24px; border: 2px solid; border-color: #808080 #ffffff #ffffff #808080;
+        background: #fff; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #808080; margin-left: auto;
+    }
+    .preview-img { width: 100%; height: 100%; object-fit: cover; }
+
+    .category-checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px; margin-bottom: 8px; margin-top: 4px; }
+    .checkbox-chip { display: flex; align-items: center; gap: 6px; background: #c0c0c0; border: 2px solid; border-color: #ffffff #808080 #808080 #ffffff; padding: 2px 6px; font-size: 10px; cursor: pointer; width: 100%; }
+    .checkbox-chip.checked { background: #000080; color: #ffffff; border-color: #000000 #ffffff #ffffff #000000; box-shadow: inset 1px 1px 2px #000; }
+    .form-actions { display: flex; justify-content: flex-end; }
+    .save-btn { background: #008000; color: #ffffff; padding: 4px 16px; border-color: #ffffff #000000 #000000 #ffffff; }
+
+    /* Layout Strategy (DESKTOP) */
+    .main-workspace {
         display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 8px;
-        color: #808080;
-        margin-left: auto;
-    }
-
-    .preview-img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-
-    .category-checkbox-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        flex-direction: row;
+        flex-grow: 1;
+        padding: 6px;
         gap: 6px;
-        margin-bottom: 12px;
-        margin-top: 5px;
+        overflow: hidden;
+        min-height: 0;
     }
 
-    .checkbox-chip {
+    .matrix-wrapper {
+        flex-grow: 1;
         display: flex;
-        align-items: center;
-        gap: 6px;
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #ffffff #808080 #808080 #ffffff;
-        padding: 4px 8px;
-        font-size: 11px;
-        text-align: left;
-        cursor: pointer;
-        width: 100%;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
     }
 
-    .checkbox-chip.checked {
-        background: #000080;
-        color: #ffffff;
-        border-color: #000000 #ffffff #ffffff #000000;
-        box-shadow: inset 1px 1px 2px #000;
-    }
-
-    .form-actions {
-        display: flex;
-        justify-content: flex-end;
-    }
-
-    .save-btn {
-        background: #008000;
-        color: #ffffff;
-        padding: 6px 16px;
-        font-size: 12px;
-        border-color: #ffffff #000000 #000000 #ffffff;
-    }
-
-    /* Matrix Styles */
     .matrix-container {
-        overflow-x: auto;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
     }
 
     .matrix-header-row {
+        display: flex; background: #000080; color: #ffffff; font-weight: bold; font-size: 11px; border-bottom: 2px solid #808080; flex-shrink: 0;
+    }
+    .header-cell { padding: 4px 8px; text-shadow: 1px 1px 0px #000; }
+    .left-col { width: 150px; flex-shrink: 0; border-right: 2px solid #808080; }
+    .right-col { flex-grow: 1; }
+
+    .matrix-body {
         display: flex;
-        background: #000080;
-        color: #ffffff;
-        font-weight: bold;
-        font-size: 12px;
-        border-bottom: 2px solid #808080;
-    }
-
-    .header-cell {
-        padding: 6px;
-        text-shadow: 1px 1px 0px #000;
-    }
-
-    .left-col {
-        width: 220px;
-        flex-shrink: 0;
-        border-right: 2px solid #808080;
-    }
-
-    .right-col {
+        flex-direction: column;
         flex-grow: 1;
-        padding-left: 12px;
+        min-height: 0;
     }
 
     .matrix-row {
         display: flex;
+        flex: 1;
+        min-height: 0;
         border-bottom: 1px solid #808080;
         background: #e0e0e0;
     }
-
-    .matrix-row:nth-child(even) {
-        background: #d6d6d6;
-    }
+    .matrix-row:nth-child(even) { background: #d6d6d6; }
 
     .category-cell {
-        width: 220px;
-        flex-shrink: 0;
-        padding: 8px 6px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: bold;
-        font-size: 12px;
-        border-right: 2px solid #808080;
-        background: rgba(255, 255, 255, 0.15);
+        width: 150px; flex-shrink: 0; padding: 4px 8px; display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 11px; border-right: 2px solid #808080; background: rgba(255, 255, 255, 0.15);
     }
 
     .assets-cell {
         flex-grow: 1;
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap; /* Desktop: strictly single line */
         align-items: center;
-        gap: 14px;
-        padding: 6px 12px;
-        min-height: 48px;
+        gap: 8px;
+        padding: 4px 8px;
+        min-width: 0;
+        overflow: hidden;
     }
 
-    /* Sticker Styles & Hover Logic */
+    /* Shrinkable Dynamic Stickers (Desktop) */
     .asset-sticker-wrapper {
         position: relative;
+        height: 100%;
+        max-height: 55px;
+        aspect-ratio: 1 / 1;
+        flex: 0 1 auto; /* Allow horizontal shrinking on desktop */
+        min-width: 0;
+        min-height: 0;
+        transition: transform 0.1s ease;
+    }
+    .asset-sticker-wrapper:hover {
+        transform: scale(1.08);
+        z-index: 10;
     }
 
     .asset-sticker {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #ffffff;
+        border: 2px solid #000000;
+        border-radius: 6px;
+        box-shadow: 2px 2px 0px #000000;
+        overflow: hidden;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        width: 52px;
-        text-align: center;
+        container-type: inline-size;
     }
 
-    .sticker-avatar {
-        font-size: 22px;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #ffffff;
-        border: 1px solid #808080;
-        border-radius: 4px;
-        box-shadow: 1px 1px 2px rgba(0,0,0,0.2);
-        overflow: hidden;
+    .sticker-avatar { width: 100%; height: 100%; background: #ffffff; }
+
+    .emoji-fallback {
+        display: flex; align-items: center; justify-content: center; height: 100%;
+        font-size: min(32px, 45cqw);
     }
 
     .coin-img {
         width: 100%;
         height: 100%;
         object-fit: cover;
+        filter: saturate(1.8) contrast(1.2);
+    }
+
+    .sticker-overlay {
+        position: absolute; bottom: 0; left: 0; width: 100%; height: 50%;
+        background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%);
+        pointer-events: none; z-index: 1;
     }
 
     .sticker-label {
-        font-size: 9px;
-        font-weight: bold;
-        margin-top: 3px;
-        color: #101010;
+        position: absolute;
+        bottom: 1px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: min(11px, 18cqw);
+        font-weight: 900;
+        color: #ffff00;
+        text-transform: uppercase;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
+        z-index: 2;
+        pointer-events: none;
+        letter-spacing: 0.5px;
+        text-shadow:
+            1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000,
+            0px 2px 2px rgba(0,0,0,0.9);
     }
 
-    /* The 'X' Button on hover */
     .remove-match-btn {
         position: absolute;
         top: -6px;
         right: -6px;
-        width: 18px;
-        height: 18px;
-        padding: 0 !important;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #000;
+        background: #ff0000;
+        color: white;
+        font-weight: bold;
+        padding: 0;
         font-size: 9px;
-        color: red;
-        z-index: 10;
+        line-height: 9px;
+        border-radius: 50%;
+        z-index: 20;
         display: none;
+        cursor: pointer;
     }
-
-    /* Show 'X' button when hovering the wrapper (Desktop) */
     .asset-sticker-wrapper:hover .remove-match-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: flex; align-items: center; justify-content: center;
     }
 
-    /* Leaderboard */
-    .leaderboard-panel {
-        background: #b5b5b5;
-        border: 2px solid;
-        border-color: #ffffff #808080 #808080 #ffffff;
-        padding: 6px;
+    /* Leaderboard Sidebar */
+    .leaderboard-wrapper {
+        width: 200px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
     }
 
     .panel-header {
-        background: #000080;
-        color: #ffffff;
-        padding: 4px 8px;
-        font-size: 11px;
-        font-weight: bold;
-        margin-bottom: 4px;
-        text-shadow: 1px 1px 0px #000;
+        background: #000080; color: #ffffff; padding: 4px 6px; font-size: 11px; font-weight: bold; margin-bottom: 4px; text-shadow: 1px 1px 0px #000;
     }
 
-    .leaderboard-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        gap: 6px;
-        padding: 8px;
-        max-height: 180px;
+    .leaderboard-list {
+        flex-grow: 1;
         overflow-y: auto;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
     }
 
     .leaderboard-pill {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 6px 10px;
-        font-size: 11px;
-        font-weight: bold;
-        border: 2px solid;
-        border-color: #ffffff #000000 #000000 #ffffff;
-        box-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-        transition: all 0.2s ease;
+        display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; font-size: 10px; font-weight: bold; border: 2px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: 1px 1px 2px rgba(0,0,0,0.3);
     }
 
-    .pill-badge {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .leaderboard-tiny-img {
-        width: 14px;
-        height: 14px;
-        border-radius: 2px;
-    }
-
-    .mt-10 { margin-top: 10px; }
+    .pill-badge { display: flex; align-items: center; gap: 6px; }
+    .leaderboard-tiny-img { width: 14px; height: 14px; border-radius: 2px; }
 
     /* =========================================
-       MOBILE RESPONSIVENESS OVERRIDES
+       FIXED MOBILE FALLBACK
        ========================================= */
-    @media (max-width: 650px) {
-        .matrix-header-row {
-            display: none; /* Hide top headers to save space */
+    @media (max-width: 800px) {
+        .main-workspace {
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .matrix-wrapper {
+            min-height: auto; /* Removed fixed height restriction */
+            height: auto; /* Let it grow infinitely down */
+            overflow: visible;
+        }
+        .leaderboard-wrapper {
+            width: 100%;
+            height: auto;
+            max-height: 300px; /* Cap the leaderboard height slightly */
+            flex-shrink: 0;
+            margin-top: 10px; /* Force separation between matrix and leaderboard */
         }
 
+        .matrix-header-row { display: none; }
+
+        /* Unlock row heights so wrapping doesn't cause bleeding */
         .matrix-row {
-            flex-direction: column; /* Stack category on top of icons */
+            flex-direction: column;
+            min-height: auto;
+            height: auto;
+            flex: none; /* Turn off flex equalization */
         }
-
         .category-cell {
             width: 100%;
             border-right: none;
@@ -645,25 +570,28 @@
             padding: 6px 8px;
         }
 
+        /* Enable Wrapping! */
         .assets-cell {
-            width: 100%;
             padding: 10px 8px;
-            justify-content: flex-start;
+            flex-wrap: wrap; /* CRITICAL FIX: allow to flow to next line */
+            height: auto;
+            overflow: visible; /* Prevent clipping */
+            gap: 12px; /* Nicer touch-friendly gap */
         }
 
-        .app-toolbar {
-            flex-direction: row; /* Keep buttons next to each other */
-            gap: 6px;
+        .app-toolbar { flex-direction: row; }
+
+        /* Stop shrinking on mobile and lock size so they neatly grid out */
+        .asset-sticker-wrapper {
+            flex: 0 0 auto;
+            width: 55px; /* Hardcoded size for mobile */
+            height: 55px;
+            max-height: none; /* Release desktop constraints */
         }
 
-        /* Always show the remove button on touch devices since they can't hover */
+        /* Force close button visibility on touch screens */
         @media (hover: none) {
-            .remove-match-btn {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                opacity: 0.85; /* Slight transparency so it's not too aggressive */
-            }
+            .remove-match-btn { display: flex; opacity: 0.9; top: -6px; right: -6px; }
         }
     }
 </style>
