@@ -581,23 +581,33 @@
     }
 
     async function copyToClipboard() {
-        if (!selectedMeme || selectedMeme.type !== "photo") return;
+        if (!selectedMeme) return;
 
-        try {
-            const response = await fetch(selectedMeme.url);
-            const blob = await response.blob();
-            const imageBlob =
-                blob.type === "image/png"
-                    ? blob
-                    : await convertImageToPng(blob);
-            await navigator.clipboard.write([
-                new ClipboardItem({ [imageBlob.type]: imageBlob }),
-            ]);
-            setClipboardMessage("Image copied!");
-        } catch (err) {
-            await navigator.clipboard.writeText(selectedMeme.url);
-            setClipboardMessage("Link copied instead");
-        }
+        if (selectedMeme.type === "photo") {
+                try {
+                    const response = await fetch(selectedMeme.url);
+                    const blob = await response.blob();
+                    const imageBlob =
+                        blob.type === "image/png"
+                            ? blob
+                            : await convertImageToPng(blob);
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ [imageBlob.type]: imageBlob }),
+                    ]);
+                    setClipboardMessage("Image copied!");
+                } catch (err) {
+                    await navigator.clipboard.writeText(selectedMeme.url);
+                    setClipboardMessage("Link copied instead");
+                }
+            } else {
+                // Handle Video Type
+                try {
+                    await navigator.clipboard.writeText(selectedMeme.url);
+                    setClipboardMessage("Video link copied!");
+                } catch (err) {
+                    setClipboardMessage("Failed to copy link");
+                }
+            }
     }
 
     function convertImageToPng(blob: Blob) {
@@ -952,15 +962,15 @@
                     Download
                 </button>
 
-                {#if selectedMeme?.type === "photo"}
+
                     <button
                         class="win-btn action-btn primary-action"
                         disabled={!selectedMeme}
                         onclick={copyToClipboard}
                     >
-                        Copy Image
+                        Copy Url
                     </button>
-                {/if}
+
             </div>
         </div>
     </div>
