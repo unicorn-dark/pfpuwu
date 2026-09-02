@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onMount, onDestroy } from "svelte";
 
     const CA = "UWUy7J86LUiBv5SjAUZ53LMGhtnqvbQ7QNSSkyupump";
 
@@ -32,97 +32,106 @@
         }, 16);
     }
 
-    // --- CUSTOM MEDIA PLAYER STATE ---
-    let audioRef: any;
-    let isPlaying = $state(false);
-    let currentTrackIndex = $state(0);
-    let isLoadingMusic = $state(true);
-    let playlist: any[] = $state([]);
+    // --- BRAINWAVES STATE & LOGIC ---
+    // Locked to 900Hz based on Dubuis' 2004 "Fréquences et Conscience" specifications
+    const baseFreq = 900;
+    let beatFreq = $state(30);
+    let switchTime = $state(4.0);
 
-    // Seeker State
-    let currentTime = $state(0);
-    let duration = $state(0);
+    let isSwitched = $state(false);
+    let isPlayingBrainwave = $state(false);
 
-    let currentTrack = $derived(playlist.length > 0 ? playlist[currentTrackIndex] : null);
+    let leftFreq = $derived(isSwitched ? baseFreq + beatFreq : baseFreq);
+    let rightFreq = $derived(isSwitched ? baseFreq : baseFreq + beatFreq);
 
-    function togglePlay() {
-        if (!audioRef || playlist.length === 0) return;
-        if (isPlaying) {
-            audioRef.pause();
+    let audioCtx: any = null;
+    let oscLeft: any = null;
+    let oscRight: any = null;
+    let masterGain: any = null;
+    let switchInterval: ReturnType<typeof setInterval>;
+
+    function setPreset(beat: number, time: number) {
+        beatFreq = beat;
+        switchTime = time;
+    }
+
+    async function startBrainwave() {
+        if (isPlayingBrainwave) return;
+
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioCtx) audioCtx = new AudioContext();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.8;
+        masterGain.connect(audioCtx.destination);
+
+        oscLeft = audioCtx.createOscillator();
+        oscRight = audioCtx.createOscillator();
+        oscLeft.type = 'sine';
+        oscRight.type = 'sine';
+
+        if (audioCtx.createStereoPanner) {
+            const panLeft = audioCtx.createStereoPanner();
+            const panRight = audioCtx.createStereoPanner();
+            panLeft.pan.value = -1;
+            panRight.pan.value = 1;
+            oscLeft.connect(panLeft).connect(masterGain);
+            oscRight.connect(panRight).connect(masterGain);
         } else {
-            audioRef.play();
-        }
-        isPlaying = !isPlaying;
-    }
-
-    async function playTrack(index: number) {
-            if (playlist.length === 0) return;
-
-            // 1. Tell Svelte to change the track
-            currentTrackIndex = index;
-
-            // 2. Wait for Svelte to update the DOM (the <audio> tag's src)
-            await tick();
-
-            // 3. Now it is safe to hit play!
-            if (audioRef) {
-                audioRef.play().catch((err: any) => console.error("Playback prevented:", err));
-                isPlaying = true;
-            }
+            const merger = audioCtx.createChannelMerger(2);
+            oscLeft.connect(merger, 0, 0);
+            oscRight.connect(merger, 0, 1);
+            merger.connect(masterGain);
         }
 
-    function nextTrack() {
-        if (playlist.length === 0) return;
-        playTrack((currentTrackIndex + 1) % playlist.length);
+        isPlayingBrainwave = true;
+        isSwitched = false;
+
+        oscLeft.frequency.setValueAtTime(leftFreq, audioCtx.currentTime);
+        oscRight.frequency.setValueAtTime(rightFreq, audioCtx.currentTime);
+
+        oscLeft.start();
+        oscRight.start();
     }
 
-    function prevTrack() {
-        if (playlist.length === 0) return;
-        playTrack((currentTrackIndex - 1 + playlist.length) % playlist.length);
+    function stopBrainwave() {
+        if (!isPlayingBrainwave) return;
+        if (oscLeft) { oscLeft.stop(); oscLeft.disconnect(); }
+        if (oscRight) { oscRight.stop(); oscRight.disconnect(); }
+        if (audioCtx) audioCtx.suspend();
+
+        isPlayingBrainwave = false;
+        isSwitched = false;
     }
 
-    function formatTime(seconds: number) {
-        if (!seconds || isNaN(seconds)) return "00:00";
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60);
-        return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-    }
-
-    function onSeek(e: any) {
-        if (audioRef) {
-            audioRef.currentTime = Number(e.currentTarget.value);
+    $effect(() => {
+        if (isPlayingBrainwave && oscLeft && oscRight && masterGain && audioCtx) {
+            oscLeft.frequency.setValueAtTime(leftFreq, audioCtx.currentTime);
+            oscRight.frequency.setValueAtTime(rightFreq, audioCtx.currentTime);
         }
-    }
+    });
+
+    $effect(() => {
+        if (switchInterval) clearInterval(switchInterval);
+
+        if (isPlayingBrainwave) {
+            switchInterval = setInterval(() => {
+                isSwitched = !isSwitched;
+            }, switchTime * 1000);
+        }
+    });
+
+    onDestroy(() => {
+        if (isPlayingBrainwave) stopBrainwave();
+    });
     // ---------------------------------
 
     onMount(async () => {
         document.body.style.setProperty("--sidebar-width", "320px");
 
-        // 1. Fetch Cloudflare R2 Music via Dynamic Backend Method
-        try {
-            const musicRes = await fetch("/api/music");
-            const rawData = await musicRes.json();
-
-            if (rawData && rawData.length > 0) {
-                playlist = rawData.map((url: string) => {
-                    const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, "") || "Unknown Track";
-                    return {
-                        title: filename.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                        artist: "UwU Memes",
-                        url: url
-                    };
-                });
-            }
-        } catch (e) {
-            console.error("Failed to fetch music from API", e);
-            playlist = [];
-        } finally {
-            isLoadingMusic = false;
-        }
-
         let currentPriceNum = 0.0068;
 
-        // 2. Dexscreener Fetch
         try {
             const res = await fetch(
                 `https://api.dexscreener.com/latest/dex/tokens/${CA}`,
@@ -138,7 +147,6 @@
             console.error("Dexscreener fetch failed", e);
         }
 
-        // 3. Birdeye Secure Fetch
         try {
             const serverRes = await fetch("/api/uwu-chart");
             const birdeyeData = await serverRes.json();
@@ -315,98 +323,55 @@
             </div>
         </fieldset>
 
-        <fieldset class="win98-fieldset player-fieldset">
-            <legend>Media Player</legend>
-
-            {#if currentTrack}
-                <audio
-                    bind:this={audioRef}
-                    src={currentTrack.url}
-                    onended={nextTrack}
-                    bind:currentTime={currentTime}
-                    bind:duration={duration}
-                ></audio>
-            {/if}
+        <fieldset class="win98-fieldset brainwave-fieldset">
+            <legend>Initiation Brainwaves</legend>
 
             <div class="player-lcd">
                 <div class="lcd-status">
-                    {#if isLoadingMusic}
-                        ⏳ CONNECTING...
-                    {:else if playlist.length === 0}
-                        ❌ NO AUDIO
-                    {:else}
-                        {isPlaying ? "▶ PLAYING" : "⏸ PAUSED"}
-                    {/if}
+                    <span>{isPlayingBrainwave ? "▶ TRANSMITTING..." : "⏸ INACTIVE"}</span>
+                    <span class="lcd-base-hz">BASE: {baseFreq}Hz</span>
                 </div>
-                <div class="lcd-track-marquee">
-                    <div class="marquee-content">
-                        {#if isLoadingMusic}
-                            Fetching from server...
-                        {:else if playlist.length === 0}
-                            Bucket empty or unreachable
-                        {:else if currentTrack}
-                            {currentTrack.artist} - {currentTrack.title}
-                        {/if}
-                    </div>
+                <div class="lcd-freq-display">
+                    <span class="chan {isSwitched ? 'inactive' : 'active'}">L: {leftFreq.toFixed(1)}</span>
+                    <span class="swap-indicator">{isSwitched ? "⇌" : "⇋"}</span>
+                    <span class="chan {!isSwitched ? 'inactive' : 'active'}">R: {rightFreq.toFixed(1)}</span>
                 </div>
             </div>
 
-            <!-- New Seeker UI -->
-            <div class="seeker-container">
-                <span class="seeker-time">{formatTime(currentTime)}</span>
-                <input
-                    type="range"
-                    class="win98-slider"
-                    min="0"
-                    max={duration || 100}
-                    value={currentTime}
-                    oninput={onSeek}
-                    disabled={playlist.length === 0}
-                />
-                <span class="seeker-time">{formatTime(duration)}</span>
+            <div class="bw-preset-grid">
+                <button class="win98-btn bw-preset-btn" onclick={() => setPreset(30, 4.0)}>Earth (30Hz)</button>
+                <button class="win98-btn bw-preset-btn" onclick={() => setPreset(10, 4.0)}>Astral (10Hz)</button>
+                <button class="win98-btn bw-preset-btn" onclick={() => setPreset(6, 4.0)}>Mental (6Hz)</button>
+                <button class="win98-btn bw-preset-btn" onclick={() => setPreset(2, 4.0)}>Eternity (2Hz)</button>
+            </div>
+
+            <div class="bw-sliders">
+                <div class="bw-slider-group">
+                    <div class="bw-slider-header">
+                        <span>Switch Timer</span>
+                        <span>{switchTime}s</span>
+                    </div>
+                    <input type="range" class="win98-slider" min="1" max="20" step="0.5" bind:value={switchTime} />
+                </div>
             </div>
 
             <div class="player-controls">
                 <button
                     class="win98-btn ctrl-btn"
-                    onclick={prevTrack}
-                    disabled={playlist.length === 0}
-                    title="Previous">⏮</button
+                    style={isPlayingBrainwave ? "color: #008000;" : ""}
+                    onclick={startBrainwave}
+                    disabled={isPlayingBrainwave}
                 >
-                <button
-                    class="win98-btn ctrl-btn"
-                    onclick={togglePlay}
-                    disabled={playlist.length === 0}
-                    title="Play/Pause"
-                >
-                    {isPlaying ? "⏸" : "▶"}
+                    ▶ START
                 </button>
                 <button
                     class="win98-btn ctrl-btn"
-                    onclick={nextTrack}
-                    disabled={playlist.length === 0}
-                    title="Next">⏭</button
+                    style={!isPlayingBrainwave ? "color: #FF0000;" : ""}
+                    onclick={stopBrainwave}
+                    disabled={!isPlayingBrainwave}
                 >
-            </div>
-
-            <div class="player-playlist">
-                {#if isLoadingMusic}
-                    <div class="playlist-item">Loading tracks...</div>
-                {:else if playlist.length === 0}
-                    <div class="playlist-item" style="color: red;">Error: No tracks loaded</div>
-                {:else}
-                    {#each playlist as track, i}
-                        <!-- Converted to button for guaranteed single-click registration -->
-                        <button
-                            type="button"
-                            class="playlist-item {i === currentTrackIndex ? 'active' : ''}"
-                            onclick={() => playTrack(i)}
-                        >
-                            <span class="track-num">{i + 1}.</span>
-                            <span class="track-name">{track.title}</span>
-                        </button>
-                    {/each}
-                {/if}
+                    ⏹ STOP
+                </button>
             </div>
         </fieldset>
 
@@ -508,19 +473,6 @@
             inset 0px -1px 0 #808080;
     }
 
-    .sidebar-content::-webkit-scrollbar {
-        width: 16px;
-    }
-    .sidebar-content::-webkit-scrollbar-track {
-        background: #e6e6e6;
-        box-shadow: inset 1px 1px 0 #808080;
-    }
-    .sidebar-content::-webkit-scrollbar-thumb {
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #fff #5a5a5a #5a5a5a #fff;
-    }
-
     .win98-titlebar {
         background: linear-gradient(90deg, #000080, #1080d0);
         padding: 3px 4px;
@@ -550,7 +502,7 @@
 
     .sidebar-content {
         padding: 8px;
-        overflow-y: auto;
+        overflow-y: hidden;
         overflow-x: hidden;
         flex-grow: 1;
         display: flex;
@@ -628,7 +580,6 @@
         border-color: #808080 #ffffff #ffffff #808080;
         margin: 0;
         padding: 8px;
-        /* CRITICAL: This line forces the fieldset to stay within screen boundaries! */
         min-width: 0;
     }
     .win98-fieldset legend {
@@ -688,7 +639,7 @@
         background: #2d1b47;
         border: 2px solid;
         border-color: #808080 #fff #fff #808080;
-        height: 180px;
+        height: 150px;
         position: relative;
         overflow: hidden;
     }
@@ -752,13 +703,13 @@
         border-color: #ff007f;
     }
 
-    .player-fieldset {
-        flex-grow: 1;
+    /* BRAINWAVES STYLING */
+    .brainwave-fieldset {
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        min-height: 0;
+        gap: 8px;
         margin-bottom: 10px;
+        flex-shrink: 0;
     }
 
     .player-lcd {
@@ -768,62 +719,79 @@
         padding: 4px 6px;
         display: flex;
         flex-direction: column;
-        gap: 2px;
-        height: 34px;
+        gap: 4px;
         flex-shrink: 0;
-        overflow: hidden;
     }
     .lcd-status {
         color: #00ff00;
         font-size: 9px;
         font-weight: bold;
         font-family: "Courier New", Courier, monospace;
-    }
-
-    /* True Marquee Effect */
-    .lcd-track-marquee {
-        width: 100%;
-        overflow: hidden;
-        white-space: nowrap;
-        position: relative;
-        box-sizing: border-box;
-    }
-    .marquee-content {
-        display: inline-block;
-        padding-left: 100%;
-        color: #00ff00;
-        font-size: 11px;
-        font-weight: bold;
-        font-family: "Courier New", Courier, monospace;
-        animation: marquee 8s linear infinite;
-    }
-    @keyframes marquee {
-        0%   { transform: translate(0, 0); }
-        100% { transform: translate(-100%, 0); }
-    }
-
-    /* Seeker Slider UI */
-    .seeker-container {
         display: flex;
-        align-items: center;
-        gap: 6px;
-        width: 100%;
-        box-sizing: border-box;
+        justify-content: space-between;
     }
-    .seeker-time {
+    .lcd-base-hz {
+        color: #008080;
+    }
+    .lcd-freq-display {
+        display: flex;
+        justify-content: space-between;
         font-family: "Courier New", Courier, monospace;
-        font-size: 10px;
+        font-size: 13px;
         font-weight: bold;
-        color: #000;
-        flex-shrink: 0;
     }
+    .chan {
+        color: #00ff00;
+    }
+    .chan.active {
+        color: #fff;
+        text-shadow: 0 0 5px #00ff00;
+    }
+    .chan.inactive {
+        color: #008000;
+    }
+    .swap-indicator {
+        color: #008080;
+    }
+
+    .bw-preset-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+    }
+    .bw-preset-btn {
+        font-size: 9px;
+        padding: 4px 2px;
+    }
+
+    .bw-sliders {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: #e6e6e6;
+        padding: 6px;
+        border: 1px inset #fff;
+    }
+    .bw-slider-group {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .bw-slider-header {
+        display: flex;
+        justify-content: space-between;
+        font-size: 9px;
+        font-weight: bold;
+        color: #333;
+    }
+
     .win98-slider {
         -webkit-appearance: none;
         appearance: none;
         width: 100%;
         background: transparent;
         margin: 0;
-        height: 20px;
+        height: 16px;
         flex-grow: 1;
     }
     .win98-slider:focus {
@@ -840,8 +808,8 @@
     .win98-slider::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        height: 16px;
-        width: 10px;
+        height: 14px;
+        width: 8px;
         background: #c0c0c0;
         border: 1px solid;
         border-color: #fff #000 #000 #fff;
@@ -849,88 +817,25 @@
         margin-top: -6px;
         cursor: pointer;
     }
-    .win98-slider::-moz-range-track {
-        width: 100%;
-        height: 4px;
-        background: #000;
-        border-bottom: 1px solid #fff;
-        border-right: 1px solid #fff;
-        box-shadow: inset 1px 1px 0 #808080;
-    }
-    .win98-slider::-moz-range-thumb {
-        height: 16px;
-        width: 10px;
-        background: #c0c0c0;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
-        cursor: pointer;
-        border-radius: 0;
-    }
 
     .player-controls {
         display: flex;
         gap: 4px;
         justify-content: center;
+        margin-top: 4px;
     }
     .ctrl-btn {
         flex: 1;
-        font-size: 14px;
-        padding: 2px 0;
-    }
-
-    .player-playlist {
-        background: #ffffff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        flex-grow: 1;
-        overflow-y: auto;
-        overflow-x: hidden;
-        display: block;
-        min-height: 60px;
-        width: 100%;
-        box-sizing: border-box;
-    }
-    /* Switched from div to button to fix click mapping */
-    .playlist-item {
-        padding: 2px 4px;
-        cursor: pointer;
-        user-select: none;
-        width: 100%;
-        box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        background: none;
-        border: none;
-        text-align: left;
-        font-family: inherit;
-        font-size: inherit;
-        color: inherit;
-    }
-    .playlist-item:hover {
-        background: #e0e0e0;
-    }
-    .playlist-item.active {
-        background: #000080;
-        color: #ffffff;
-    }
-    .track-num {
-        display: inline-block;
-        width: 18px;
-        flex-shrink: 0;
-        color: inherit;
-    }
-    .track-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex-grow: 1;
+        font-size: 11px;
+        padding: 6px 0;
     }
 
     .hyperlink-matrix {
         display: flex;
         flex-direction: row;
         gap: 8px;
+        flex-shrink: 0;
+        margin-top: auto;
     }
     .link-btn {
         flex: 1;
