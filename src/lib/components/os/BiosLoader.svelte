@@ -137,13 +137,10 @@
         return newHtml;
     };
 
+    import { ALL_TRAIT_SRC_PATHS, getCachedTraitImage } from "$lib/utils/traits";
+
     let displayHtml = $state(generateFrame(false));
     let glitchInterval: any;
-
-    const allTraitFiles = import.meta.glob("/static/traits/**/*.png");
-    const preloadPaths = Object.keys(allTraitFiles).map((path) =>
-        path.replace("/static", ""),
-    );
 
     onMount(async () => {
         // 1. Start the visual glitch
@@ -159,26 +156,16 @@
             "Loading graphical subsystems into VRAM (Please wait)...",
         ];
 
-        // 3. 🚀 THE REAL BLOCKER 🚀
-        // We create an array of promises, one for every single image.
-        const imagePromises = preloadPaths.map((src) => {
-            return new Promise((resolve) => {
-                const img = new Image();
-                // Resolve the promise ONLY when the image is fully downloaded by the browser
-                img.onload = resolve;
-                // If a file is corrupted/missing, resolve anyway so the OS doesn't hang forever
-                img.onerror = resolve;
-                img.src = src;
-            });
-        });
+        // 3. 🚀 PRELOAD DIRECTLY INTO SHARED MEMORY CACHE 🚀
+        const imagePromises = ALL_TRAIT_SRC_PATHS.map((src) => getCachedTraitImage(src));
 
-        // The BIOS screen will intentionally hold here until every file is cached!
+        // The BIOS screen will hold here until every file is cached in memory!
         await Promise.all(imagePromises);
 
         // 4. Update the screen to show we finished downloading
         lines = [
             ...lines,
-            `[OK] ${preloadPaths.length} visual assets cached to VRAM.`,
+            `[OK] ${ALL_TRAIT_SRC_PATHS.length} visual assets cached to VRAM.`,
             "Starting Desktop Environment...",
         ];
 

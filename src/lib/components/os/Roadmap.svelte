@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onMount, onDestroy, tick } from "svelte";
     import { fade } from "svelte/transition";
 
     // --- STATE ---
@@ -289,7 +289,12 @@
         setTimeout(updateNodeOffsets, 150);
 
         window.addEventListener("resize", updateNodeOffsets);
-        return () => window.removeEventListener("resize", updateNodeOffsets);
+    });
+
+    onDestroy(() => {
+        if (typeof window !== "undefined") {
+            window.removeEventListener("resize", updateNodeOffsets);
+        }
     });
 </script>
 
@@ -482,9 +487,9 @@
                         <img
                             src={`/images/roadmap/${activeMilestone.id}.png`}
                             alt={activeMilestone.name}
-                            onload={(e) => (e.currentTarget.style.display = "")}
+                            onload={(e) => ((e.currentTarget as HTMLElement).style.display = "")}
                             onerror={(e) =>
-                                (e.currentTarget.style.display = "none")}
+                                ((e.currentTarget as HTMLElement).style.display = "none")}
                         />
                         <span class="placeholder-text"
                             >🖼️ {activeMilestone.name}.bmp</span
@@ -543,10 +548,10 @@
                                             src={`/images/roadmap/${milestone.id}.png`}
                                             alt={milestone.name}
                                             onload={(e) =>
-                                                (e.currentTarget.style.display =
+                                                ((e.currentTarget as HTMLElement).style.display =
                                                     "")}
                                             onerror={(e) =>
-                                                (e.currentTarget.style.display =
+                                                ((e.currentTarget as HTMLElement).style.display =
                                                     "none")}
                                         />
                                         <span class="placeholder-text"

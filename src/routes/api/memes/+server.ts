@@ -2,8 +2,25 @@ import { json } from "@sveltejs/kit";
 import { supabase } from "$lib/supabaseClient";
 import { pipeline } from "@xenova/transformers";
 
+const CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
+};
+
+// Module-level singleton to prevent re-instantiating the ~90MB ONNX pipeline on warm lambdas
+let extractorPromise: Promise<any> | null = null;
+function getExtractor() {
+  if (!extractorPromise) {
+    extractorPromise = pipeline(
+      "feature-extraction",
+      "Xenova/all-MiniLM-L6-v2",
+    );
+  }
+  return extractorPromise;
+}
+
 export async function GET({ url }) {
-  const search = url.searchParams.get("search");
+  const searchParam = url.searchParams.get("search");
+  const search = searchParam ? searchParam.trim() : "";
   const type = url.searchParams.get("type") || "photo";
   const sort = url.searchParams.get("sort") || "popular";
   const limit = parseInt(url.searchParams.get("limit") || "30", 10);
@@ -26,7 +43,11 @@ export async function GET({ url }) {
       .range(offset, offset + limit - 1);
 
     const { data, error } = await query;
-    return json(error ? { error: error.message } : data);
+    if (error) {
+      return json({ error: error.message }, { status: 500 });
+    }
+
+    return json(data, { headers: CACHE_HEADERS });
   }
 
   // ==================== SEARCH ====================
@@ -40,12 +61,9 @@ export async function GET({ url }) {
 
     let results: any[] = keywordMatches || [];
 
-    // 2. Only do semantic search for PHOTOS (not for videos)
-    if (type === "photo") {
-      const extractor = await pipeline(
-        "feature-extraction",
-        "Xenova/all-MiniLM-L6-v2",
-      );
+    // 2. Only do semantic search for PHOTOS (not for videos) and if query has at least 2 chars
+    if (type === "photo" && search.length >= 2) {
+      const extractor = await getExtractor();
       const output = await extractor(search, {
         pooling: "mean",
         normalize: true,
@@ -75,7 +93,9 @@ export async function GET({ url }) {
     );
 
     // Apply pagination
-    return json(uniqueResults.slice(offset, offset + limit));
+    return json(uniqueResults.slice(offset, offset + limit), {
+      headers: CACHE_HEADERS,
+    });
   } catch (err: any) {
     return json({ error: err.message }, { status: 500 });
   }

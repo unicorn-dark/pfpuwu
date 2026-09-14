@@ -386,7 +386,8 @@
                 src="/images/hectacorn.jpg"
                 alt="Hectocorn"
                 class="preview-img"
-                onerror={(e) => (e.currentTarget.style.display = "none")}
+                onerror={(e) =>
+                    ((e.currentTarget as HTMLElement).style.display = "none")}
             />
             <div class="instructions">
                 <strong>PC:</strong> Press [SPACE] or Click<br />

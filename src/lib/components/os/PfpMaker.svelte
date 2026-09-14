@@ -1,104 +1,11 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-
-    // 1. Removed 'background' from the layer order entirely
-    const LAYER_ORDER = [
-        "body",
-        "face",
-        "eyes",
-        "head",
-        "costume",
-        "accessory",
-        "horn",
-    ];
-
-    // 2. Defined background options as its own standalone constant
-    const BACKGROUND_OPTIONS = [
-        { name: "Pitch Black", hex: "#000000" },
-        { name: "Midnight Blue", hex: "#000033" },
-        { name: "Deep Navy", hex: "#000080" },
-        { name: "Dark Crimson", hex: "#4A0404" },
-        { name: "Bordeaux", hex: "#660033" },
-        { name: "Deep Eggplant", hex: "#301934" },
-        { name: "Indigo", hex: "#4B0082" },
-        { name: "Plum", hex: "#483248" },
-        { name: "Void Purple", hex: "#2E0854" },
-    ];
-
-    // The Vite Magic: Auto-discover every PNG
-    const allTraitFiles = import.meta.glob("/static/traits/**/*.png");
-    const filePaths = Object.keys(allTraitFiles);
-
-    const TRAITS: Record<string, any[]> = {};
-    const RING_OPTIONS: any[] = [{ name: "None", id: null }];
-
-    LAYER_ORDER.forEach((layer) => {
-        TRAITS[layer] = layer === "body" ? [] : [{ name: "None", src: null }];
-    });
-
-    filePaths.forEach((path) => {
-        const parts = path.split("/");
-        const fileName = parts.pop() as string;
-        const folderName = parts.pop() as string;
-
-        if (folderName === "background") return;
-
-        let cleanName = fileName.replace(".png", "").replace(/[-_]/g, " ");
-        cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-        const publicUrl = path.replace("/static", "");
-
-        if (folderName === "ring") {
-            if (fileName.startsWith("top-ring")) {
-                const colorId = fileName
-                    .replace("top-ring-", "")
-                    .replace(".png", "");
-                RING_OPTIONS.push({ name: `Color ${colorId}`, id: colorId });
-            }
-        } else if (TRAITS[folderName]) {
-            TRAITS[folderName].push({ name: cleanName, src: publicUrl });
-        }
-    });
-
-    RING_OPTIONS.sort((a, b) => {
-        if (!a.id) return -1;
-        if (!b.id) return 1;
-        return parseInt(a.id) - parseInt(b.id);
-    });
-
-    const imageCache = new Map<string, HTMLImageElement>();
-
-    function getCachedImage(src: string): Promise<HTMLImageElement | null> {
-        if (!src) return Promise.resolve(null);
-        if (imageCache.has(src)) return Promise.resolve(imageCache.get(src)!);
-
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-                imageCache.set(src, img);
-                resolve(img);
-            };
-            img.onerror = () => {
-                console.warn(`Failed to load: ${src}`);
-                resolve(null);
-            };
-            img.src = src;
-        });
-    }
-
-    function preloadAllAssets() {
-        Object.values(TRAITS).forEach((traitCategory) => {
-            traitCategory.forEach((trait) => {
-                if (trait.src) getCachedImage(trait.src);
-            });
-        });
-        RING_OPTIONS.forEach((ring) => {
-            if (ring.id) {
-                getCachedImage(`/traits/ring/top-ring-${ring.id}.png`);
-                getCachedImage(`/traits/ring/bottom-ring-${ring.id}.png`);
-            }
-        });
-    }
+    import {
+        LAYER_ORDER,
+        BACKGROUND_OPTIONS,
+        TRAITS,
+        RING_OPTIONS,
+        getCachedTraitImage,
+    } from "$lib/utils/traits";
 
     let currentTraits: Record<string, number> = $state({});
     LAYER_ORDER.forEach((layer) => {
@@ -160,12 +67,14 @@
             }
         });
 
-        const images = await Promise.all(imagePathsToLoad.map(getCachedImage));
+        const images = await Promise.all(imagePathsToLoad.map(getCachedTraitImage));
+        if (!canvasElement) return;
+        const canvas = canvasElement;
 
         // 5. Apply background based on state
         const bgHex = BACKGROUND_OPTIONS[activeBg].hex;
         ctx.fillStyle = bgHex;
-        ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         images.forEach((img) => {
             if (img) {
@@ -173,8 +82,8 @@
                     img,
                     0,
                     0,
-                    canvasElement.width,
-                    canvasElement.height,
+                    canvas.width,
+                    canvas.height,
                 );
             }
         });
@@ -185,11 +94,6 @@
     $effect(() => {
         // Trigger effect implicitly by reading state inside renderPfp
         renderPfp();
-    });
-
-    onMount(() => {
-        renderPfp();
-        setTimeout(preloadAllAssets, 500);
     });
 
     function randomize() {

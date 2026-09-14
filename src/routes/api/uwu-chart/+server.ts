@@ -9,6 +9,10 @@ const CACHE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
 // The "Lock" that prevents double-fetching
 let activeFetchPromise: Promise<any> | null = null; 
 
+const CACHE_HEADERS = {
+    'Cache-Control': 'public, max-age=60, s-maxage=120, stale-while-revalidate=300',
+};
+
 export async function GET() {
     const CA = "UWUy7J86LUiBv5SjAUZ53LMGhtnqvbQ7QNSSkyupump";
     const currentTime = Date.now();
@@ -16,14 +20,14 @@ export async function GET() {
     // 1. Check if we have fresh data in the cache
     if (cachedData && (currentTime - cacheTimestamp) < CACHE_DURATION_MS) {
         console.log("🟢 Serving chart data from Server Cache!");
-        return json(cachedData);
+        return json(cachedData, { headers: CACHE_HEADERS });
     }
 
     // 2. PROMISE LOCK: If we are ALREADY asking Birdeye, just wait for that answer!
     if (activeFetchPromise) {
         console.log("⏳ Request is waiting for an active Birdeye fetch to finish...");
         const sharedData = await activeFetchPromise;
-        return json(sharedData);
+        return json(sharedData, { headers: CACHE_HEADERS });
     }
 
     // 3. If no cache and no active fetch, we must be the first request. Lock it!
@@ -70,5 +74,5 @@ export async function GET() {
         return json(finalData, { status: finalData.status });
     }
     
-    return json(finalData);
+    return json(finalData, { headers: CACHE_HEADERS });
 }

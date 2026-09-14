@@ -13,10 +13,18 @@ export async function GET() {
       .select("*", { count: "exact", head: true })
       .eq("type", "video");
 
-    return json({
-      photo: photoCount || 0,
-      video: videoCount || 0,
-    });
+    return json(
+      {
+        photo: photoCount || 0,
+        video: videoCount || 0,
+      },
+      {
+        headers: {
+          "Cache-Control":
+            "public, max-age=120, s-maxage=300, stale-while-revalidate=600",
+        },
+      },
+    );
   } catch (err: any) {
     return json({ error: err.message }, { status: 500 });
   }

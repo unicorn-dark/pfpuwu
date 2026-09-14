@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 
 export interface WindowState {
     id: string;
@@ -16,18 +16,16 @@ export const highestZIndex = writable(10);
 
 export const openWindow = (id: string, title: string, width = 400, height = 300) => {
     highestZIndex.update(n => n + 1);
+    const newZ = get(highestZIndex);
     
     activeWindows.update(windows => {
         const existing = windows.find(w => w.id === id);
         if (existing) {
             existing.isOpen = true;
             existing.isMinimized = false; // Restore if it was minimized
-            highestZIndex.subscribe(val => existing.zIndex = val)();
+            existing.zIndex = newZ;
             return [...windows];
         }
-        
-        let newZ = 10;
-        highestZIndex.subscribe(val => newZ = val)();
         
         return [...windows, { id, title, isOpen: true, isMinimized: false, zIndex: newZ, width, height }];
     });
@@ -43,10 +41,11 @@ export const closeWindow = (id: string) => {
 
 export const focusWindow = (id: string) => {
     highestZIndex.update(n => n + 1);
+    const newZ = get(highestZIndex);
     activeWindows.update(windows => {
         const win = windows.find(w => w.id === id);
         if (win) {
-            highestZIndex.subscribe(val => win.zIndex = val)();
+            win.zIndex = newZ;
         }
         return [...windows];
     });
@@ -62,11 +61,12 @@ export const minimizeWindow = (id: string) => {
 
 export const restoreWindow = (id: string) => {
     highestZIndex.update(n => n + 1);
+    const newZ = get(highestZIndex);
     activeWindows.update(windows => {
         const win = windows.find(w => w.id === id);
         if (win) {
             win.isMinimized = false;
-            highestZIndex.subscribe(val => win.zIndex = val)();
+            win.zIndex = newZ;
         }
         return [...windows];
     });

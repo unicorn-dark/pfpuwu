@@ -142,8 +142,14 @@
                     exportStatusText = `Downloading ${processed}/${totalExportCount}`;
 
                     try {
-                        const proxyUrl = `/api/proxy?url=${encodeURIComponent(meme.url)}`;
-                        const response = await fetch(proxyUrl);
+                        let response: Response;
+                        try {
+                            response = await fetch(meme.url);
+                            if (!response.ok) throw new Error("Direct fetch failed");
+                        } catch {
+                            const proxyUrl = `/api/proxy?url=${encodeURIComponent(meme.url)}`;
+                            response = await fetch(proxyUrl);
+                        }
                         if (!response.ok) continue;
 
                         yield {
@@ -227,7 +233,7 @@
         errorMessage = "";
 
         try {
-            let nextBatch = pageCache.get(cacheKey);
+            let nextBatch: Meme[] | undefined = pageCache.get(cacheKey);
 
             if (!nextBatch) {
                 let url = `/api/memes?type=${filterType}&sort=${sortBy}&limit=${pageSize}&offset=${offset}`;
@@ -238,11 +244,12 @@
                 const res = await fetch(url);
                 if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
-                nextBatch = await res.json();
-                pageCache.set(cacheKey, nextBatch);
+                const fetched: Meme[] = await res.json();
+                nextBatch = fetched;
+                pageCache.set(cacheKey, fetched);
             }
 
-            if (fetchId !== activeFetchId) return;
+            if (fetchId !== activeFetchId || !nextBatch) return;
 
             const newItems = nextBatch.filter(
                 (newItem) =>
@@ -303,13 +310,11 @@
         filterType = type;
         searchQuery = ""; // Clear search when switching tabs
         memes = [];
-        pageCache.clear();
         fetchMemes();
     }
 
     function onSortChange() {
         memes = [];
-        pageCache.clear();
         fetchMemes();
     }
 
@@ -790,15 +795,19 @@
                             onclick={() => selectMeme(meme)}
                         >
                             {#if meme.type === "photo"}
-                                <img src={meme.url} alt="Thumbnail" />
+                                <img
+                                    src={meme.url}
+                                    alt="Thumbnail"
+                                    loading="lazy"
+                                    decoding="async"
+                                />
                             {:else}
                                 <video
                                     src={`${meme.url}#t=0.001`}
                                     muted
                                     preload="metadata"
                                     playsinline
-                                    webkit-playsinline
-                                />
+                                ></video>
                             {/if}
                             {#if meme.score && meme.score > 0}
                                 <div class="mini-score">⭐ {meme.score}</div>
