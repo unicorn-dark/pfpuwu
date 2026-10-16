@@ -141,12 +141,27 @@
 <div class="pfp-maker-layout">
     <div class="preview-box field-row">
         <div class="canvas-container">
-            <canvas
-                bind:this={canvasElement}
-                class:is-loading={isRendering}
-                width="512"
-                height="512"
-            ></canvas>
+            <div class="canvas-wrapper">
+                <canvas
+                    bind:this={canvasElement}
+                    class:is-loading={isRendering}
+                    width="512"
+                    height="512"
+                ></canvas>
+
+                <!-- Classic Windows 98 Blue Bar Artist Credit on Image Preview -->
+                <div class="artist-credit-bar">
+                    <span>Artist - </span>
+                    <a
+                        href="https://x.com/muzen28"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Artist: @muzen28 on X"
+                    >
+                        muzen
+                    </a>
+                </div>
+            </div>
         </div>
         <div class="action-row">
             <button class="win98-btn" onclick={randomize}>🎲 Randomize</button>
@@ -291,6 +306,7 @@
         box-sizing: border-box;
         flex-grow: 1;
         min-height: 0;
+        position: relative;
     }
 
     .preview-box {
@@ -315,7 +331,21 @@
         overflow: hidden;
     }
 
+    .canvas-wrapper {
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        max-width: 100%;
+        max-height: 100%;
+        aspect-ratio: 1;
+        width: 100%;
+        height: 100%;
+    }
+
     canvas {
+        width: 100%;
+        height: 100%;
         max-width: 100%;
         max-height: 100%;
         aspect-ratio: 1;
@@ -584,6 +614,39 @@
             inset 1px 1px 0px #000000;
     }
 
+    /* --- Classic Windows 98 Blue Bar Artist Credit --- */
+    .artist-credit-bar {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        z-index: 10;
+        display: inline-flex;
+        align-items: center;
+        background: #000080;
+        color: #ffffff;
+        font-family: 'MS Sans Serif', 'Tahoma', sans-serif;
+        font-size: 11px;
+        font-weight: bold;
+        padding: 3px 8px;
+        border: 1px solid #000040;
+        box-shadow: 1px 1px 0px rgba(0, 0, 0, 0.4);
+        user-select: none;
+        white-space: nowrap;
+        line-height: 1.2;
+    }
+
+    .artist-credit-bar a {
+        color: #ffffff;
+        text-decoration: underline;
+        margin-left: 3px;
+        cursor: pointer;
+    }
+
+    .artist-credit-bar a:hover {
+        color: #ffff00;
+        text-decoration: underline;
+    }
+
     @media (max-width: 768px) {
         .pfp-maker-layout {
             flex-direction: column;
@@ -673,6 +736,14 @@
         .tooltip-toast {
             bottom: 20px;
             position: absolute;
+        }
+
+        .artist-credit-bar {
+            bottom: 4px;
+            right: 6px;
+            padding: 2px 6px;
+            font-size: 10px;
+            z-index: 50;
         }
     }
 </style>

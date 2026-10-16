@@ -4,11 +4,12 @@ import type { RequestHandler } from './$types';
 import crypto from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import { getOAuth1RequestToken } from '$lib/server/twitterOAuth';
+import { resolveAppOrigin } from '$lib/server/origin';
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
-    const origin = url.origin;
+export const GET: RequestHandler = async ({ url, cookies, request }) => {
+    const { origin, isHttps } = resolveAppOrigin(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
-    const isProd = url.protocol === 'https:';
+    const isProd = isHttps;
 
     const apiKey = env.X_API_KEY;
     const apiSecret = env.X_API_SECRET;

@@ -8,9 +8,10 @@ import {
     getOAuth1UserProfile,
     type TwitterUser
 } from '$lib/server/twitterOAuth';
+import { resolveAppOrigin } from '$lib/server/origin';
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
-    const origin = url.origin;
+export const GET: RequestHandler = async ({ url, cookies, request }) => {
+    const { origin } = resolveAppOrigin(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
 
     // Check if user cancelled authorization
@@ -254,6 +255,33 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
         throw redirect(302, '/?auth_error=Failed+to+authenticate+session');
     }
 
-    // Redirect to the Supabase action_link which validates and sets the session!
-    throw redirect(302, linkData.properties.action_link);
+    // Exchange the action_link server-side to guarantee redirect directly to origin/#access_token=...
+    // This protects against Supabase falling back to localhost:3000 if the domain is not yet whitelisted in Supabase dashboard
+    let destinationUrl = linkData.properties.action_link;
+    try {
+        const verifyRes = await fetch(linkData.properties.action_link, {
+            method: 'GET',
+            redirect: 'manual'
+        });
+
+        const location = verifyRes.headers.get('location');
+        if (location && location.includes('#access_token=')) {
+            const hashIndex = location.indexOf('#');
+            if (hashIndex !== -1) {
+                const hashPart = location.slice(hashIndex);
+                destinationUrl = `${origin}/${hashPart}`;
+            }
+        } else if (location && location.startsWith('http')) {
+            try {
+                const parsedLoc = new URL(location);
+                if (parsedLoc.hash) {
+                    destinationUrl = `${origin}/${parsedLoc.hash}`;
+                }
+            } catch {}
+        }
+    } catch (e) {
+        console.warn('Server-side verify probe failed, using direct action_link:', e);
+    }
+
+    throw redirect(302, destinationUrl);
 };
