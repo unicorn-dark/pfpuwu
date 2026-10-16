@@ -105,7 +105,7 @@ export const highestZIndex = writable(20);
 export const isDraggingAnyWindow = writable(false);
 
 // Bottom-Right Docked Chat Drawer State
-export const isChatDrawerOpen = writable<boolean>(true);
+export const isChatDrawerOpen = writable<boolean>(false);
 export function openChatDrawer() {
     isChatDrawerOpen.set(true);
 }
