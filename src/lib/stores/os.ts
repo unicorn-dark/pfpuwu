@@ -96,6 +96,17 @@ export const APP_REGISTRY: AppDefinition[] = [
         minWidth: 340,
         minHeight: 320,
         route: '/roadmap'
+    },
+    {
+        id: 'uwu-world',
+        title: 'UwU World (MMO)',
+        icon: '🕹️',
+        defaultWidth: 960,
+        defaultHeight: 680,
+        minWidth: 360,
+        minHeight: 400,
+        route: '/world',
+        badge: 'MMO'
     }
 ];
 

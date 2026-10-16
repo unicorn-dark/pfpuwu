@@ -15,6 +15,7 @@
     import MinesweeperApp from "./MinesweeperApp.svelte";
     import PrivateersApp from "./PrivateersApp.svelte";
     import Roadmap from "./Roadmap.svelte";
+    import UwUWorldApp from "./UwUWorldApp.svelte";
     import SoundManager from "./SoundManager.svelte";
     import XAuthModal from "./XAuthModal.svelte";
     import AvatarCustomizerModal from "./AvatarCustomizerModal.svelte";
@@ -60,6 +61,9 @@
                 break;
             case "/roadmap":
                 launchApp("roadmap");
+                break;
+            case "/world":
+                launchApp("uwu-world");
                 break;
             case "/blog":
                 launchApp("privateers-blog");
@@ -174,6 +178,10 @@
                     {:else if win.id === "roadmap"}
                         <div class="app-content">
                             <Roadmap />
+                        </div>
+                    {:else if win.id === "uwu-world"}
+                        <div class="app-content">
+                            <UwUWorldApp />
                         </div>
                     {/if}
                 </Window>
