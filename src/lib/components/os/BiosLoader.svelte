@@ -1,13 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { isBooting } from "$lib/stores/os";
-    import {
-        ALL_TRAIT_SRC_PATHS,
-        LAYER_ORDER,
-        TRAITS,
-        getCachedTraitImage
-    } from "$lib/utils/traits";
+    import { isBooting } from "$lib/stores/os.js";
 
+    // We use $state for variables that need to update the UI
     let lines: string[] = $state([]);
 
     const originalAscii = `
@@ -62,7 +57,7 @@
                      ~---~+^*+*^++>+++++++++++++++++++++++++*^+*^+*^++++++++++++*^^^++^*=--~
                      ~-----~*^+*^^*+++++++++++++++++++++++++**=+*+^*++++++++++++*>^+^^=----~
                      ~------~*^*^*++++++++++++++++++++++++++++^*+++**++++++++++++*>^+------~
-                       ~--~=*))^+++++++++++++++++++++++++++++++++++**++++++++++++++*<
+                       ~--~=*))^+++++++++++++++++++++++++++++++++++**+++++++++++++*<=~---~
                          ]((((^++++++++++++++++++++++++++++++++++++**++++++++++++++*<
                          ]((]>*++++++++++++++++++++++++++++++++++++^^++++++++++++++*<
                         ](((<*+++++++++++++++++++++++++++++++++++++^^++++++++++++++*^
@@ -76,12 +71,14 @@
                                    ++++++++++++++*            *++++++++++++++*
                                    *+++++++++++++              *++++++++++++*
                                        ++*******
-`;
+
+
+                                                                                                                `;
 
     const glitchChars = "[]()<>^=*+@#%{}";
     const asciiLines = originalAscii.split("\n");
-    const colorMap = asciiLines.map((line, y) =>
-        line.split("").map((char, x) => {
+    const colorMap = asciiLines.map((line, y) => {
+        return line.split("").map((char, x) => {
             if (char === " ") return null;
             if (char === "-") return "#ffffff";
             if (char === "(") return "#b300b3";
@@ -101,8 +98,8 @@
             if (y === 53) return "#ffffff";
             if (y >= 54) return "#fcd303";
             return "#ffffff";
-        })
-    );
+        });
+    });
 
     const generateFrame = (isGlitching = false) => {
         let newHtml = "";
@@ -112,68 +109,75 @@
             for (let x = 0; x < asciiLines[y].length; x++) {
                 const origChar = asciiLines[y][x];
                 let displayChar = origChar;
-                if (isGlitching && origChar !== " " && origChar !== "\n" && Math.random() < 0.15) {
-                    displayChar = glitchChars[Math.floor(Math.random() * glitchChars.length)];
+
+                if (isGlitching && origChar !== " " && origChar !== "\n") {
+                    if (Math.random() < 0.15) {
+                        displayChar =
+                            glitchChars[
+                                Math.floor(Math.random() * glitchChars.length)
+                            ];
+                    }
                 }
+
                 const color = colorMap[y][x];
                 if (color !== currentSpanColor) {
-                    if (currentSpanColor !== null) lineHtml += "</span>";
+                    if (currentSpanColor !== null) {
+                        lineHtml += "</span>";
+                    }
                     lineHtml += `<span style="color: ${color}; text-shadow: 0 0 2px ${color}88;">`;
                     currentSpanColor = color;
                 }
                 lineHtml += displayChar;
             }
-            if (currentSpanColor !== null) lineHtml += "</span>";
+            if (currentSpanColor !== null) {
+                lineHtml += "</span>";
+            }
             newHtml += lineHtml + "\n";
         }
         return newHtml;
     };
 
-    let displayHtml = $state(generateFrame(false));
-    let glitchInterval: ReturnType<typeof setInterval>;
+    import { ALL_TRAIT_SRC_PATHS, getCachedTraitImage } from "$lib/utils/traits";
 
-    function skipBoot() {
-        isBooting.set(false);
-    }
+    let displayHtml = $state(generateFrame(false));
+    let glitchInterval: any;
 
     onMount(async () => {
+        // 1. Start the visual glitch
         glitchInterval = setInterval(() => {
             displayHtml = generateFrame(true);
-        }, 60);
+        }, 50);
 
+        // 2. Dump the initial text so the user isn't staring at a blank screen
         lines = [
-            "Unicorn Memetic Social OS v2.0 (Y2K Edition)",
-            "Mounting X-Identity & Social Layer...",
-            "Pre-warming initial avatar layers..."
+            "Unicorn Mememtic Warfare LLC 2026.",
+            "SVELTEKIT OS ACPI BIOS Revision 3105",
+            "Mounting Virtual File System...",
+            "Loading graphical subsystems into VRAM (Please wait)...",
         ];
 
-        // Fast non-blocking boot: preload only the first default trait per layer (~7 files)
-        const starterPaths: string[] = [];
-        LAYER_ORDER.forEach((layer) => {
-            const defaultIdx = layer !== "body" && TRAITS[layer]?.length > 1 ? 1 : 0;
-            const src = TRAITS[layer]?.[defaultIdx]?.src;
-            if (src) starterPaths.push(src);
-        });
+        // 3. 🚀 PRELOAD DIRECTLY INTO SHARED MEMORY CACHE 🚀
+        const imagePromises = ALL_TRAIT_SRC_PATHS.map((src) => getCachedTraitImage(src));
 
-        await Promise.race([
-            Promise.all(starterPaths.map((src) => getCachedTraitImage(src))),
-            new Promise((r) => setTimeout(r, 450))
-        ]);
+        // The BIOS screen will hold here until every file is cached in memory!
+        await Promise.all(imagePromises);
 
-        // Warm the remaining trait files in the background without blocking boot
-        setTimeout(() => {
-            ALL_TRAIT_SRC_PATHS.forEach((src) => {
-                getCachedTraitImage(src);
-            });
-        }, 100);
-
+        // 4. Update the screen to show we finished downloading
         lines = [
             ...lines,
-            "[OK] Y2K Window Manager & Ephemeral Social Layer Ready.",
-            "Booting Desktop..."
+            `[OK] ${ALL_TRAIT_SRC_PATHS.length} visual assets cached to VRAM.`,
+            "Starting Desktop Environment...",
         ];
 
-        await new Promise((r) => setTimeout(r, 180));
+        // 5. Wait strictly for the browser to finish rendering the basic HTML/CSS
+        if (document.readyState !== "complete") {
+            await new Promise((resolve) =>
+                window.addEventListener("load", resolve),
+            );
+        }
+
+        // 6. A tiny 300ms cinematic pause, then instantly boot into the OS.
+        await new Promise((r) => setTimeout(r, 300));
         isBooting.set(false);
     });
 
@@ -182,22 +186,20 @@
     });
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="bios-screen" onclick={skipBoot}>
+<div class="bios-screen">
     <div class="bios-header">
         <div class="logo-container">
             <pre class="ascii-unicorn">{@html displayHtml}</pre>
         </div>
         <div class="title-container">
             <h1 class="megatrends-title">Unicorn</h1>
-            <h2 class="megatrends-subtitle">pfpuwu social os // y2k</h2>
+            <h2 class="megatrends-subtitle">it's in the name</h2>
         </div>
     </div>
 
     <div class="boot-text">
         {#each lines as line}
-            <p>{line}</p>
+            <p>{line === " " ? "\u00A0" : line}</p>
         {/each}
     </div>
 </div>
@@ -205,24 +207,23 @@
 <style>
     .bios-screen {
         width: 100vw;
-        height: 100dvh;
-        background-color: #0b0d13;
+        height: 100vh;
+        background-color: #111;
         color: #fff;
-        font-family: var(--os-font-mono);
-        padding: 2rem 3rem;
+        font-family: "Courier New", Courier, monospace;
+        padding: 2rem 4rem;
         box-sizing: border-box;
         overflow: hidden;
         display: flex;
         flex-direction: column;
         justify-content: flex-start;
-        cursor: pointer;
     }
 
     .bios-header {
         display: flex;
         align-items: center;
-        gap: 2.5rem;
-        margin-bottom: 1.5rem;
+        gap: 3rem; /* Increased gap to give the larger ASCII breathing room */
+        margin-bottom: 2rem;
     }
 
     .logo-container {
@@ -230,10 +231,11 @@
     }
 
     .ascii-unicorn {
-        font-family: var(--os-font-mono);
+        font-family: "Courier New", Courier, monospace;
         font-weight: bold;
-        font-size: 4.5px;
-        line-height: 4.5px;
+        /* Doubled the font size to make the ASCII much bigger on Desktop */
+        font-size: 5px;
+        line-height: 5px;
         letter-spacing: 0;
         margin: 0;
     }
@@ -245,46 +247,57 @@
 
     .megatrends-title {
         font-family: "Times New Roman", Times, serif;
-        font-size: 4.2rem;
+        font-size: 5rem;
         font-weight: bold;
-        color: #f8fafc;
+        color: #eeeeee;
         margin: 0;
         letter-spacing: -0.02em;
         line-height: 1;
     }
 
     .megatrends-subtitle {
-        font-family: var(--os-font-mono);
-        font-size: 0.95rem;
-        color: #00e5ff;
-        margin: 8px 0 0 0;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        text-shadow: 0 0 10px rgba(0, 229, 255, 0.7);
+        font-family:
+            "Courier New", Courier, monospace; /* Hacker terminal font */
+        font-size: 1rem;
+
+        color: #fcd303; /* Cyberpunk Alert Yellow */
+        margin: 0;
+        margin-top: 8px;
+        letter-spacing: 0.2em; /* Spaced out for a cinematic look */
+        /* Subtle neon glow */
+        text-shadow: 0 0 10px rgba(252, 211, 3, 0.8);
+    }
+
+    .boot-text {
+        width: 100%;
+        text-align: left;
     }
 
     .boot-text p {
-        margin: 0 0 0.35rem 0;
-        font-size: 0.95rem;
+        margin: 0 0 0.4rem 0;
+        font-size: 1.1rem;
         font-weight: bold;
-        color: #e2e8f0;
+        color: #e0e0e0;
+        text-shadow: 0 0 1px rgba(255, 255, 255, 0.4);
     }
 
+    /* Mobile Responsiveness */
     @media (max-width: 768px) {
         .bios-screen {
             padding: 1rem;
         }
+
         .bios-header {
             flex-direction: column;
             align-items: flex-start;
-            gap: 0.75rem;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
-        .megatrends-title {
-            font-size: 2.8rem;
-        }
+
         .ascii-unicorn {
-            font-size: 2.8px;
-            line-height: 2.8px;
+            /* Kept smaller on mobile so the grid doesn't blow out the viewport */
+            font-size: 3px;
+            line-height: 3px;
         }
     }
 </style>
