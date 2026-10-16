@@ -1,11 +1,12 @@
 // src/lib/game/activities/miniGames.ts
 /**
- * Collaborative activities, casino sound effects, Vault Heist manager, and Web Audio retro synthesizer for UwU World
+ * Collaborative activities, multi-genre Web Audio synthesizer (Classical, House, Electronic, Techno, Rave),
+ * casino sound effects, and Vault Heist manager for UwU World.
  */
 
 import { gridDistance } from '../isometric/isoMath';
 export { DiceDuelManager, type DiceSeat, type PlayerScore, type DiceGamePhase } from './diceDuel';
-export { RouletteGameManager, ROULETTE_SECTORS, type RouletteSector } from './rouletteGame';
+export { RouletteGameManager, ROULETTE_SECTORS, BETTABLE_ROULETTE_SECTORS, type RouletteSector } from './rouletteGame';
 
 export interface VaultState {
     pads: [boolean, boolean, boolean, boolean];
@@ -16,18 +17,140 @@ export interface VaultState {
     heroes?: string[];
 }
 
+export type MusicGenre = 'Classical' | 'House' | 'Electronic' | 'Techno' | 'Rave';
+
 export interface DJTrack {
     id: number;
+    genre: MusicGenre;
     title: string;
     bpm: number;
+    wave: OscillatorType;
+    bassWave: OscillatorType;
     notes: number[];
+    bassNotes: number[];
+    drumPattern: 'none' | 'four_floor' | 'electro' | 'techno' | 'rave';
 }
 
 export const DJ_TRACKS: DJTrack[] = [
-    { id: 1, title: '\u{1F3B5} 8-Bit Cyber Funk', bpm: 124, notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63] },
-    { id: 2, title: '\u{1FA99} Neon Disco Wave', bpm: 128, notes: [220.0, 277.18, 329.63, 440.0, 329.63, 277.18] },
-    { id: 3, title: '\u{1F47E} Glitch Hop 98', bpm: 110, notes: [174.61, 220.0, 261.63, 349.23, 261.63, 220.0] },
-    { id: 4, title: '\u{26A1} Synthwave Midnight', bpm: 130, notes: [196.0, 246.94, 293.66, 392.0, 293.66, 246.94] }
+    // --- CLASSICAL ---
+    {
+        id: 1,
+        genre: 'Classical',
+        title: '\u{1F3BB} Bach — Toccata & Fugue in D Minor',
+        bpm: 112,
+        wave: 'sawtooth',
+        bassWave: 'triangle',
+        notes: [587.33, 523.25, 587.33, 440.0, 349.23, 392.0, 440.0, 293.66, 440.0, 523.25, 466.16, 440.0, 392.0, 349.23, 329.63, 293.66],
+        bassNotes: [146.83, 146.83, 110.0, 110.0, 174.61, 146.83, 110.0, 146.83],
+        drumPattern: 'none'
+    },
+    {
+        id: 2,
+        genre: 'Classical',
+        title: '\u{1F3BC} Beethoven — Für Elise & Moonlight Arpeggio',
+        bpm: 118,
+        wave: 'triangle',
+        bassWave: 'sine',
+        notes: [659.25, 622.25, 659.25, 622.25, 659.25, 493.88, 587.33, 523.25, 440.0, 261.63, 329.63, 440.0, 493.88, 329.63, 415.3, 493.88],
+        bassNotes: [110.0, 164.81, 220.0, 164.81, 82.41, 164.81, 207.65, 164.81],
+        drumPattern: 'none'
+    },
+
+    // --- HOUSE ---
+    {
+        id: 3,
+        genre: 'House',
+        title: '\u{1F3E0} Ibiza Sunset Deep House Groove',
+        bpm: 124,
+        wave: 'triangle',
+        bassWave: 'sine',
+        notes: [329.63, 392.0, 493.88, 587.33, 493.88, 392.0, 369.99, 440.0, 523.25, 440.0, 392.0, 329.63],
+        bassNotes: [82.41, 82.41, 98.0, 110.0, 73.42, 73.42, 87.31, 98.0],
+        drumPattern: 'four_floor'
+    },
+    {
+        id: 4,
+        genre: 'House',
+        title: '\u{1F3B9} French Filter Piano House',
+        bpm: 126,
+        wave: 'sawtooth',
+        bassWave: 'triangle',
+        notes: [440.0, 554.37, 659.25, 880.0, 659.25, 554.37, 493.88, 587.33, 739.99, 659.25, 587.33, 493.88],
+        bassNotes: [110.0, 110.0, 146.83, 164.81, 98.0, 123.47, 146.83, 123.47],
+        drumPattern: 'four_floor'
+    },
+
+    // --- ELECTRONIC ---
+    {
+        id: 5,
+        genre: 'Electronic',
+        title: '\u{26A1} Daft Cyber Funk Odyssey',
+        bpm: 120,
+        wave: 'square',
+        bassWave: 'sawtooth',
+        notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23, 440.0, 587.33, 440.0, 349.23],
+        bassNotes: [65.41, 130.81, 65.41, 130.81, 73.42, 146.83, 87.31, 174.61],
+        drumPattern: 'electro'
+    },
+    {
+        id: 6,
+        genre: 'Electronic',
+        title: '\u{1F30C} Synthwave Midnight Horizon',
+        bpm: 128,
+        wave: 'sawtooth',
+        bassWave: 'sawtooth',
+        notes: [196.0, 246.94, 293.66, 392.0, 493.88, 392.0, 293.66, 246.94, 220.0, 261.63, 329.63, 440.0],
+        bassNotes: [98.0, 98.0, 98.0, 98.0, 82.41, 82.41, 110.0, 110.0],
+        drumPattern: 'electro'
+    },
+
+    // --- TECHNO ---
+    {
+        id: 7,
+        genre: 'Techno',
+        title: '\u{1F50A} Berlin Underground Acid 303',
+        bpm: 135,
+        wave: 'sawtooth',
+        bassWave: 'square',
+        notes: [146.83, 293.66, 155.56, 146.83, 220.0, 146.83, 311.13, 293.66, 146.83, 174.61, 293.66, 220.0],
+        bassNotes: [73.42, 73.42, 73.42, 77.78, 73.42, 73.42, 110.0, 73.42],
+        drumPattern: 'techno'
+    },
+    {
+        id: 8,
+        genre: 'Techno',
+        title: '\u{1F916} Industrial Warehouse Peak-Time',
+        bpm: 138,
+        wave: 'square',
+        bassWave: 'sawtooth',
+        notes: [130.81, 138.59, 130.81, 196.0, 130.81, 261.63, 196.0, 155.56],
+        bassNotes: [65.41, 65.41, 65.41, 65.41, 69.3, 69.3, 65.41, 77.78],
+        drumPattern: 'techno'
+    },
+
+    // --- RAVE ---
+    {
+        id: 9,
+        genre: 'Rave',
+        title: '\u{1F386} 90s Euphoric Hardcore Rave Anthem',
+        bpm: 148,
+        wave: 'sawtooth',
+        bassWave: 'square',
+        notes: [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25, 587.33, 698.46, 880.0, 1174.66, 880.0, 783.99],
+        bassNotes: [130.81, 261.63, 146.83, 293.66, 164.81, 329.63, 174.61, 349.23],
+        drumPattern: 'rave'
+    },
+    {
+        id: 10,
+        genre: 'Rave',
+        title: '\u{1F6A8} Big Room Laser Rave Strobe Drop',
+        bpm: 145,
+        wave: 'square',
+        bassWave: 'sawtooth',
+        notes: [440.0, 440.0, 523.25, 587.33, 659.25, 659.25, 587.33, 523.25, 493.88, 440.0, 392.0, 440.0],
+        bassNotes: [110.0, 110.0, 130.81, 146.83, 164.81, 164.81, 146.83, 110.0],
+        drumPattern: 'rave'
+    }
 ];
 
 export const RETRO_PALETTE_16 = [
@@ -38,7 +161,7 @@ export const RETRO_PALETTE_16 = [
 ];
 
 /**
- * Procedural Web Audio 8-bit Synthesizer & Casino SFX Engine
+ * Multi-Genre Web Audio Synthesizer & Casino SFX Engine
  */
 export class RetroSynthesizer {
     private ctx: AudioContext | null = null;
@@ -69,6 +192,7 @@ export class RetroSynthesizer {
         this.currentTrackIndex = DJ_TRACKS.indexOf(track);
         this.step = 0;
 
+        // 16th-note / 8th-note step clock
         const intervalMs = (60 / track.bpm / 2) * 1000;
         this.timerId = window.setInterval(() => {
             this.playNextStep(track);
@@ -78,39 +202,78 @@ export class RetroSynthesizer {
     private playNextStep(track: DJTrack) {
         if (this.isMuted || !this.ctx || this.ctx.state !== 'running') return;
 
+        const now = this.ctx.currentTime;
         const noteFreq = track.notes[this.step % track.notes.length];
+        const bassFreq = track.bassNotes[Math.floor(this.step / 2) % track.bassNotes.length];
+        const stepIdx = this.step;
         this.step++;
 
         try {
+            // 1. Lead Synth Channel
             const osc = this.ctx.createOscillator();
             const gain = this.ctx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(noteFreq, this.ctx.currentTime);
+            osc.type = track.wave;
+            osc.frequency.setValueAtTime(noteFreq, now);
 
-            gain.gain.setValueAtTime(0.032, this.ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.18);
+            const leadVol = track.genre === 'Classical' ? 0.042 : 0.032;
+            const leadDur = track.genre === 'Classical' ? 0.24 : 0.16;
+            gain.gain.setValueAtTime(leadVol, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + leadDur);
 
             osc.connect(gain);
             gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + leadDur + 0.02);
 
-            osc.start();
-            osc.stop(this.ctx.currentTime + 0.2);
+            // 2. Bassline / Counterpoint Channel
+            if (stepIdx % 2 === 0 || track.drumPattern === 'rave' || track.drumPattern === 'techno') {
+                const bass = this.ctx.createOscillator();
+                const bassGain = this.ctx.createGain();
+                bass.type = track.bassWave;
+                bass.frequency.setValueAtTime(bassFreq, now);
 
-            if (this.step % 2 === 0) {
-                const kick = this.ctx.createOscillator();
-                const kickGain = this.ctx.createGain();
-                kick.type = 'sine';
-                kick.frequency.setValueAtTime(115, this.ctx.currentTime);
-                kick.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.12);
+                bassGain.gain.setValueAtTime(0.045, now);
+                bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
-                kickGain.gain.setValueAtTime(0.09, this.ctx.currentTime);
-                kickGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.14);
+                bass.connect(bassGain);
+                bassGain.connect(this.ctx.destination);
+                bass.start(now);
+                bass.stop(now + 0.2);
+            }
 
-                kick.connect(kickGain);
-                kickGain.connect(this.ctx.destination);
+            // 3. Drum / Percussion Synthesis
+            if (track.drumPattern !== 'none') {
+                // Four-on-the-floor kick on even steps
+                if (stepIdx % 2 === 0) {
+                    const kick = this.ctx.createOscillator();
+                    const kickGain = this.ctx.createGain();
+                    kick.type = 'sine';
+                    const startPitch = track.drumPattern === 'rave' || track.drumPattern === 'techno' ? 145 : 115;
+                    kick.frequency.setValueAtTime(startPitch, now);
+                    kick.frequency.exponentialRampToValueAtTime(32, now + 0.12);
 
-                kick.start();
-                kick.stop(this.ctx.currentTime + 0.15);
+                    kickGain.gain.setValueAtTime(0.11, now);
+                    kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+                    kick.connect(kickGain);
+                    kickGain.connect(this.ctx.destination);
+                    kick.start(now);
+                    kick.stop(now + 0.15);
+                } else {
+                    // Off-beat open hi-hat / synth tick for House, Techno & Rave
+                    const hat = this.ctx.createOscillator();
+                    const hatGain = this.ctx.createGain();
+                    hat.type = 'square';
+                    hat.frequency.setValueAtTime(3200 + (stepIdx % 3) * 600, now);
+
+                    hatGain.gain.setValueAtTime(0.012, now);
+                    hatGain.gain.exponentialRampToValueAtTime(0.0005, now + 0.045);
+
+                    hat.connect(hatGain);
+                    hatGain.connect(this.ctx.destination);
+                    hat.start(now);
+                    hat.stop(now + 0.05);
+                }
             }
         } catch {}
     }
@@ -204,7 +367,7 @@ export class RetroSynthesizer {
         if (this.isMuted || !this.ctx) return;
 
         try {
-            const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+            const notes = [523.25, 659.25, 783.99, 1046.5];
             notes.forEach((freq, idx) => {
                 const osc = this.ctx!.createOscillator();
                 const gain = this.ctx!.createGain();
@@ -234,14 +397,6 @@ export class RetroSynthesizer {
     }
 }
 
-/**
- * Manages 4-player Co-op Vault logic + Holo-Decoy Bots for Solo/Small-Group Play
- * Pad coordinates match the 32x32 map around Vault Door (5.5, 16.5):
- * - Pad 1 (NW): (4.5, 14.5)
- * - Pad 2 (NE): (6.5, 14.5)
- * - Pad 3 (SW): (4.5, 18.5)
- * - Pad 4 (SE): (6.5, 18.5)
- */
 export class VaultManager {
     public state: VaultState = {
         pads: [false, false, false, false],

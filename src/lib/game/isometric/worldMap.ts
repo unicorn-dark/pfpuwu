@@ -1,14 +1,16 @@
 // src/lib/game/isometric/worldMap.ts
 /**
  * Rich 32x32 Isometric World Map & Corner-Free Collision Engine for UwU World
- * Features:
- * - Mathematically exact tile alignment: tile (x, y) spans [x, x+1] x [y, y+1] with center at (x + 0.5, y + 0.5)
- * - Offscreen static floor & 3D perimeter wall caching for 60FPS zero-lag rendering
- * - Circle-vs-AABB corner-sliding physics so characters never snag on corners or get stuck
- * - Symmetric Casino Pit layouts for Dice Duel, Meme Roulette, Cyber Blackjack 21, and Lucky Slots
+ * Well-spaced Casino Stations (zero overlap!):
+ * - NW Pit (11.5, 13.5): 3-Round Craps / Dice Duel Table + 4 Symmetric Seats P1-P4
+ * - NE Pit (19.5, 12.5): Meme Roulette Wheel + 6 Betting Mats at x: 18..20, y: 14..15
+ * - SW Pit (11.5, 19.5): Cyber Blackjack 21 Table
+ * - SE Pit (20.5, 19.5): Golden UwU Jackpot Slot Machines (7 tiles south of Roulette!)
+ * - Center North Pit (15.5, 12.5): Rocket Crash Multiplier Terminal
+ * - East Arcade South (27.5, 19.5): Cyber Mines High-Stakes Table
  */
 
-import { TILE_WIDTH, TILE_HEIGHT, gridToScreen, clamp } from './isoMath';
+import { TILE_WIDTH, TILE_HEIGHT, clamp } from './isoMath';
 
 export const MAP_SIZE = 32;
 
@@ -39,6 +41,8 @@ export interface WorldObject {
         | 'roulette_wheel'
         | 'blackjack_table'
         | 'slot_machine'
+        | 'crash_rocket'
+        | 'mines_table'
         | 'vault'
         | 'pressure_pad'
         | 'dj_booth'
@@ -73,17 +77,14 @@ export interface ZoneTrigger {
     type: 'casino' | 'nightclub' | 'plaza' | 'vault' | 'arcade';
 }
 
-// 32x32 Grid Definitions
 export const WORLD_TILES: number[][] = [];
 export const COLLISION_MAP: boolean[][] = [];
 export const ANIMATED_TILE_COORDS: Array<{ x: number; y: number; type: TileType }> = [];
 
-// Initialize 32x32 Grid
 for (let y = 0; y < MAP_SIZE; y++) {
     WORLD_TILES[y] = [];
     COLLISION_MAP[y] = [];
     for (let x = 0; x < MAP_SIZE; x++) {
-        // Outer Boundaries
         if (x === 0 || x === MAP_SIZE - 1 || y === 0 || y === MAP_SIZE - 1) {
             WORLD_TILES[y][x] = TileType.WALL_BRICK;
             COLLISION_MAP[y][x] = true;
@@ -116,7 +117,11 @@ for (let y = 0; y < MAP_SIZE; y++) {
 
         // Zone 3: 90s Arcade & Graffiti Alley (East: x: 23..30, y: 10..22)
         if (x >= 23 && y >= 10 && y <= 22) {
-            WORLD_TILES[y][x] = TileType.WOOD_PARQUET;
+            if (x >= 26 && x <= 28 && y >= 18 && y <= 20) {
+                WORLD_TILES[y][x] = TileType.GOLD_BORDER;
+            } else {
+                WORLD_TILES[y][x] = TileType.WOOD_PARQUET;
+            }
             COLLISION_MAP[y][x] = false;
             continue;
         }
@@ -138,31 +143,32 @@ for (let y = 0; y < MAP_SIZE; y++) {
 
         // Zone 5: Central High Roller Casino Lounge (Center: x: 9..22, y: 10..21)
         if (x >= 9 && x <= 22 && y >= 10 && y <= 21) {
-            // Central VIP Red/Gold Walkway at x = 15..16
-            if ((x === 15 || x === 16) && y >= 10 && y <= 21) {
+            // Central VIP Red/Gold Walkway at x = 15..16 (and cross-walkway at y = 16..17)
+            if (((x === 15 || x === 16) && y >= 10 && y <= 21) || ((y === 16 || y === 17) && x >= 9 && x <= 22)) {
                 WORLD_TILES[y][x] = TileType.VIP_WALKWAY;
             }
-            // Dice Duel Pit around (12, 14):
-            // 4 Symmetric Player Seats flush with the 4 edges of tile (12, 14)
+            // NW Dice Duel Pit around (11, 13):
+            // 4 Symmetric Player Seats flush with the 4 edges of tile (11, 13)
             else if (
-                (x === 11 && y === 14) || // P1 (NW)
-                (x === 13 && y === 14) || // P2 (SE)
-                (x === 12 && y === 13) || // P3 (NE)
-                (x === 12 && y === 15)    // P4 (SW)
+                (x === 10 && y === 13) || // P1 (NW)
+                (x === 12 && y === 13) || // P2 (SE)
+                (x === 11 && y === 12) || // P3 (NE)
+                (x === 11 && y === 14)    // P4 (SW)
             ) {
                 WORLD_TILES[y][x] = TileType.DICE_SEAT;
             }
-            // Corner Gold Borders of Dice Pit & Blackjack Pit & Roulette Pit
+            // NE Meme Roulette Betting Mats at x: 18..20, y: 14..15
+            else if (x >= 18 && x <= 20 && y >= 14 && y <= 15) {
+                WORLD_TILES[y][x] = TileType.ROULETTE_MAT;
+            }
+            // Gold Borders around Casino Pits (NW Dice, NE Roulette, SW Blackjack, SE Slots)
             else if (
-                (x >= 11 && x <= 13 && y >= 13 && y <= 15) ||
-                (x >= 11 && x <= 13 && y >= 17 && y <= 19) ||
-                (x >= 18 && x <= 20 && y >= 12 && y <= 14)
+                (x >= 10 && x <= 12 && y >= 12 && y <= 14) ||
+                (x >= 18 && x <= 20 && y >= 11 && y <= 13) ||
+                (x >= 10 && x <= 12 && y >= 18 && y <= 20) ||
+                (x >= 19 && x <= 21 && y >= 18 && y <= 20)
             ) {
                 WORLD_TILES[y][x] = TileType.GOLD_BORDER;
-            }
-            // 6 Meme Roulette Betting Mats at x: 18..20, y: 15..16
-            else if (x >= 18 && x <= 20 && y >= 15 && y <= 16) {
-                WORLD_TILES[y][x] = TileType.ROULETTE_MAT;
             } else {
                 WORLD_TILES[y][x] = TileType.CASINO_FELT;
             }
@@ -175,7 +181,6 @@ for (let y = 0; y < MAP_SIZE; y++) {
     }
 }
 
-// Collect animated tiles for fast partial redraws
 for (let y = 0; y < MAP_SIZE; y++) {
     for (let x = 0; x < MAP_SIZE; x++) {
         const t = WORLD_TILES[y][x];
@@ -190,7 +195,6 @@ for (let y = 0; y < MAP_SIZE; y++) {
     }
 }
 
-// Interactive & Decorative World Objects with Explicit, Tight Tile Collision Footprints
 export const WORLD_OBJECTS: WorldObject[] = [
     // --- 3D ISOMETRIC DISTRICT ARCHWAYS / BILLBOARDS ---
     {
@@ -202,7 +206,7 @@ export const WORLD_OBJECTS: WorldObject[] = [
         height: 0.6,
         depthOffset: -120,
         title: 'HIGH ROLLER CASINO',
-        subtitle: 'CRAPS • ROULETTE • BLACKJACK • SLOTS',
+        subtitle: 'CRAPS • ROULETTE • BLACKJACK • SLOTS • CRASH',
         badgeColor: '#ffd700',
         solidTiles: []
     },
@@ -215,7 +219,7 @@ export const WORLD_OBJECTS: WorldObject[] = [
         height: 0.6,
         depthOffset: -120,
         title: 'CYBER NIGHTCLUB',
-        subtitle: 'LIVE 8-BIT SYNTH DJ & DANCE FLOOR',
+        subtitle: 'CLASSICAL • HOUSE • TECHNO • RAVE DJ',
         badgeColor: '#00ffff',
         solidTiles: []
     },
@@ -228,7 +232,7 @@ export const WORLD_OBJECTS: WorldObject[] = [
         height: 0.6,
         depthOffset: -120,
         title: 'ARMORED BANK VAULT',
-        subtitle: 'CO-OP PAD HEIST & LASER HACK',
+        subtitle: 'CO-OP PAD HEIST & HOLO CLONES',
         badgeColor: '#ff3366',
         solidTiles: []
     },
@@ -240,91 +244,93 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 4.0,
         height: 0.6,
         depthOffset: -120,
-        title: '90s RETRO ARCADE',
-        subtitle: 'CABINETS & LIVE PIXEL MURAL',
+        title: '90s ARCADE & MINES',
+        subtitle: 'COIN RUSH • CYBER MINES • LIVE GRAFFITI',
         badgeColor: '#ff00ff',
         solidTiles: []
     },
 
-    // --- CASINO DISTRICT ---
-    // 1. 3D Craps / Dice Duel Table centered on tile (12, 14) -> (12.5, 14.5)
-    // Surrounded by P1 (11,14), P2 (13,14), P3 (12,13), P4 (12,15)
+    // --- WELL-SPACED CASINO DISTRICT STATIONS (ZERO OVERLAP!) ---
+    // 1. NW Pit: 3D Craps / Dice Duel Table centered on tile (11, 13) -> (11.5, 13.5)
+    // Surrounded by P1 (10,13), P2 (12,13), P3 (11,12), P4 (11,14)
     {
         id: 'dice-duel-table',
         type: 'dice_table',
-        x: 12.5,
-        y: 14.5,
+        x: 11.5,
+        y: 13.5,
         width: 1.0,
         height: 1.0,
-        solidTiles: [{ x: 12, y: 14 }],
+        solidTiles: [{ x: 11, y: 13 }],
         data: { active: true }
     },
-    // 2. 3D Meme Roulette Wheel centered on tile (19, 13) -> (19.5, 13.5)
+    // 2. NE Pit: 3D Meme Roulette Wheel centered on tile (19, 12) -> (19.5, 12.5)
+    // Betting Mats are directly in front at x: 18..20, y: 14..15
     {
         id: 'meme-roulette-wheel',
         type: 'roulette_wheel',
         x: 19.5,
-        y: 13.5,
+        y: 12.5,
         width: 1.0,
         height: 1.0,
-        solidTiles: [{ x: 19, y: 13 }]
+        solidTiles: [{ x: 19, y: 12 }]
     },
-    // 3. 3D Cyber Blackjack 21 Table centered on tile (12, 18) -> (12.5, 18.5)
+    // 3. SW Pit: 3D Cyber Blackjack 21 Table centered on tile (11, 19) -> (11.5, 19.5)
     {
         id: 'blackjack-table',
         type: 'blackjack_table',
-        x: 12.5,
-        y: 18.5,
+        x: 11.5,
+        y: 19.5,
         width: 1.0,
         height: 1.0,
-        solidTiles: [{ x: 12, y: 18 }]
+        solidTiles: [{ x: 11, y: 19 }]
     },
-    // 4. 3D Golden UwU Slot Machines at (16.5, 12.5) and (21.5, 13.5)
+    // 4. SE Pit: 3D Golden UwU Slot Machines at (20.5, 19.5) and (21.5, 19.5) — 7 tiles away from Roulette!
     {
         id: 'slot-machine-1',
         type: 'slot_machine',
-        x: 21.5,
-        y: 13.5,
+        x: 20.5,
+        y: 19.5,
         width: 0.9,
         height: 0.9,
-        solidTiles: [{ x: 21, y: 13 }]
+        solidTiles: [{ x: 20, y: 19 }]
     },
     {
         id: 'slot-machine-2',
         type: 'slot_machine',
         x: 21.5,
-        y: 15.5,
+        y: 19.5,
         width: 0.9,
         height: 0.9,
-        solidTiles: [{ x: 21, y: 15 }]
+        solidTiles: [{ x: 21, y: 19 }]
     },
-    // Casino VIP Sofas & Pillars
+    // 5. Center North Pit: Rocket Crash Multiplier Terminal at (15.5, 12.5)
     {
-        id: 'casino-sofa-1',
-        type: 'sofa',
-        x: 9.5,
-        y: 20.5,
+        id: 'crash-rocket-terminal',
+        type: 'crash_rocket',
+        x: 15.5,
+        y: 12.5,
         width: 1.0,
         height: 1.0,
-        solidTiles: [{ x: 9, y: 20 }]
+        solidTiles: [{ x: 15, y: 12 }]
     },
+    // Casino VIP Pillars
     {
         id: 'vip-pillar-1',
         type: 'vip_pillar',
         x: 14.5,
-        y: 11.5,
+        y: 10.5,
         width: 0.6,
         height: 0.6,
-        solidTiles: [{ x: 14, y: 11 }]
+        solidTiles: [{ x: 14, y: 10 }]
     },
     {
         id: 'vip-pillar-2',
         type: 'vip_pillar',
-        x: 17.5,
-        y: 11.5,
+        x: 16.5,
+        y: 10.5,
         width: 0.6,
         height: 0.6,
-        solidTiles: [{ x: 17, y: 11 }]
+        solidTiles: [{ x: 16, y: 10 }]
     },
 
     // --- CYBER NIGHTCLUB ---
@@ -419,17 +425,17 @@ export const WORLD_OBJECTS: WorldObject[] = [
     { id: 'pad-3', type: 'pressure_pad', x: 4.5, y: 18.5, width: 0.8, height: 0.8, solidTiles: [], data: { index: 3, pressed: false } },
     { id: 'pad-4', type: 'pressure_pad', x: 6.5, y: 18.5, width: 0.8, height: 0.8, solidTiles: [], data: { index: 4, pressed: false } },
 
-    // --- ARCADE & GRAFFITI ALLEY ---
+    // --- ARCADE, GRAFFITI & CYBER MINES ALLEY ---
     {
         id: 'graffiti-billboard',
         type: 'graffiti_wall',
         x: 27.5,
-        y: 16.5,
+        y: 15.5,
         width: 2.0,
         height: 1.0,
         solidTiles: [
-            { x: 27, y: 16 },
-            { x: 28, y: 16 }
+            { x: 27, y: 15 },
+            { x: 28, y: 15 }
         ]
     },
     {
@@ -449,10 +455,18 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 0.9,
         height: 0.9,
         solidTiles: [{ x: 28, y: 12 }]
+    },
+    {
+        id: 'cyber-mines-table',
+        type: 'mines_table',
+        x: 27.5,
+        y: 19.5,
+        width: 1.0,
+        height: 1.0,
+        solidTiles: [{ x: 27, y: 19 }]
     }
 ];
 
-// Apply exact solid tile footprints from WORLD_OBJECTS
 WORLD_OBJECTS.forEach((obj) => {
     if (obj.solidTiles) {
         obj.solidTiles.forEach((t) => {
@@ -463,19 +477,17 @@ WORLD_OBJECTS.forEach((obj) => {
     }
 });
 
-// Guarantee that all 4 Dice Seats, 6 Roulette Mats, and 4 Vault Pads are 100% walkable
 const interactiveWalkableTiles = [
-    { x: 11, y: 14 }, { x: 13, y: 14 }, { x: 12, y: 13 }, { x: 12, y: 15 }, // Dice Seats P1-P4
-    { x: 18, y: 15 }, { x: 19, y: 15 }, { x: 20, y: 15 }, // Roulette Mats Row 1
-    { x: 18, y: 16 }, { x: 19, y: 16 }, { x: 20, y: 16 }, // Roulette Mats Row 2
+    { x: 10, y: 13 }, { x: 12, y: 13 }, { x: 11, y: 12 }, { x: 11, y: 14 }, // Dice Seats P1-P4
+    { x: 18, y: 14 }, { x: 19, y: 14 }, { x: 20, y: 14 }, // Roulette Mats Row 1
+    { x: 18, y: 15 }, { x: 19, y: 15 }, { x: 20, y: 15 }, // Roulette Mats Row 2
     { x: 4, y: 14 }, { x: 6, y: 14 }, { x: 4, y: 18 }, { x: 6, y: 18 },     // Vault Pressure Pads
-    { x: 16, y: 17 }, { x: 15, y: 17 }, { x: 12, y: 19 }                    // Spawn & Blackjack Seat
+    { x: 15, y: 16 }, { x: 16, y: 16 }                                      // Central Spawn
 ];
 interactiveWalkableTiles.forEach((t) => {
     COLLISION_MAP[t.y][t.x] = false;
 });
 
-// Districts
 export const ZONES: ZoneTrigger[] = [
     {
         id: 'zone-casino',
@@ -550,12 +562,6 @@ export function isWalkable(gx: number, gy: number, radius = 0.2): boolean {
     return true;
 }
 
-/**
- * Continuous Circle-vs-Tile AABB Collision Resolver with Smooth Corner Deflection.
- * Guarantees that:
- * 1. If a player ever starts inside a solid tile, they are smoothly ejected to the nearest open tile.
- * 2. Grazing or walking diagonally into any corner of a table/wall deflects the player radially around the corner with zero snagging.
- */
 export function resolveMoveWithSliding(
     curX: number,
     curY: number,
@@ -566,7 +572,6 @@ export function resolveMoveWithSliding(
     let px = curX;
     let py = curY;
 
-    // 1. Emergency Unstuck Guard: If current tile is solid, snap to nearest walkable tile center
     const curTx = Math.floor(px);
     const curTy = Math.floor(py);
     if (
@@ -593,7 +598,6 @@ export function resolveMoveWithSliding(
         }
     }
 
-    // 2. Apply desired step and resolve Circle-vs-AABB overlaps iteratively
     const subSteps = 2;
     const stepX = deltaX / subSteps;
     const stepY = deltaY / subSteps;
@@ -605,7 +609,6 @@ export function resolveMoveWithSliding(
         const baseTx = Math.floor(px);
         const baseTy = Math.floor(py);
 
-        // 2 passes of circle-vs-AABB resolution for butter-smooth corner sliding
         for (let pass = 0; pass < 2; pass++) {
             for (let ty = baseTy - 1; ty <= baseTy + 1; ty++) {
                 for (let tx = baseTx - 1; tx <= baseTx + 1; tx++) {
@@ -624,7 +627,6 @@ export function resolveMoveWithSliding(
                             px += (diffX / dist) * overlap;
                             py += (diffY / dist) * overlap;
                         } else {
-                            // Exact center overlap fallback: push away from tile center
                             const cx = tx + 0.5;
                             const cy = ty + 0.5;
                             const odx = px - cx;
@@ -654,10 +656,6 @@ export function getCurrentZone(gx: number, gy: number): ZoneTrigger | null {
     return null;
 }
 
-/**
- * Rich Procedural Isometric Tile Renderer
- * Note: (sx, sy) is the exact screen center of tile (gx, gy), i.e., gridToScreen(gx + 0.5, gy + 0.5).
- */
 export function drawRichIsometricTile(
     ctx: CanvasRenderingContext2D,
     sx: number,
@@ -697,7 +695,6 @@ export function drawRichIsometricTile(
             ctx.fillStyle = isAlt ? '#6b0d22' : '#5e0a1d';
             ctx.fill();
 
-            // Subtle royal diamond motif
             ctx.strokeStyle = 'rgba(255, 215, 0, 0.28)';
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -714,7 +711,6 @@ export function drawRichIsometricTile(
         }
 
         case TileType.VIP_WALKWAY: {
-            // Plush Royal Crimson & Gold Carpet Runner
             ctx.fillStyle = '#9e112b';
             ctx.fill();
 
@@ -731,7 +727,6 @@ export function drawRichIsometricTile(
         }
 
         case TileType.GOLD_BORDER: {
-            // Ornate Obsidian & Gold Casino Pit Border Tile
             ctx.fillStyle = '#1d192b';
             ctx.fill();
 
@@ -753,17 +748,14 @@ export function drawRichIsometricTile(
         }
 
         case TileType.DICE_SEAT: {
-            // Glowing Isometric Casino Player Seat Pad flush with the Dice Table
             const pulse = 0.7 + 0.3 * Math.sin(timeMs / 240);
             ctx.fillStyle = '#092b24';
             ctx.fill();
 
-            // Outer Gold Rim
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Inner Pulsing Neon Cyan Diamond
             ctx.fillStyle = `rgba(0, 255, 200, ${0.18 * pulse})`;
             ctx.strokeStyle = `rgba(0, 255, 255, ${0.9 * pulse})`;
             ctx.lineWidth = 1.5;
@@ -777,9 +769,9 @@ export function drawRichIsometricTile(
             ctx.stroke();
 
             let seatLabel = 'P1';
-            if (gx === 13 && gy === 14) seatLabel = 'P2';
-            else if (gx === 12 && gy === 13) seatLabel = 'P3';
-            else if (gx === 12 && gy === 15) seatLabel = 'P4';
+            if (gx === 12 && gy === 13) seatLabel = 'P2';
+            else if (gx === 11 && gy === 12) seatLabel = 'P3';
+            else if (gx === 11 && gy === 14) seatLabel = 'P4';
 
             ctx.fillStyle = '#00ffff';
             ctx.beginPath();
@@ -798,35 +790,35 @@ export function drawRichIsometricTile(
         }
 
         case TileType.ROULETTE_MAT: {
-            // 6 Distinct Meme Betting Mats at x: 18..20, y: 15..16
+            // 6 Distinct Meme Betting Mats at x: 18..20, y: 14..15
             let memeBg = '#0a5c36';
             let icon = '\u{1F438}';
-            let label = '2x';
+            let label = '3x';
 
-            if (gx === 18 && gy === 15) {
+            if (gx === 18 && gy === 14) {
                 memeBg = '#0a5c36';
                 icon = '\u{1F438}';
-                label = '2x';
-            } else if (gx === 19 && gy === 15) {
+                label = '3x';
+            } else if (gx === 19 && gy === 14) {
                 memeBg = '#7a6000';
                 icon = '\u{1F415}';
-                label = '2x';
-            } else if (gx === 20 && gy === 15) {
+                label = '4x';
+            } else if (gx === 20 && gy === 14) {
                 memeBg = '#8b1c1c';
                 icon = '\u{1F680}';
-                label = '3x';
-            } else if (gx === 18 && gy === 16) {
+                label = '6x';
+            } else if (gx === 18 && gy === 15) {
                 memeBg = '#1c4d8b';
                 icon = '\u{1F48E}';
-                label = '3x';
-            } else if (gx === 19 && gy === 16) {
+                label = '8x';
+            } else if (gx === 19 && gy === 15) {
                 memeBg = '#541c8b';
                 icon = '\u{1F5FF}';
-                label = '5x';
-            } else if (gx === 20 && gy === 16) {
+                label = '12x';
+            } else if (gx === 20 && gy === 15) {
                 memeBg = '#8b1c6d';
                 icon = '\u{1F984}';
-                label = '10x';
+                label = '25x';
             }
 
             ctx.fillStyle = memeBg;
@@ -839,7 +831,7 @@ export function drawRichIsometricTile(
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(icon, sx - 7, sy);
+            ctx.fillText(icon, sx - 8, sy);
 
             ctx.font = 'bold 9px monospace';
             ctx.fillStyle = '#ffd700';
@@ -919,9 +911,7 @@ export function drawRichIsometricTile(
         }
 
         case TileType.WALL_BRICK: {
-            // 3D Raised Isometric Perimeter Wall Block
             const wallH = 18;
-            // Top cap
             ctx.fillStyle = '#252538';
             ctx.beginPath();
             ctx.moveTo(sx, sy - TILE_HEIGHT / 2 - wallH);
@@ -934,7 +924,6 @@ export function drawRichIsometricTile(
             ctx.lineWidth = 0.8;
             ctx.stroke();
 
-            // Left face
             ctx.fillStyle = '#191926';
             ctx.beginPath();
             ctx.moveTo(sx - TILE_WIDTH / 2, sy - wallH);
@@ -944,7 +933,6 @@ export function drawRichIsometricTile(
             ctx.closePath();
             ctx.fill();
 
-            // Right face
             ctx.fillStyle = '#12121c';
             ctx.beginPath();
             ctx.moveTo(sx + TILE_WIDTH / 2, sy - wallH);
@@ -963,12 +951,10 @@ export function drawRichIsometricTile(
             ctx.fill();
     }
 
-    // Crisp Isometric Tile Outlines
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.42)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Subtle 3D Top Bevel Highlight
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
     ctx.beginPath();
     ctx.moveTo(sx - TILE_WIDTH / 2, sy);
@@ -979,10 +965,6 @@ export function drawRichIsometricTile(
     ctx.restore();
 }
 
-/**
- * Pre-renders the entire static 32x32 isometric floor map into an offscreen canvas once,
- * reducing per-frame tile draw calls from 1,024 to ~70 animated tiles!
- */
 export class StaticFloorCache {
     public canvas: HTMLCanvasElement | null = null;
     public originX = 0;
@@ -1011,7 +993,6 @@ export class StaticFloorCache {
                 const tileType = WORLD_TILES[y][x];
                 if (!tileType) continue;
 
-                // Center of tile [x, x+1] x [y, y+1] in cache coordinates
                 const gx = x + 0.5;
                 const gy = y + 0.5;
                 const sx = (gx - gy) * (TILE_WIDTH / 2) + this.originX;

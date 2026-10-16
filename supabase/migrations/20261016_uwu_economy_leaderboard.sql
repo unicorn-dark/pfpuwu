@@ -1,5 +1,5 @@
--- UwU World MMO Economy, Leaderboard & P2P Transfers Migration
--- Run this in your Supabase SQL Editor to enable persistent global leaderboards, win/loss records, 24h daily rewards, and $UWU transfers.
+-- UwU World MMO Economy, Leaderboard, Persistent Graffiti Wall & P2P Transfers Migration
+-- Run this in your Supabase SQL Editor to enable persistent global leaderboards, win/loss records, 24h daily rewards, $UWU transfers, and persistent 48x32 Graffiti Wall state.
 
 -- 1. PLAYER ECONOMY & LEADERBOARD TABLE
 CREATE TABLE IF NOT EXISTS public.uwu_world_players (
@@ -64,55 +64,28 @@ CREATE POLICY "Players can insert transfers"
     ON public.uwu_transfers FOR INSERT
     WITH CHECK (amount > 0);
 
--- 3. ATOMIC P2P TRANSFER RPC FUNCTION (Optional helper for atomic balance transfer)
-CREATE OR REPLACE FUNCTION public.transfer_uwu_chips(
-    p_sender_id TEXT,
-    p_sender_username TEXT,
-    p_recipient_username TEXT,
-    p_amount BIGINT,
-    p_note TEXT DEFAULT ''
-)
-RETURNS JSONB AS $$
-DECLARE
-    v_sender_chips BIGINT;
-    v_clean_recipient TEXT := LOWER(REGEXP_REPLACE(TRIM(p_recipient_username), '^@', ''));
-BEGIN
-    IF p_amount <= 0 THEN
-        RETURN jsonb_build_object('ok', false, 'error', 'Transfer amount must be positive.');
-    END IF;
+-- 3. PERSISTENT 48x32 GRAFFITI WALL TABLE
+CREATE TABLE IF NOT EXISTS public.uwu_graffiti_wall (
+    room_id TEXT PRIMARY KEY DEFAULT 'main',
+    data_url TEXT NOT NULL,
+    updated_by TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-    SELECT chips INTO v_sender_chips
-    FROM public.uwu_world_players
-    WHERE user_id = p_sender_id
-    FOR UPDATE;
+ALTER TABLE public.uwu_graffiti_wall ENABLE ROW LEVEL SECURITY;
 
-    IF v_sender_chips IS NULL OR v_sender_chips < p_amount THEN
-        RETURN jsonb_build_object('ok', false, 'error', 'Insufficient $UWU balance.');
-    END IF;
+DROP POLICY IF EXISTS "Graffiti wall is publicly readable" ON public.uwu_graffiti_wall;
+CREATE POLICY "Graffiti wall is publicly readable"
+    ON public.uwu_graffiti_wall FOR SELECT
+    USING (true);
 
-    -- Deduct from sender
-    UPDATE public.uwu_world_players
-    SET chips = chips - p_amount,
-        updated_at = now()
-    WHERE user_id = p_sender_id;
+DROP POLICY IF EXISTS "Players can upsert graffiti wall" ON public.uwu_graffiti_wall;
+CREATE POLICY "Players can upsert graffiti wall"
+    ON public.uwu_graffiti_wall FOR INSERT
+    WITH CHECK (true);
 
-    -- Credit recipient if already in uwu_world_players, otherwise create entry if in profiles
-    UPDATE public.uwu_world_players
-    SET chips = chips + p_amount,
-        updated_at = now()
-    WHERE LOWER(x_username) = v_clean_recipient;
-
-    IF NOT FOUND THEN
-        INSERT INTO public.uwu_world_players (user_id, x_username, chips, updated_at)
-        VALUES ('user_' || v_clean_recipient, v_clean_recipient, 2500 + p_amount, now())
-        ON CONFLICT (user_id) DO UPDATE
-        SET chips = public.uwu_world_players.chips + p_amount,
-            updated_at = now();
-    END IF;
-
-    INSERT INTO public.uwu_transfers (sender_id, sender_username, recipient_username, amount, note)
-    VALUES (p_sender_id, p_sender_username, v_clean_recipient, p_amount, COALESCE(p_note, ''));
-
-    RETURN jsonb_build_object('ok', true, 'new_balance', v_sender_chips - p_amount);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+DROP POLICY IF EXISTS "Players can update graffiti wall" ON public.uwu_graffiti_wall;
+CREATE POLICY "Players can update graffiti wall"
+    ON public.uwu_graffiti_wall FOR UPDATE
+    USING (true)
+    WITH CHECK (true);

@@ -14,7 +14,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
     const { origin } = resolveAppOrigin(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
 
-    // Check if user cancelled authorization
     const denied = url.searchParams.get('denied');
     if (denied) {
         throw redirect(302, '/?auth_error=Sign+in+cancelled');
@@ -35,9 +34,7 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 
     let twitterUser: TwitterUser;
 
-    // =========================================================================
-    // FLOW A: OAuth 1.0a (Primary, 100% Free Tier Compatible)
-    // =========================================================================
+    // FLOW A: OAuth 1.0a
     if (oauthToken && oauthVerifier) {
         const apiKey = env.X_API_KEY;
         const apiSecret = env.X_API_SECRET;
@@ -56,7 +53,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         }
 
         try {
-            // Exchange for user access token
             const tokenRes = await getOAuth1AccessToken(
                 apiKey,
                 apiSecret,
@@ -65,7 +61,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
                 oauthTokenSecret
             );
 
-            // Fetch user profile (or fallback smoothly)
             twitterUser = await getOAuth1UserProfile(
                 apiKey,
                 apiSecret,
@@ -75,7 +70,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
                 tokenRes.screenName
             );
 
-            // Clean up cookies
             cookies.delete(cookieSecretKey, { path: '/' });
             cookies.delete('x_oauth1_secret', { path: '/' });
         } catch (err: any) {
@@ -83,9 +77,7 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
             throw redirect(302, `/?auth_error=${encodeURIComponent(err?.message || 'Failed to authenticate with X')}`);
         }
     }
-    // =========================================================================
-    // FLOW B: OAuth 2.0 PKCE (Fallback)
-    // =========================================================================
+    // FLOW B: OAuth 2.0 PKCE
     else if (code && state) {
         const savedState = cookies.get('x_oauth_state');
         const codeVerifier = cookies.get('x_oauth_verifier');
@@ -144,16 +136,11 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         const userJson = await userRes.json();
         const xUser = userJson.data;
 
-        let rawAvatar = xUser.profile_image_url || '/unicorn.png';
-        if (rawAvatar.includes('_normal.')) {
-            rawAvatar = rawAvatar.replace('_normal.', '_400x400.');
-        }
-
         twitterUser = {
             id: String(xUser.id),
             username: String(xUser.username).toLowerCase().replace(/^@/, ''),
             name: String(xUser.name || xUser.username),
-            profileImageUrl: rawAvatar
+            profileImageUrl: '/unicorn.png'
         };
 
         cookies.delete('x_oauth_state', { path: '/' });
@@ -162,13 +149,9 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         throw redirect(302, '/?auth_error=Invalid+authentication+callback');
     }
 
-    // =========================================================================
-    // SUPABASE INTEGRATION: Upsert Profile & Issue Session via Magiclink
-    // =========================================================================
     const xUserId = twitterUser.id;
     const xUsername = twitterUser.username;
     const xDisplayName = twitterUser.name;
-    const rawAvatar = twitterUser.profileImageUrl;
 
     const supabaseUrl = env.PUBLIC_SUPABASE_URL || env.SUPABASE_URL || 'https://zodyqbsxcihojdqidgjd.supabase.co';
     const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY;
@@ -182,7 +165,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         auth: { autoRefreshToken: false, persistSession: false }
     });
 
-    // Check if user already exists in profiles
     const { data: existingProfile } = await supabaseAdmin
         .from('profiles')
         .select('*')
@@ -195,7 +177,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
     if (existingProfile?.id) {
         authUserId = existingProfile.id;
     } else {
-        // Create user in auth.users
         const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
             email: syntheticEmail,
             email_confirm: true,
@@ -204,12 +185,11 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
                 user_name: xUsername,
                 screen_name: xUsername,
                 full_name: xDisplayName,
-                avatar_url: rawAvatar
+                avatar_url: '/unicorn.png'
             }
         });
 
         if (createErr || !newUser?.user) {
-            // If user already exists in auth.users, find their id
             const { data: userList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
             const matched = userList?.users?.find(
                 (u) => u.email === syntheticEmail || u.user_metadata?.provider_id === xUserId
@@ -224,9 +204,14 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         }
     }
 
-    // Upsert into public.profiles
+    // Strictly prevent any external X profile image (which may contain a PFP ring/background)
     const avatarTraits = existingProfile?.avatar_traits || {};
-    const finalAvatar = existingProfile?.avatar_url || rawAvatar;
+    const hasCustomTraits = Object.keys(avatarTraits).length > 0;
+    const existingAvatar = existingProfile?.avatar_url || '/unicorn.png';
+    const finalAvatar =
+        !hasCustomTraits || existingAvatar.includes('twimg.com')
+            ? '/unicorn.png'
+            : existingAvatar;
 
     await supabaseAdmin.from('profiles').upsert(
         {
@@ -241,7 +226,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         { onConflict: 'id' }
     );
 
-    // Generate Magiclink to log the user in client-side
     const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
         type: 'magiclink',
         email: syntheticEmail,
@@ -255,8 +239,6 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         throw redirect(302, '/?auth_error=Failed+to+authenticate+session');
     }
 
-    // Exchange the action_link server-side to guarantee redirect directly to origin/#access_token=...
-    // This protects against Supabase falling back to localhost:3000 if the domain is not yet whitelisted in Supabase dashboard
     let destinationUrl = linkData.properties.action_link;
     try {
         const verifyRes = await fetch(linkData.properties.action_link, {

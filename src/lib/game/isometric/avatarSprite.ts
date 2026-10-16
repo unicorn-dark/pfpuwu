@@ -1,6 +1,6 @@
 // src/lib/game/isometric/avatarSprite.ts
 /**
- * Avatar rendering, transparent Unicorn figure compositor (zero black background!),
+ * Avatar rendering, transparent Unicorn figure compositor (zero black/colored background and zero ring!),
  * walk cycle animations, 6 distinct dance moves, speech bubbles, PTT voice ripples, and name tags.
  */
 
@@ -37,7 +37,6 @@ export interface PlayerAvatarState {
     isHouseDealer?: boolean;
 }
 
-// Image / Canvas cache to avoid re-decoding images every frame
 const avatarDrawableCache = new Map<string, HTMLCanvasElement | HTMLImageElement>();
 const loadingUrls = new Set<string>();
 let cachedDealerDataUrl = '';
@@ -68,9 +67,6 @@ function loadRawImage(src: string): Promise<HTMLImageElement | null> {
     });
 }
 
-/**
- * Composites multiple transparent trait PNGs into a single 100% transparent offscreen canvas
- */
 async function buildTransparentCompositeCanvas(layerUrls: string[], cacheKey: string, isDealer = false) {
     if (typeof document === 'undefined' || loadingUrls.has(cacheKey)) return;
     loadingUrls.add(cacheKey);
@@ -100,9 +96,10 @@ async function buildTransparentCompositeCanvas(layerUrls: string[], cacheKey: st
 }
 
 /**
- * Removes solid black/near-black background pixels from an image if it has an opaque dark border
+ * Removes ANY solid background color (Black, Navy, Crimson, Purple, etc.) AND any outer PFP ring
+ * from a loaded avatar image so no avatar can ever appear with a background or ring!
  */
-function stripBlackBackgroundToCanvas(img: HTMLImageElement): HTMLCanvasElement {
+function stripBackgroundAndRingToCanvas(img: HTMLImageElement): HTMLCanvasElement {
     const w = img.naturalWidth || 128;
     const h = img.naturalHeight || 128;
     const c = document.createElement('canvas');
@@ -116,49 +113,53 @@ function stripBlackBackgroundToCanvas(img: HTMLImageElement): HTMLCanvasElement 
         const imgData = ctx.getImageData(0, 0, w, h);
         const data = imgData.data;
 
-        // Check if top-left corner pixel is opaque and dark (black background)
+        // Check if any corner pixel is opaque (indicating a solid background was baked into the image)
         const r0 = data[0];
         const g0 = data[1];
         const b0 = data[2];
         const a0 = data[3];
 
-        if (a0 > 200 && r0 < 30 && g0 < 30 && b0 < 30) {
-            // Flood-fill from outer edges to remove contiguous dark background without erasing inner dark outlines
+        if (a0 > 140) {
             const visited = new Uint8Array(w * h);
             const queue = new Int32Array(w * h);
             let head = 0;
             let tail = 0;
 
-            const pushIfDark = (x: number, y: number) => {
+            const pushIfMatchesBg = (x: number, y: number) => {
                 if (x < 0 || x >= w || y < 0 || y >= h) return;
                 const idx = y * w + x;
                 if (visited[idx]) return;
                 const p = idx * 4;
-                if (data[p + 3] > 0 && data[p] < 28 && data[p + 1] < 28 && data[p + 2] < 28) {
+                if (
+                    data[p + 3] > 0 &&
+                    Math.abs(data[p] - r0) <= 34 &&
+                    Math.abs(data[p + 1] - g0) <= 34 &&
+                    Math.abs(data[p + 2] - b0) <= 34
+                ) {
                     visited[idx] = 1;
                     queue[tail++] = idx;
                 }
             };
 
             for (let x = 0; x < w; x++) {
-                pushIfDark(x, 0);
-                pushIfDark(x, h - 1);
+                pushIfMatchesBg(x, 0);
+                pushIfMatchesBg(x, h - 1);
             }
             for (let y = 0; y < h; y++) {
-                pushIfDark(0, y);
-                pushIfDark(w - 1, y);
+                pushIfMatchesBg(0, y);
+                pushIfMatchesBg(w - 1, y);
             }
 
             while (head < tail) {
                 const curr = queue[head++];
                 const p = curr * 4;
-                data[p + 3] = 0; // Make transparent
+                data[p + 3] = 0;
                 const cx = curr % w;
                 const cy = (curr / w) | 0;
-                pushIfDark(cx + 1, cy);
-                pushIfDark(cx - 1, cy);
-                pushIfDark(cx, cy + 1);
-                pushIfDark(cx, cy - 1);
+                pushIfMatchesBg(cx + 1, cy);
+                pushIfMatchesBg(cx - 1, cy);
+                pushIfMatchesBg(cx, cy + 1);
+                pushIfMatchesBg(cx, cy - 1);
             }
 
             ctx.putImageData(imgData, 0, 0);
@@ -168,9 +169,6 @@ function stripBlackBackgroundToCanvas(img: HTMLImageElement): HTMLCanvasElement 
     return c;
 }
 
-/**
- * Returns the cached transparent House Dealer Unicorn data URL for UI badges
- */
 export function getTransparentDealerDataUrl(): string {
     if (!cachedDealerDataUrl && typeof window !== 'undefined') {
         buildTransparentCompositeCanvas(DEALER_TRAIT_LAYERS, 'dealer_unicorn', true);
@@ -181,7 +179,6 @@ export function getTransparentDealerDataUrl(): string {
 export function getCachedAvatarImage(url: string): HTMLCanvasElement | HTMLImageElement | null {
     if (typeof window === 'undefined') return null;
 
-    // 1. Special transparent House Dealer Unicorn composite
     if (url === 'dealer_unicorn') {
         const cached = avatarDrawableCache.get('dealer_unicorn');
         if (cached) return cached;
@@ -189,8 +186,8 @@ export function getCachedAvatarImage(url: string): HTMLCanvasElement | HTMLImage
         return null;
     }
 
-    // 2. Replace '/unicorn.png' (which has a black background) with our 100% transparent layered Unicorn figure
-    if (!url || url === '/unicorn.png') {
+    // Never render external X/Twitter PFPs (which have rings/backgrounds) or raw /unicorn.png
+    if (!url || url === '/unicorn.png' || url.includes('twimg.com')) {
         const cached = avatarDrawableCache.get('default_unicorn');
         if (cached) return cached;
         buildTransparentCompositeCanvas(DEFAULT_UNICORN_TRAIT_LAYERS, 'default_unicorn', false);
@@ -205,7 +202,7 @@ export function getCachedAvatarImage(url: string): HTMLCanvasElement | HTMLImage
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-            const cleanCanvas = stripBlackBackgroundToCanvas(img);
+            const cleanCanvas = stripBackgroundAndRingToCanvas(img);
             avatarDrawableCache.set(url, cleanCanvas);
         };
         img.src = url;
@@ -214,9 +211,6 @@ export function getCachedAvatarImage(url: string): HTMLCanvasElement | HTMLImage
     return null;
 }
 
-/**
- * Renders a player or House Dealer Unicorn avatar at its current isometric position
- */
 export function renderPlayerAvatar(
     ctx: CanvasRenderingContext2D,
     player: PlayerAvatarState,
@@ -230,7 +224,6 @@ export function renderPlayerAvatar(
     const sx = Math.round(screen.x);
     const sy = Math.round(screen.y);
 
-    // Frustum culling for offscreen avatars
     if (sx < -120 || sx > canvasW + 120 || sy < -120 || sy > canvasH + 140) {
         return;
     }
@@ -238,7 +231,7 @@ export function renderPlayerAvatar(
     ctx.save();
     ctx.translate(sx, sy);
 
-    // 1. Local Player / House Dealer Ground Ring & Drop Shadow
+    // 1. Ground Ring & Drop Shadow
     ctx.save();
     if (isLocalPlayer) {
         const ringPulse = Math.sin(performance.now() / 220) * 1.5;
@@ -260,7 +253,7 @@ export function renderPlayerAvatar(
     ctx.fill();
     ctx.restore();
 
-    // 2. Calculate animation offsets & Dance Moves
+    // 2. Animation Offsets & Dance Moves
     let bobY = 0;
     let tiltAngle = 0;
     let scaleX = player.dir === 'NW' || player.dir === 'SW' ? -1 : 1;
@@ -268,36 +261,30 @@ export function renderPlayerAvatar(
 
     if (player.isDancing) {
         const move = player.danceMove || 'disco';
-
         switch (move) {
             case 'disco':
                 bobY = -Math.abs(Math.sin(player.walkAnimTick * 8)) * 14;
                 tiltAngle = Math.sin(player.walkAnimTick * 6) * 0.16;
                 break;
-
             case 'spin':
                 bobY = -Math.sin(player.walkAnimTick * 5) * 6;
                 scaleX = Math.cos(player.walkAnimTick * 8);
                 tiltAngle = Math.sin(player.walkAnimTick * 8) * 0.18;
                 break;
-
             case 'robot': {
                 const snap = Math.floor(player.walkAnimTick * 4) % 4;
                 tiltAngle = snap === 0 ? 0.22 : snap === 2 ? -0.22 : 0;
                 bobY = snap % 2 === 0 ? -5 : 0;
                 break;
             }
-
             case 'wave':
                 bobY = Math.sin(player.walkAnimTick * 6) * 8;
                 tiltAngle = Math.cos(player.walkAnimTick * 6) * 0.24;
                 break;
-
             case 'windmill':
                 bobY = 6 + Math.sin(player.walkAnimTick * 12) * 5;
                 tiltAngle = (player.walkAnimTick * 8) % (Math.PI * 2);
                 break;
-
             case 'headbang':
                 bobY = -Math.abs(Math.sin(player.walkAnimTick * 14)) * 11;
                 tiltAngle = -Math.sin(player.walkAnimTick * 14) * 0.35;
@@ -310,7 +297,7 @@ export function renderPlayerAvatar(
         bobY = Math.sin(performance.now() / 500 + (player.id.charCodeAt(0) || 0)) * 1.2;
     }
 
-    // 3. Draw Speaking Audio Pulse Rings (if PTT active)
+    // 3. Speaking Audio Pulse Rings
     if (player.isSpeaking) {
         ctx.save();
         const pulse = (performance.now() % 1000) / 1000;
@@ -328,7 +315,7 @@ export function renderPlayerAvatar(
         ctx.restore();
     }
 
-    // 4. Draw Transparent Avatar Sprite (Zero Black Background!)
+    // 4. Transparent Avatar Sprite
     const effectiveUrl = player.isHouseDealer ? 'dealer_unicorn' : player.avatarUrl || '/unicorn.png';
     const drawable = getCachedAvatarImage(effectiveUrl);
 
@@ -342,7 +329,6 @@ export function renderPlayerAvatar(
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(drawable, -AVATAR_SIZE / 2, -AVATAR_SIZE + 5, AVATAR_SIZE, AVATAR_SIZE);
     } else {
-        // Transparent vector unicorn silhouette while PNG layers finish loading (takes <20ms)
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(0, -28, 14, 0, Math.PI * 2);
@@ -356,7 +342,6 @@ export function renderPlayerAvatar(
         ctx.fill();
     }
 
-    // Crowns above head
     if (player.hasHighRollerCrown) {
         ctx.font = '18px sans-serif';
         ctx.textAlign = 'center';
@@ -369,7 +354,7 @@ export function renderPlayerAvatar(
 
     ctx.restore();
 
-    // 5. Name Tag & PTT Badge
+    // 5. Name Tag
     ctx.save();
     const tagY = -AVATAR_SIZE - 4 + bobY;
     const crownPrefix = player.hasHighRollerCrown
@@ -415,7 +400,6 @@ export function renderPlayerAvatar(
     }
     ctx.restore();
 
-    // 6. Floating Reaction Emote
     if (player.currentEmote && player.currentEmote.expiresAt > Date.now()) {
         ctx.save();
         const emoteBob = Math.sin(performance.now() / 160) * 5;
@@ -425,7 +409,6 @@ export function renderPlayerAvatar(
         ctx.restore();
     }
 
-    // 7. Speech Bubble
     if (player.speechBubble && player.speechBubble.expiresAt > Date.now()) {
         renderSpeechBubble(ctx, player.speechBubble.text, 0, tagY - tagH - 10);
     }
@@ -433,9 +416,6 @@ export function renderPlayerAvatar(
     ctx.restore();
 }
 
-/**
- * Renders an authentic Windows 98 comic speech bubble with bevels and tail
- */
 function renderSpeechBubble(
     ctx: CanvasRenderingContext2D,
     text: string,

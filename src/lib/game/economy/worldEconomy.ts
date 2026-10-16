@@ -1,8 +1,8 @@
 // src/lib/game/economy/worldEconomy.ts
 /**
- * UwU World Economy, 24h Daily Reward, Win/Loss Stats, Leaderboard & P2P $UWU Transfer Manager
- * Synchronizes with Supabase (`public.uwu_world_players` and `public.uwu_transfers`)
- * with automatic localStorage + Realtime broadcast fallback if tables are not yet created.
+ * UwU World Economy, 24h Daily Reward, Win/Loss Stats, Leaderboard, Persistent Graffiti Wall & P2P $UWU Transfer Manager
+ * Synchronizes with Supabase (`public.uwu_world_players`, `public.uwu_transfers`, `public.uwu_graffiti_wall`)
+ * with automatic localStorage + Realtime broadcast fallback.
  */
 
 import { supabase } from '$lib/supabaseClient';
@@ -38,10 +38,63 @@ export interface UwuTransferRecord {
 const LOCAL_STATS_KEY = 'pfpuwu_world_economy_v2';
 const LOCAL_LEADERBOARD_CACHE_KEY = 'pfpuwu_world_leaderboard_cache_v2';
 const LOCAL_TRANSFERS_KEY = 'pfpuwu_world_transfers_v2';
+const LOCAL_GRAFFITI_KEY = 'pfpuwu_world_graffiti_dataurl_v2';
 
 /**
- * Formats remaining milliseconds into "XXh YYm" or "YYm ZZs"
+ * Loads saved 48x32 Graffiti Wall PNG data URL from Supabase or localStorage so it never resets on join
  */
+export async function loadSavedGraffitiWall(): Promise<string | null> {
+    let localUrl: string | null = null;
+    if (typeof window !== 'undefined') {
+        try {
+            localUrl = localStorage.getItem(LOCAL_GRAFFITI_KEY);
+        } catch {}
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('uwu_graffiti_wall')
+            .select('data_url')
+            .eq('room_id', 'main')
+            .maybeSingle();
+
+        if (!error && data?.data_url) {
+            if (typeof window !== 'undefined') {
+                try {
+                    localStorage.setItem(LOCAL_GRAFFITI_KEY, data.data_url);
+                } catch {}
+            }
+            return data.data_url;
+        }
+    } catch {}
+
+    return localUrl;
+}
+
+/**
+ * Saves 48x32 Graffiti Wall PNG data URL to localStorage and Supabase
+ */
+export async function saveGraffitiWallState(dataUrl: string, username = 'anon'): Promise<void> {
+    if (!dataUrl) return;
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(LOCAL_GRAFFITI_KEY, dataUrl);
+        } catch {}
+    }
+
+    try {
+        await supabase.from('uwu_graffiti_wall').upsert(
+            {
+                room_id: 'main',
+                data_url: dataUrl,
+                updated_by: username,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'room_id' }
+        );
+    } catch {}
+}
+
 export function formatCooldownRemaining(ms: number): string {
     if (ms <= 0) return 'Ready!';
     const totalSec = Math.ceil(ms / 1000);
@@ -57,9 +110,6 @@ export function formatCooldownRemaining(ms: number): string {
     return `${secs}s`;
 }
 
-/**
- * Computes whether the 24-hour daily 1,000 $UWU reward is available
- */
 export function getDailyRewardStatus(lastClaimIso: string | null): {
     canClaim: boolean;
     remainingMs: number;
@@ -81,9 +131,6 @@ export function getDailyRewardStatus(lastClaimIso: string | null): {
     };
 }
 
-/**
- * Loads local player stats from localStorage and syncs with Supabase `uwu_world_players`
- */
 export async function loadOrInitPlayerStats(
     userId: string,
     username: string,
@@ -123,17 +170,10 @@ export async function loadOrInitPlayerStats(
                         last_daily_claim: parsed.last_daily_claim || null
                     };
                 }
-            } else {
-                // Migrate legacy chips key if present
-                const legacyChips = localStorage.getItem('pfpuwu_world_chips_v1');
-                if (legacyChips !== null && !isNaN(Number(legacyChips))) {
-                    stats.chips = Math.max(0, Number(legacyChips));
-                }
             }
         } catch {}
     }
 
-    // Try syncing with Supabase `uwu_world_players`
     try {
         const { data: existing, error } = await supabase
             .from('uwu_world_players')
@@ -176,9 +216,6 @@ export async function loadOrInitPlayerStats(
     return stats;
 }
 
-/**
- * Saves player stats locally and asynchronously upserts to Supabase
- */
 export function saveLocalPlayerStats(stats: PlayerEconomyStats) {
     if (typeof window === 'undefined') return;
     try {
@@ -210,9 +247,6 @@ export async function syncPlayerStatsToSupabase(stats: PlayerEconomyStats): Prom
     } catch {}
 }
 
-/**
- * Maintains a local cache of peer & leaderboard entries so the leaderboard works even offline or pre-migration
- */
 export function upsertPlayerInLocalLeaderboardCache(entry: PlayerEconomyStats) {
     if (typeof window === 'undefined') return;
     try {
@@ -229,16 +263,12 @@ export function upsertPlayerInLocalLeaderboardCache(entry: PlayerEconomyStats) {
     } catch {}
 }
 
-/**
- * Fetches the combined global + room leaderboard
- */
 export async function fetchLeaderboard(
     localStats: PlayerEconomyStats,
     onlinePeers: PlayerEconomyStats[]
 ): Promise<PlayerEconomyStats[]> {
     const merged = new Map<string, PlayerEconomyStats>();
 
-    // 1. Seed from local cache
     if (typeof window !== 'undefined') {
         try {
             const raw = localStorage.getItem(LOCAL_LEADERBOARD_CACHE_KEY);
@@ -253,7 +283,6 @@ export async function fetchLeaderboard(
         } catch {}
     }
 
-    // 2. Fetch from Supabase `uwu_world_players` if table exists
     try {
         const { data, error } = await supabase
             .from('uwu_world_players')
@@ -283,7 +312,6 @@ export async function fetchLeaderboard(
         }
     } catch {}
 
-    // 3. Also pull known profiles from `public.profiles` so registered X users appear on the board
     try {
         const { data: profiles } = await supabase
             .from('profiles')
@@ -310,14 +338,13 @@ export async function fetchLeaderboard(
                         updated_at: new Date().toISOString(),
                         isOnline: false
                     });
-                } else if (prof.avatar_url && prof.avatar_url !== '/unicorn.png') {
+                } else if (prof.avatar_url && prof.avatar_url !== '/unicorn.png' && !prof.avatar_url.includes('twimg.com')) {
                     existing.avatar_url = prof.avatar_url;
                 }
             }
         }
     } catch {}
 
-    // 4. Overlay live online peers
     for (const peer of onlinePeers) {
         const key = (peer.x_username || '').replace(/^@/, '').toLowerCase();
         if (!key) continue;
@@ -330,7 +357,6 @@ export async function fetchLeaderboard(
         });
     }
 
-    // 5. Overlay local player
     const myKey = localStats.x_username.replace(/^@/, '').toLowerCase();
     merged.set(myKey, {
         ...localStats,
@@ -341,9 +367,6 @@ export async function fetchLeaderboard(
     return Array.from(merged.values());
 }
 
-/**
- * Executes a P2P $UWU transfer to another player by @username
- */
 export async function executeUwuTransfer(
     senderStats: PlayerEconomyStats,
     recipientUsername: string,
@@ -377,49 +400,34 @@ export async function executeUwuTransfer(
         created_at: new Date().toISOString()
     };
 
-    // Try atomic RPC first, then fallback to table updates + local cache
     try {
-        const { data: rpcRes, error: rpcErr } = await supabase.rpc('transfer_uwu_chips', {
-            p_sender_id: senderStats.user_id,
-            p_sender_username: cleanSender,
-            p_recipient_username: cleanRecipient,
-            p_amount: cleanAmount,
-            p_note: record.note
-        });
+        await supabase
+            .from('uwu_world_players')
+            .update({ chips: newBalance, updated_at: new Date().toISOString() })
+            .eq('user_id', senderStats.user_id);
 
-        if (rpcErr) {
-            // Fallback direct table update if RPC isn't installed yet
+        const { data: recRow } = await supabase
+            .from('uwu_world_players')
+            .select('user_id, chips')
+            .ilike('x_username', cleanRecipient)
+            .maybeSingle();
+
+        if (recRow) {
             await supabase
                 .from('uwu_world_players')
-                .update({ chips: newBalance, updated_at: new Date().toISOString() })
-                .eq('user_id', senderStats.user_id);
-
-            const { data: recRow } = await supabase
-                .from('uwu_world_players')
-                .select('user_id, chips')
-                .ilike('x_username', cleanRecipient)
-                .maybeSingle();
-
-            if (recRow) {
-                await supabase
-                    .from('uwu_world_players')
-                    .update({ chips: Number(recRow.chips || 0) + cleanAmount, updated_at: new Date().toISOString() })
-                    .eq('user_id', recRow.user_id);
-            }
-
-            await supabase.from('uwu_transfers').insert({
-                sender_id: record.sender_id,
-                sender_username: record.sender_username,
-                recipient_username: record.recipient_username,
-                amount: record.amount,
-                note: record.note
-            });
-        } else if (rpcRes && rpcRes.ok === false) {
-            return { ok: false, error: rpcRes.error || 'Transfer failed.', newBalance: senderStats.chips };
+                .update({ chips: Number(recRow.chips || 0) + cleanAmount, updated_at: new Date().toISOString() })
+                .eq('user_id', recRow.user_id);
         }
+
+        await supabase.from('uwu_transfers').insert({
+            sender_id: record.sender_id,
+            sender_username: record.sender_username,
+            recipient_username: record.recipient_username,
+            amount: record.amount,
+            note: record.note
+        });
     } catch {}
 
-    // Update local cache for recipient & transfer log
     if (typeof window !== 'undefined') {
         try {
             const rawCache = localStorage.getItem(LOCAL_LEADERBOARD_CACHE_KEY);

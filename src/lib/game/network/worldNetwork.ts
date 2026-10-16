@@ -6,8 +6,8 @@
  * - Position broadcasting with dead-reckoning interpolation (16Hz -> 60FPS)
  * - 6 Dance moves sync
  * - Text chat speech bubbles
- * - Economy, Leaderboard stats sync & P2P $UWU Chip Transfers
- * - Mini-game state synchronization (Dice Duel, Roulette, Blackjack/Slots Jackpot, Vault, DJ, Drag Graffiti)
+ * - Economy, Leaderboard stats sync, P2P $UWU Chip Transfers & Persistent Graffiti Wall Sync
+ * - Mini-game state synchronization (Dice Duel, Roulette, Blackjack/Slots/Crash/Mines Jackpot, Vault, DJ)
  * - WebRTC signaling for proximity voice chat
  */
 
@@ -34,15 +34,15 @@ export class WorldNetworkManager {
     private peerEconomyStats = new Map<string, PlayerEconomyStats>();
 
     private lastBroadcastTime = 0;
-    private broadcastIntervalMs = 60; // ~16 updates per second
+    private broadcastIntervalMs = 60;
 
     // Event callbacks
     public onChatReceived: (senderId: string, username: string, text: string) => void = () => {};
     public onEmoteReceived: (senderId: string, emote: string) => void = () => {};
     public onVaultUnlocked: (heroes: string[]) => void = () => {};
     public onDJTrackChanged: (trackId: number, djUser: string) => void = () => {};
-    public onGraffitiPixel: (x: number, y: number, color: string) => void = () => {};
-    public onGraffitiBatch: (pixels: Array<{ x: number; y: number; color: string }>) => void = () => {};
+    public onGraffitiPixel: (x: number, y: number, color: string, brush?: number) => void = () => {};
+    public onGraffitiSnapshot: (dataUrl: string) => void = () => {};
     public onWebRTCSignal: (fromUserId: string, payload: any) => void = () => {};
     public onOnlineCountChanged: (count: number) => void = () => {};
     public onCasinoJackpot: (username: string, game: string, amount: number) => void = () => {};
@@ -62,9 +62,6 @@ export class WorldNetworkManager {
         this.localPlayerState = { ...initialPlayer };
     }
 
-    /**
-     * Connects to Supabase Realtime channel and joins presence room
-     */
     public init() {
         if (typeof window === 'undefined') return;
 
@@ -75,7 +72,6 @@ export class WorldNetworkManager {
             }
         });
 
-        // 1. Presence Sync
         this.channel
             .on('presence', { event: 'sync' }, () => {
                 const presenceState = this.channel.presenceState();
@@ -95,9 +91,9 @@ export class WorldNetworkManager {
                                     displayName: data.displayName,
                                     avatarUrl: data.avatarUrl || '/unicorn.png',
                                     x: data.x || 16.0,
-                                    y: data.y || 17.5,
+                                    y: data.y || 16.5,
                                     targetX: data.x || 16.0,
-                                    targetY: data.y || 17.5,
+                                    targetY: data.y || 16.5,
                                     dir: data.dir || 'SE',
                                     isWalking: false,
                                     isDancing: false,
@@ -114,7 +110,6 @@ export class WorldNetworkManager {
                     }
                 }
 
-                // Remove peers who left
                 for (const [id] of this.remotePlayers.entries()) {
                     if (!activeIds.has(id)) {
                         this.remotePlayers.delete(id);
@@ -123,7 +118,6 @@ export class WorldNetworkManager {
 
                 this.onOnlineCountChanged(this.remotePlayers.size + 1);
             })
-            // 2. Position & Dance Updates
             .on('broadcast', { event: 'pos' }, ({ payload }: any) => {
                 if (!payload || payload.id === this.localUserId) return;
                 const p = this.remotePlayers.get(payload.id);
@@ -161,7 +155,6 @@ export class WorldNetworkManager {
                     });
                 }
             })
-            // 3. Speech Bubble Chat
             .on('broadcast', { event: 'chat' }, ({ payload }: any) => {
                 if (!payload) return;
                 const p = this.remotePlayers.get(payload.id);
@@ -175,7 +168,6 @@ export class WorldNetworkManager {
                     };
                 }
             })
-            // 4. Reactions / Emotes
             .on('broadcast', { event: 'emote' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onEmoteReceived(payload.id, payload.emote);
@@ -188,26 +180,22 @@ export class WorldNetworkManager {
                     };
                 }
             })
-            // 5. Vault Heist Unlocked
             .on('broadcast', { event: 'vault_unlocked' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onVaultUnlocked(payload.heroes || []);
             })
-            // 6. DJ Track Switch
             .on('broadcast', { event: 'dj_track' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onDJTrackChanged(payload.trackId, payload.djUser);
             })
-            // 7. Collaborative Pixel Graffiti (Single or Batch)
             .on('broadcast', { event: 'graffiti_pixel' }, ({ payload }: any) => {
                 if (!payload) return;
-                this.onGraffitiPixel(payload.x, payload.y, payload.color);
+                this.onGraffitiPixel(payload.x, payload.y, payload.color, payload.brush || 1);
             })
-            .on('broadcast', { event: 'graffiti_batch' }, ({ payload }: any) => {
-                if (!payload || !payload.pixels) return;
-                this.onGraffitiBatch(payload.pixels);
+            .on('broadcast', { event: 'graffiti_snapshot' }, ({ payload }: any) => {
+                if (!payload || !payload.dataUrl) return;
+                this.onGraffitiSnapshot(payload.dataUrl);
             })
-            // 8. Dice Duel Events
             .on('broadcast', { event: 'dice_seat_update' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onDiceSeatsUpdate(payload.seats);
@@ -220,17 +208,14 @@ export class WorldNetworkManager {
                 if (!payload) return;
                 this.onDiceTournamentWon(payload.winner);
             })
-            // 9. Meme Roulette Spin
             .on('broadcast', { event: 'roulette_spin' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onRouletteSpinResult(payload.winner);
             })
-            // 10. Casino Jackpot Broadcast
             .on('broadcast', { event: 'casino_jackpot' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onCasinoJackpot(payload.username, payload.game, payload.amount);
             })
-            // 11. Economy Stats Sync (Balances, Wins, Losses, High Score)
             .on('broadcast', { event: 'stats_sync' }, ({ payload }: any) => {
                 if (!payload || !payload.stats) return;
                 const st: PlayerEconomyStats = payload.stats;
@@ -246,18 +231,15 @@ export class WorldNetworkManager {
                     this.onStatsUpdated(st);
                 }
             })
-            // 12. P2P $UWU Chip Transfer Broadcast
             .on('broadcast', { event: 'uwu_transfer' }, ({ payload }: any) => {
                 if (!payload || !payload.record) return;
                 this.onUwuTransferReceived(payload.record);
             })
-            // 13. WebRTC Signaling for Proximity Voice
             .on('broadcast', { event: 'webrtc_signal' }, ({ payload }: any) => {
                 if (!payload || payload.to !== this.localUserId) return;
                 this.onWebRTCSignal(payload.from, payload.data);
             });
 
-        // Subscribe and track presence
         this.channel.subscribe(async (status: string) => {
             if (status === 'SUBSCRIBED') {
                 await this.channel.track({
@@ -276,9 +258,6 @@ export class WorldNetworkManager {
         });
     }
 
-    /**
-     * Broadcasts local player position (throttled to ~16Hz)
-     */
     public broadcastPosition(
         x: number,
         y: number,
@@ -401,21 +380,21 @@ export class WorldNetworkManager {
         });
     }
 
-    public broadcastGraffitiPixel(x: number, y: number, color: string) {
+    public broadcastGraffitiPixel(x: number, y: number, color: string, brush = 1) {
         if (!this.channel) return;
         this.channel.send({
             type: 'broadcast',
             event: 'graffiti_pixel',
-            payload: { x, y, color }
+            payload: { x, y, color, brush }
         });
     }
 
-    public broadcastGraffitiBatch(pixels: Array<{ x: number; y: number; color: string }>) {
-        if (!this.channel || pixels.length === 0) return;
+    public broadcastGraffitiSnapshot(dataUrl: string) {
+        if (!this.channel || !dataUrl) return;
         this.channel.send({
             type: 'broadcast',
-            event: 'graffiti_batch',
-            payload: { pixels }
+            event: 'graffiti_snapshot',
+            payload: { dataUrl }
         });
     }
 
