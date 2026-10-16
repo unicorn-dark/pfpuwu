@@ -3,13 +3,11 @@ import type { EntryGenerator } from './$types';
 
 export const entries: EntryGenerator = () => [
     { path: '' },
-    { path: 'memeguide' },
     { path: 'pfp' },
+    { path: 'chat' },
     { path: 'explorer' },
     { path: 'roadmap' },
     { path: 'blog' },
-    { path: 'pumpit' },
     { path: 'paint' },
-    { path: 'minesweeper' },
-    { path: 'notepad' },
+    { path: 'minesweeper' }
 ];

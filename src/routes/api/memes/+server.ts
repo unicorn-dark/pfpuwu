@@ -22,13 +22,54 @@ export async function GET({ url }) {
   const searchParam = url.searchParams.get("search");
   const search = searchParam ? searchParam.trim() : "";
   const type = url.searchParams.get("type") || "photo";
-  const sort = url.searchParams.get("sort") || "popular";
+  const sort = url.searchParams.get("sort") || "random";
   const limit = parseInt(url.searchParams.get("limit") || "30", 10);
   const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+  const seed = parseInt(url.searchParams.get("seed") || `${Date.now()}`, 10);
 
   // ==================== NO SEARCH ====================
   if (!search) {
     let query = supabase.from("memes_with_scores").select("*").eq("type", type);
+
+    if (sort === "random") {
+      const approxTotal = type === "photo" ? 4225 : 646;
+      const P = Math.max(1, Math.ceil(approxTotal / limit));
+      const pageIndex = Math.floor(offset / limit);
+
+      function gcd(x: number, y: number): number {
+        return y === 0 ? x : gcd(y, x % y);
+      }
+      let a = (Math.abs(seed) % (P - 1)) + 1;
+      while (gcd(a, P) !== 1) {
+        a = (a + 1) % P;
+        if (a === 0) a = 1;
+      }
+      const c = (Math.abs(seed) * 31 + 17) % P;
+      const targetPage = (a * pageIndex + c) % P;
+      const targetOffset = targetPage * limit;
+
+      query = query
+        .order("id", { ascending: false })
+        .range(targetOffset, targetOffset + limit - 1);
+
+      const { data, error } = await query;
+      if (error) {
+        return json({ error: error.message }, { status: 500 });
+      }
+
+      const shuffled = [...(data || [])];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+
+      return json(shuffled, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+      });
+    }
 
     if (sort === "popular") {
       query = query.order("score", { ascending: false });

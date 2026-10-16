@@ -1,27 +1,35 @@
 <script lang="ts">
-    import { closeWindow, focusWindow, minimizeWindow } from "$lib/stores/os";
+    import {
+        closeWindow,
+        focusWindow,
+        minimizeWindow,
+        highestZIndex,
+        isDraggingAnyWindow
+    } from "$lib/stores/os";
 
     let {
         id,
         title,
+        icon = "",
         zIndex,
         isMinimized,
         initialWidth = 400,
         initialHeight = 300,
         minWidth = 250,
         minHeight = 150,
+        children
     } = $props();
 
-    let width = $state(initialWidth);
-    let height = $state(initialHeight);
+    const isBrowser = typeof window !== "undefined";
+    const vw = isBrowser ? window.innerWidth : 1024;
+    const vh = isBrowser ? window.innerHeight : 768;
 
-    const isDesktop = window.innerWidth > 768;
-    const availableWidth = isDesktop
-        ? window.innerWidth - 320
-        : window.innerWidth;
+    let width = $state(Math.min(initialWidth, vw));
+    let height = $state(Math.min(initialHeight, vh - 35));
 
-    let left = $state(availableWidth / 2 - initialWidth / 2);
-    let top = $state(window.innerHeight / 2 - initialHeight / 2);
+    const stagger = ((zIndex % 5) - 2) * 16;
+    let left = $state(Math.max(0, Math.floor(vw / 2 - width / 2 + stagger)));
+    let top = $state(Math.max(0, Math.floor((vh - 35) / 2 - height / 2 + stagger)));
 
     // --- MAXIMIZE LOGIC ---
     let isMaximized = $state(false);
@@ -52,9 +60,10 @@
         initialTop: number;
 
     function onDragStart(e: MouseEvent) {
-        if (e.button !== 0 || isMaximized) return;
+        if (e.button !== 0 || isMaximized || window.innerWidth <= 768) return;
 
         isDragging = true;
+        isDraggingAnyWindow.set(true);
         dragStartX = e.clientX;
         dragStartY = e.clientY;
         initialLeft = left;
@@ -69,11 +78,12 @@
     function onDrag(e: MouseEvent) {
         if (!isDragging) return;
         left = initialLeft + (e.clientX - dragStartX);
-        top = initialTop + (e.clientY - dragStartY);
+        top = Math.max(0, initialTop + (e.clientY - dragStartY));
     }
 
     function onDragEnd() {
         isDragging = false;
+        isDraggingAnyWindow.set(false);
         window.removeEventListener("mousemove", onDrag);
         window.removeEventListener("mouseup", onDragEnd);
     }
@@ -86,14 +96,14 @@
 
     function onResizeStart(e: MouseEvent, handle: string) {
         e.stopPropagation();
-        if (e.button !== 0 || isMaximized) return;
+        if (e.button !== 0 || isMaximized || window.innerWidth <= 768) return;
 
         isResizing = true;
+        isDraggingAnyWindow.set(true);
         activeHandle = handle;
         dragStartX = e.clientX;
         dragStartY = e.clientY;
 
-        // Capture initial dimensions AND positions
         resizeStartW = width;
         resizeStartH = height;
         resizeStartLeft = left;
@@ -111,37 +121,28 @@
         const deltaX = e.clientX - dragStartX;
         const deltaY = e.clientY - dragStartY;
 
-        // RIGHT edge (East)
         if (activeHandle.includes("e")) {
             width = Math.max(minWidth, resizeStartW + deltaX);
         }
-
-        // BOTTOM edge (South)
         if (activeHandle.includes("s")) {
             height = Math.max(minHeight, resizeStartH + deltaY);
         }
-
-        // LEFT edge (West) -> Affects both Width AND X-Coordinate
         if (activeHandle.includes("w")) {
             const newWidth = Math.max(minWidth, resizeStartW - deltaX);
             if (newWidth > minWidth) {
                 left = resizeStartLeft + deltaX;
                 width = newWidth;
             } else {
-                // Lock coordinate if minimum width is hit
                 left = resizeStartLeft + (resizeStartW - minWidth);
                 width = minWidth;
             }
         }
-
-        // TOP edge (North) -> Affects both Height AND Y-Coordinate
         if (activeHandle.includes("n")) {
             const newHeight = Math.max(minHeight, resizeStartH - deltaY);
             if (newHeight > minHeight) {
                 top = resizeStartTop + deltaY;
                 height = newHeight;
             } else {
-                // Lock coordinate if minimum height is hit
                 top = resizeStartTop + (resizeStartH - minHeight);
                 height = minHeight;
             }
@@ -150,12 +151,16 @@
 
     function onResizeEnd() {
         isResizing = false;
+        isDraggingAnyWindow.set(false);
         activeHandle = "";
         window.removeEventListener("mousemove", onResize);
         window.removeEventListener("mouseup", onResizeEnd);
     }
+
+    const isFocused = $derived(zIndex === $highestZIndex);
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
     class="win98-window"
     class:maximized={isMaximized}
@@ -170,42 +175,22 @@
     onmousedown={() => focusWindow(id)}
 >
     {#if !isMaximized}
-        <div
-            class="resize-handle n"
-            onmousedown={(e) => onResizeStart(e, "n")}
-        ></div>
-        <div
-            class="resize-handle s"
-            onmousedown={(e) => onResizeStart(e, "s")}
-        ></div>
-        <div
-            class="resize-handle e"
-            onmousedown={(e) => onResizeStart(e, "e")}
-        ></div>
-        <div
-            class="resize-handle w"
-            onmousedown={(e) => onResizeStart(e, "w")}
-        ></div>
-
-        <div
-            class="resize-handle ne"
-            onmousedown={(e) => onResizeStart(e, "ne")}
-        ></div>
-        <div
-            class="resize-handle nw"
-            onmousedown={(e) => onResizeStart(e, "nw")}
-        ></div>
-        <div
-            class="resize-handle se"
-            onmousedown={(e) => onResizeStart(e, "se")}
-        ></div>
-        <div
-            class="resize-handle sw"
-            onmousedown={(e) => onResizeStart(e, "sw")}
-        ></div>
+        <div class="resize-handle n" onmousedown={(e) => onResizeStart(e, "n")}></div>
+        <div class="resize-handle s" onmousedown={(e) => onResizeStart(e, "s")}></div>
+        <div class="resize-handle e" onmousedown={(e) => onResizeStart(e, "e")}></div>
+        <div class="resize-handle w" onmousedown={(e) => onResizeStart(e, "w")}></div>
+        <div class="resize-handle ne" onmousedown={(e) => onResizeStart(e, "ne")}></div>
+        <div class="resize-handle nw" onmousedown={(e) => onResizeStart(e, "nw")}></div>
+        <div class="resize-handle se" onmousedown={(e) => onResizeStart(e, "se")}></div>
+        <div class="resize-handle sw" onmousedown={(e) => onResizeStart(e, "sw")}></div>
     {/if}
 
-    <div class="title-bar" onmousedown={onDragStart}>
+    <div
+        class="title-bar"
+        class:inactive={!isFocused}
+        onmousedown={onDragStart}
+        ondblclick={toggleMaximize}
+    >
         <div class="title-bar-text">{title}</div>
         <div class="title-bar-controls">
             <button
@@ -236,8 +221,8 @@
         </div>
     </div>
 
-    <div class="window-body">
-        <slot></slot>
+    <div class="window-body" class:iframe-shield={$isDraggingAnyWindow}>
+        {@render children?.()}
     </div>
 </div>
 
@@ -255,92 +240,52 @@
     .maximized {
         top: 0 !important;
         left: 0 !important;
-        width: calc(100vw - var(--sidebar-width, 320px)) !important;
+        width: 100vw !important;
         height: calc(100dvh - 35px) !important;
-        transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     /* === RESIZE HANDLES === */
     .resize-handle {
         position: absolute;
         z-index: 100;
-        /* Background is transparent so you only see the cursors */
         background: transparent;
     }
-    /* Edges */
-    .resize-handle.n {
-        top: -4px;
-        left: 4px;
-        right: 4px;
-        height: 8px;
-        cursor: n-resize;
-    }
-    .resize-handle.s {
-        bottom: -4px;
-        left: 4px;
-        right: 4px;
-        height: 8px;
-        cursor: s-resize;
-    }
-    .resize-handle.e {
-        top: 4px;
-        bottom: 4px;
-        right: -4px;
-        width: 8px;
-        cursor: e-resize;
-    }
-    .resize-handle.w {
-        top: 4px;
-        bottom: 4px;
-        left: -4px;
-        width: 8px;
-        cursor: w-resize;
-    }
-
-    /* Corners */
-    .resize-handle.ne {
-        top: -4px;
-        right: -4px;
-        width: 12px;
-        height: 12px;
-        cursor: ne-resize;
-    }
-    .resize-handle.nw {
-        top: -4px;
-        left: -4px;
-        width: 12px;
-        height: 12px;
-        cursor: nw-resize;
-    }
-    .resize-handle.se {
-        bottom: -4px;
-        right: -4px;
-        width: 12px;
-        height: 12px;
-        cursor: se-resize;
-    }
-    .resize-handle.sw {
-        bottom: -4px;
-        left: -4px;
-        width: 12px;
-        height: 12px;
-        cursor: sw-resize;
-    }
+    .resize-handle.n { top: -4px; left: 4px; right: 4px; height: 8px; cursor: n-resize; }
+    .resize-handle.s { bottom: -4px; left: 4px; right: 4px; height: 8px; cursor: s-resize; }
+    .resize-handle.e { top: 4px; bottom: 4px; right: -4px; width: 8px; cursor: e-resize; }
+    .resize-handle.w { top: 4px; bottom: 4px; left: -4px; width: 8px; cursor: w-resize; }
+    .resize-handle.ne { top: -4px; right: -4px; width: 12px; height: 12px; cursor: ne-resize; }
+    .resize-handle.nw { top: -4px; left: -4px; width: 12px; height: 12px; cursor: nw-resize; }
+    .resize-handle.se { bottom: -4px; right: -4px; width: 12px; height: 12px; cursor: se-resize; }
+    .resize-handle.sw { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: sw-resize; }
 
     .title-bar {
         background: #000080;
         color: white;
-        padding: 3px 2px 3px 3px;
+        padding: 3px 2px 3px 4px;
         display: flex;
         justify-content: space-between;
         align-items: center;
         font-weight: bold;
         cursor: default;
+        flex-shrink: 0;
+    }
+
+    .title-bar.inactive {
+        background: #808080;
+        color: #d4d0c8;
+    }
+
+    .title-bar-text {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
 
     .title-bar-controls {
         display: flex;
         gap: 2px;
+        flex-shrink: 0;
     }
 
     .title-bar-controls button {
@@ -351,6 +296,7 @@
         cursor: pointer;
         padding: 0 4px;
         font-size: 0.8rem;
+        color: #000000;
     }
 
     .title-bar-controls button:active {
@@ -359,12 +305,18 @@
     }
 
     .window-body {
-        padding: 10px;
+        padding: 4px;
         flex-grow: 1;
+        min-height: 0;
         overflow: auto;
-        /* Ensure the body doesn't cover up our custom edge borders */
         position: relative;
         z-index: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .window-body.iframe-shield :global(iframe) {
+        pointer-events: none !important;
     }
 
     /* =========================================
@@ -375,7 +327,7 @@
             top: 0 !important;
             left: 0 !important;
             width: 100vw !important;
-            height: 100vh !important;
+            height: calc(100dvh - 35px) !important;
             border: none;
             box-shadow: none;
         }
@@ -389,15 +341,20 @@
             padding: 6px 4px 6px 6px !important;
         }
 
-        button[aria-label="Minimize"],
         button[aria-label="Maximize"] {
             display: none !important;
         }
 
-        button[aria-label="Close"] {
-            padding: 4px 16px !important;
-            font-size: 1.2rem !important;
+        button[aria-label="Minimize"] {
+            padding: 4px 10px !important;
+            font-size: 1rem !important;
         }
+
+        button[aria-label="Close"] {
+            padding: 4px 14px !important;
+            font-size: 1rem !important;
+        }
+
         .maximized {
             width: 100vw !important;
         }

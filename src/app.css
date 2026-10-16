@@ -1,7 +1,12 @@
-/* Lock down the page and apply pixelated rendering globally */
+/* Lock down the page and apply pixelated Windows 98 rendering globally */
 :root {
     --win98-bg: #c0c0c0;
-    --win98-blue: #0000aa; /* Oversaturated */
+    --win98-blue: #000080;
+    --taskbar-height: 35px;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
 }
 
 html, body {
@@ -9,10 +14,93 @@ html, body {
     padding: 0;
     width: 100vw;
     height: 100vh;
-    overflow: hidden; /* No scrolling */
-    font-family: 'MS Sans Serif', 'Pixelated Font', sans-serif;
-    -webkit-font-smoothing: none; /* Crucial for crisp, pixelated fonts */
-    image-rendering: pixelated; 
+    height: 100dvh;
+    overflow: hidden;
+    font-family: 'MS Sans Serif', 'Tahoma', 'Pixelated Font', sans-serif;
+    font-size: 12px;
+    -webkit-font-smoothing: none;
+    image-rendering: pixelated;
+    user-select: none;
 }
 
-/* Add custom font imports here later to ensure the UI looks perfectly retro */
+/* Classic Windows 98 Scrollbars */
+::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+}
+
+::-webkit-scrollbar-track {
+    background: repeating-conic-gradient(#c0c0c0 0% 25%, #ffffff 0% 50%) 50% / 2px 2px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border: 2px solid;
+    border-color: #ffffff #000000 #000000 #ffffff;
+    box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+}
+
+/* Reusable Classic Windows 98 Controls */
+.win98-btn, .y2k-btn {
+    font-family: 'MS Sans Serif', 'Tahoma', sans-serif;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 4px 10px;
+    background: #c0c0c0;
+    color: #000000;
+    border: 2px solid;
+    border-color: #ffffff #000000 #000000 #ffffff;
+    box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+    border-radius: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.win98-btn:active:not(:disabled), .y2k-btn:active:not(:disabled) {
+    border-color: #000000 #ffffff #ffffff #000000;
+    box-shadow: inset 1px 1px 0 #808080;
+    padding: 5px 9px 3px 11px;
+}
+
+.win98-btn.primary, .y2k-btn.primary, .y2k-btn.pink {
+    background: #000080;
+    color: #ffffff;
+    border-color: #ffffff #000000 #000000 #ffffff;
+    box-shadow: none;
+}
+
+.win98-btn:disabled, .y2k-btn:disabled {
+    color: #808080;
+    text-shadow: 1px 1px 0 #ffffff;
+    cursor: not-allowed;
+}
+
+.win98-input, .y2k-input {
+    font-family: 'MS Sans Serif', 'Tahoma', sans-serif;
+    font-size: 12px;
+    padding: 3px 5px;
+    background: #ffffff;
+    color: #000000;
+    border: 2px solid;
+    border-color: #808080 #ffffff #ffffff #808080;
+    box-shadow: inset 1px 1px 0 #000000;
+    border-radius: 0;
+    outline: none;
+}
+
+.win98-inset {
+    background: #ffffff;
+    border: 2px solid;
+    border-color: #808080 #ffffff #ffffff #808080;
+    box-shadow: inset 1px 1px 0 #000000;
+}
+
+.win98-outset {
+    background: #c0c0c0;
+    border: 2px solid;
+    border-color: #ffffff #000000 #000000 #ffffff;
+    box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
+}

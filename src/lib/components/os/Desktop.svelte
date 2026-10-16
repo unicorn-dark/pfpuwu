@@ -1,130 +1,80 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { activeWindows, openWindow } from "$lib/stores/os";
+    import {
+        APP_REGISTRY,
+        activeWindows,
+        openWindow,
+        openChatDrawer
+    } from "$lib/stores/os";
+    import { initAuth } from "$lib/stores/auth";
     import Window from "./Window.svelte";
-    import PfpMaker from "./PfpMaker.svelte";
     import Taskbar from "./Taskbar.svelte";
+    import PfpMaker from "./PfpMaker.svelte";
+    import ChatboxApp from "./ChatboxApp.svelte";
+    import MemeExplorerApp from "./MemeExplorerApp.svelte";
     import MinesweeperApp from "./MinesweeperApp.svelte";
     import PrivateersApp from "./PrivateersApp.svelte";
-    import NotepadApp from "./NotepadApp.svelte";
-    import UwUSidebar from "./UwUSidebar.svelte";
-    import VideoPlayerApp from "./VideoPlayerApp.svelte";
-    import MemeExplorerApp from "./MemeExplorerApp.svelte";
     import Roadmap from "./Roadmap.svelte";
-    import FlappyHectacorn from "./FlappyHectacorn.svelte";
-    import MemeCoinGuide from "./MemeCoinGuide.svelte";
     import SoundManager from "./SoundManager.svelte";
+    import XAuthModal from "./XAuthModal.svelte";
+    import AvatarCustomizerModal from "./AvatarCustomizerModal.svelte";
+    import {
+        userProfile,
+        showAuthModal,
+        authModalReason,
+        showAvatarCustomizer
+    } from "$lib/stores/auth";
 
-    const desktopVideos = [
-        {
-            id: "vid-demo4",
-            title: "pizza.mov",
-            src: "video/pizza.mp4",
-            width: 720,
-            height: 1280,
-        },
-    ];
-
-    const launchMemeExpApp = () => {
-        openWindow("meme-explorer", "Meme Explorer", 900, 600);
-    };
-    const launchPfpApp = () => {
-        // Boost size to 720x480 for better layout presentation on desktop
-        openWindow("pfp-app", "PFP Generator v1.0", 960, 690);
-    };
-    const launchJSPaint = () => {
-        openWindow("jspaint", "untitled - Paint", 800, 600);
-    };
-    const launchMinesweeper = () => {
-        openWindow("minesweeper", "Minesweeper", 260, 320);
-    };
-    const launchRoadmap = () => {
-        openWindow("roadmap", "UwU Roadmap", 850, 700);
-    };
-    const launchFlappy = () => {
-        openWindow("flappy", "Flappy Hectocorn", 850, 700);
-    };
-    const launchMemeGuide = () => {
-        openWindow("memeGuide", "Memecoin Guide", 850, 700);
-    };
-    const launchBlog = () => {
-        openWindow(
-            "privateers-blog",
-            "Internet Explorer - PrivateerSA",
-            840,
-            780,
-        );
-    };
-    const launchNotepad = () => {
-        openWindow("notepad", "untitled - Notepad", 500, 400);
+    const launchApp = (appId: string) => {
+        if (appId === "chatbox") {
+            openChatDrawer();
+            return;
+        }
+        const def = APP_REGISTRY.find((a) => a.id === appId);
+        if (!def) return;
+        openWindow(def.id, def.title, def.defaultWidth, def.defaultHeight);
     };
 
-    const launchVideo = (vid: any) => {
-        // 1. Determine the safe available space on the user's screen
-        const isDesktop = window.innerWidth > 768;
-        // Subtract sidebar (320px) and a safety margin (40px)
-        const maxSafeWidth = isDesktop
-            ? window.innerWidth - 360
-            : window.innerWidth - 40;
-        // Subtract taskbar (35px) and a safety margin (60px)
-        const maxSafeHeight = window.innerHeight - 95;
-
-        // 2. Calculate the scale factor to fit the video into the safe space
-        const widthScale = maxSafeWidth / vid.width;
-        const heightScale = maxSafeHeight / vid.height;
-
-        // Use the smallest scale to maintain aspect ratio (and never scale > 1)
-        const scale = Math.min(1, widthScale, heightScale);
-
-        // 3. Apply the scale to the video dimensions
-        const finalWidth = Math.floor(vid.width * scale);
-        const finalHeight = Math.floor(vid.height * scale);
-
-        // 4. Open the window with the newly scaled size (plus the window chrome padding)
-        openWindow(vid.id, vid.title, finalWidth + 12, finalHeight + 40);
-    };
-
-    // Client-side Application Router
     onMount(() => {
-        // Grab the path, normalize to lowercase, and strip any trailing slash
+        initAuth();
+
         let path = window.location.pathname.toLowerCase();
-        if (path.length > 1 && path.endsWith('/')) {
+        if (path.length > 1 && path.endsWith("/")) {
             path = path.slice(0, -1);
         }
 
+        if (path.startsWith("/space/")) {
+            // MySpace is temporarily disabled per user request
+            return;
+        }
+
         switch (path) {
-            case '/memeguide':
-                launchMemeGuide();
+            case "/pfp":
+                launchApp("pfp-app");
                 break;
-            case '/pfp':
-                launchPfpApp();
+            case "/chat":
+                openChatDrawer();
                 break;
-            case '/explorer':
-                launchMemeExpApp();
+            case "/explorer":
+                launchApp("meme-explorer");
                 break;
-            case '/roadmap':
-                launchRoadmap();
+            case "/roadmap":
+                launchApp("roadmap");
                 break;
-            case '/blog':
-                launchBlog();
+            case "/blog":
+                launchApp("privateers-blog");
                 break;
-            case '/pumpit':
-                launchFlappy();
+            case "/paint":
+                launchApp("jspaint");
                 break;
-            case '/paint':
-                launchJSPaint();
+            case "/minesweeper":
+                launchApp("minesweeper");
                 break;
-            case '/minesweeper':
-                launchMinesweeper();
-                break;
-            case '/notepad':
-                launchNotepad();
-                break;
-            case '/':
+            case "/":
             default:
-                // Default root logic or unmapped routes
-                launchPfpApp();
-                launchMemeExpApp();
+                // On opening the site: Meme Explorer is open on top, PFP Maker is open under it
+                launchApp("pfp-app");
+                launchApp("meme-explorer");
                 break;
         }
     });
@@ -132,120 +82,80 @@
 
 <div class="desktop">
     <SoundManager />
+    <XAuthModal />
+    <AvatarCustomizerModal />
+
     <div class="workspace">
         <div class="shortcuts">
-            <button
-                class="shortcut"
-                onclick={launchPfpApp}
-                ondblclick={launchPfpApp}
-            >
-                <div class="icon-placeholder">🎨</div>
-                <span>PFP Maker</span>
-            </button>
+            <!-- Dedicated X Identity & Persona Avatar Shortcuts -->
+            {#if !$userProfile}
+                <button
+                    class="shortcut shortcut-login"
+                    onclick={() => {
+                        authModalReason.set("Sign in with X (Twitter) to choose your Persona Avatar and unlock Global Chat.");
+                        showAuthModal.set(true);
+                    }}
+                    ondblclick={() => {
+                        authModalReason.set("Sign in with X (Twitter) to choose your Persona Avatar and unlock Global Chat.");
+                        showAuthModal.set(true);
+                    }}
+                    title="Sign in with X (Twitter)"
+                >
+                    <div class="icon-placeholder x-login-icon">𝕏</div>
+                    <span class="x-badge-title">Sign In (𝕏)</span>
+                </button>
+            {:else}
+                <button
+                    class="shortcut shortcut-avatar"
+                    onclick={() => showAvatarCustomizer.set(true)}
+                    ondblclick={() => showAvatarCustomizer.set(true)}
+                    title="Customize your transparent Persona Avatar"
+                >
+                    <div class="icon-placeholder avatar-icon-box">
+                        <img
+                            src={$userProfile.avatar_url || "/unicorn.png"}
+                            alt="Persona Avatar"
+                            class="desktop-persona-img"
+                            onerror={(e: any) => (e.currentTarget.src = "/unicorn.png")}
+                        />
+                    </div>
+                    <span>My Avatar</span>
+                </button>
+            {/if}
 
-            <button
-                class="shortcut"
-                onclick={launchJSPaint}
-                ondblclick={launchJSPaint}
-            >
-                <div class="icon-placeholder">🖌️</div>
-                <span>JS Paint</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchMinesweeper}
-                ondblclick={launchMinesweeper}
-            >
-                <div class="icon-placeholder">💣</div>
-                <span>Minesweeper</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchBlog}
-                ondblclick={launchBlog}
-            >
-                <div class="icon-placeholder">🌐</div>
-                <span>Privateer Blog</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchNotepad}
-                ondblclick={launchNotepad}
-            >
-                <div class="icon-placeholder">📝</div>
-                <span>Notepad</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchRoadmap}
-                ondblclick={launchRoadmap}
-            >
-                <div class="icon-placeholder">🗺️</div>
-                <span>Roadmap</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchMemeExpApp}
-                ondblclick={launchMemeExpApp}
-            >
-                <div class="icon-placeholder">🦄</div>
-                <span>Meme Explorer</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchFlappy}
-                ondblclick={launchFlappy}
-            >
-                <img
-                    src="/images/hectacorn.jpg"
-                    alt="Pump It Icon"
-                    class="custom-icon"
-                />
-                <span>Pump It</span>
-            </button>
-
-            <button
-                class="shortcut"
-                onclick={launchMemeGuide}
-                ondblclick={launchMemeGuide}
-            >
-                <div class="icon-placeholder">📜</div>
-                <span>Meme Guide</span>
-            </button>
-
-            {#each desktopVideos as vid}
+            {#each APP_REGISTRY as app (app.id)}
                 <button
                     class="shortcut"
-                    onclick={() => launchVideo(vid)}
-                    ondblclick={() => launchVideo(vid)}
+                    onclick={() => launchApp(app.id)}
+                    ondblclick={() => launchApp(app.id)}
                 >
-                    <div class="icon-placeholder">🎞️</div>
-                    <span>{vid.title}</span>
+                    <div class="icon-placeholder">{app.icon}</div>
+                    <span>{app.title}</span>
                 </button>
             {/each}
         </div>
 
         {#each $activeWindows as win (win.id)}
             {#if win.isOpen}
+                {@const appDef = APP_REGISTRY.find((a) => a.id === win.appId)}
                 <Window
                     id={win.id}
                     title={win.title}
+                    icon={win.icon}
                     zIndex={win.zIndex}
                     initialWidth={win.width}
                     initialHeight={win.height}
                     isMinimized={win.isMinimized}
-                    minWidth={win.id === "pfp-app" ? 640 : 250}
-                    minHeight={win.id === "pfp-app" ? 440 : 150}
+                    minWidth={appDef?.minWidth || 250}
+                    minHeight={appDef?.minHeight || 150}
                 >
                     {#if win.id === "pfp-app"}
                         <div class="app-content">
                             <PfpMaker />
+                        </div>
+                    {:else if win.id === "meme-explorer"}
+                        <div class="app-content">
+                            <MemeExplorerApp />
                         </div>
                     {:else if win.id === "jspaint"}
                         <iframe
@@ -253,10 +163,6 @@
                             title="JS Paint"
                             class="app-iframe"
                         ></iframe>
-                    {:else if win.id === "meme-explorer"}
-                        <div class="app-content">
-                            <MemeExplorerApp />
-                        </div>
                     {:else if win.id === "minesweeper"}
                         <div class="app-content">
                             <MinesweeperApp />
@@ -265,44 +171,18 @@
                         <div class="app-content">
                             <PrivateersApp />
                         </div>
-                    {:else if win.id === "notepad"}
-                        <div class="app-content">
-                            <NotepadApp />
-                        </div>
                     {:else if win.id === "roadmap"}
                         <div class="app-content">
                             <Roadmap />
-                        </div>
-                    {:else if win.id === "flappy"}
-                        <div
-                            class="app-content"
-                            style="padding: 0; background: #000;"
-                        >
-                            <FlappyHectacorn />
-                        </div>
-                    {:else if win.id === "memeGuide"}
-                        <div class="app-content">
-                            <MemeCoinGuide />
-                        </div>
-                    {:else if win.id.startsWith("vid-")}
-                        {@const videoData = desktopVideos.find(
-                            (v) => v.id === win.id,
-                        )}
-                        <div
-                            class="app-content"
-                            style="padding: 0; background: #000;"
-                        >
-                            {#if videoData}
-                                <VideoPlayerApp src={videoData.src} />
-                            {/if}
                         </div>
                     {/if}
                 </Window>
             {/if}
         {/each}
     </div>
-    <UwUSidebar />
+
     <Taskbar />
+    <ChatboxApp />
 </div>
 
 <style>
@@ -315,26 +195,14 @@
         overflow: hidden;
         box-sizing: border-box;
     }
-    .maximized {
-        width: 100% !important;
-        height: 100% !important;
-        top: 0 !important;
-        left: 0 !important;
-    }
+
     .workspace {
         position: absolute;
         top: 0;
         left: 0;
         bottom: 35px;
-        right: var(--sidebar-width, 320px);
+        right: 0;
         overflow: hidden;
-        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    @media (max-width: 768px) {
-        .workspace {
-            right: 0px;
-        }
     }
 
     .shortcuts {
@@ -357,6 +225,7 @@
         flex-direction: column;
         align-items: center;
         cursor: pointer;
+        font-family: inherit;
     }
 
     .icon-placeholder {
@@ -368,15 +237,64 @@
         background-color: #000080;
         padding: 2px 4px;
         border: 1px dotted transparent;
+        font-size: 11px;
+        text-align: center;
     }
 
-    .shortcut:focus span {
+    .shortcut:focus span,
+    .shortcut:hover span {
         border: 1px dotted yellow;
+    }
+
+    .x-login-icon {
+        background: #000000;
+        color: #ffffff;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #ffffff;
+        box-shadow: 2px 2px 0px rgba(0, 0, 0, 0.4);
+        font-weight: 900;
+        font-size: 1.3rem;
+        margin-bottom: 5px;
+        box-sizing: border-box;
+    }
+
+    .x-badge-title {
+        background-color: #000080 !important;
+        font-weight: bold;
+        color: #ffff00 !important;
+    }
+
+    .avatar-icon-box {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px dotted #ffffff;
+        margin-bottom: 5px;
+        box-sizing: border-box;
+    }
+
+    .desktop-persona-img {
+        width: 32px;
+        height: 32px;
+        object-fit: contain;
+        image-rendering: pixelated;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
     }
 
     .app-content {
         height: 100%;
+        width: 100%;
         color: black;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
     }
 
     .app-iframe {
@@ -385,20 +303,5 @@
         border: none;
         background: #c0c0c0;
         display: block;
-    }
-
-    .custom-icon {
-        width: 36px;
-        height: 36px;
-        margin-bottom: 5px;
-        object-fit: cover;
-        border-radius: 8px;
-        box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-    }
-
-    @media (max-width: 768px) {
-        .desktop {
-            padding-right: 0px;
-        }
     }
 </style>

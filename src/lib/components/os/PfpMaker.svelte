@@ -4,8 +4,13 @@
         BACKGROUND_OPTIONS,
         TRAITS,
         RING_OPTIONS,
-        getCachedTraitImage,
+        getCachedTraitImage
     } from "$lib/utils/traits";
+    import {
+        userProfile,
+        requireXLogin,
+        savePersonaAvatar
+    } from "$lib/stores/auth";
 
     let currentTraits: Record<string, number> = $state({});
     LAYER_ORDER.forEach((layer) => {
@@ -13,7 +18,6 @@
             layer !== "body" && TRAITS[layer].length > 1 ? 1 : 0;
     });
 
-    // 3. Isolated state for background to prevent rendering bugs
     let currentBgIndex = $state(0);
     let activeTab = $state("body");
     let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -22,27 +26,26 @@
 
     let lockedCategories: Record<string, boolean> = $state({});
     let showTooltip = $state(false);
+    let tooltipText = $state("Unlock the category first to change traits!");
     let tooltipTimeout: ReturnType<typeof setTimeout>;
+    let isSavingAvatar = $state(false);
 
-    function triggerTooltip() {
+    function triggerTooltip(msg = "Unlock the category first to change traits!") {
+        tooltipText = msg;
         showTooltip = true;
         clearTimeout(tooltipTimeout);
         tooltipTimeout = setTimeout(() => {
             showTooltip = false;
-        }, 2000);
+        }, 2200);
     }
 
-    async function renderPfp() {
-        if (!canvasElement) return;
-
-        // 4. CRITICAL FIX: Read all Svelte state synchronously BEFORE awaiting promises
-        // This ensures the `$effect` block accurately tracks dependencies and auto-updates.
-        const activeTraits = { ...currentTraits };
-        const activeRing = currentRing;
-        const activeBg = currentBgIndex;
-
-        isRendering = true;
-        const ctx = canvasElement.getContext("2d");
+    async function drawComposite(
+        targetCanvas: HTMLCanvasElement,
+        activeTraits: Record<string, number>,
+        activeBg: number,
+        activeRing: number
+    ) {
+        const ctx = targetCanvas.getContext("2d");
         if (!ctx) return;
 
         const imagePathsToLoad: string[] = [];
@@ -50,12 +53,12 @@
         LAYER_ORDER.forEach((layerName) => {
             if (layerName === "body" && activeRing > 0) {
                 imagePathsToLoad.push(
-                    `/traits/ring/top-ring-${RING_OPTIONS[activeRing].id}.png`,
+                    `/traits/ring/top-ring-${RING_OPTIONS[activeRing].id}.png`
                 );
             }
             if (layerName === "accessory" && activeRing > 0) {
                 imagePathsToLoad.push(
-                    `/traits/ring/bottom-ring-${RING_OPTIONS[activeRing].id}.png`,
+                    `/traits/ring/bottom-ring-${RING_OPTIONS[activeRing].id}.png`
                 );
             }
 
@@ -68,51 +71,70 @@
         });
 
         const images = await Promise.all(imagePathsToLoad.map(getCachedTraitImage));
-        if (!canvasElement) return;
-        const canvas = canvasElement;
 
-        // 5. Apply background based on state
         const bgHex = BACKGROUND_OPTIONS[activeBg].hex;
         ctx.fillStyle = bgHex;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
 
         images.forEach((img) => {
             if (img) {
-                ctx.drawImage(
-                    img,
-                    0,
-                    0,
-                    canvas.width,
-                    canvas.height,
-                );
+                ctx.drawImage(img, 0, 0, targetCanvas.width, targetCanvas.height);
             }
         });
+    }
 
+    async function renderPfp() {
+        if (!canvasElement) return;
+
+        const activeTraits = { ...currentTraits };
+        const activeRing = currentRing;
+        const activeBg = currentBgIndex;
+
+        isRendering = true;
+        await drawComposite(canvasElement, activeTraits, activeBg, activeRing);
         isRendering = false;
     }
 
     $effect(() => {
-        // Trigger effect implicitly by reading state inside renderPfp
         renderPfp();
     });
 
     function randomize() {
-        // LAYER_ORDER no longer contains background, so it skips it automatically
         LAYER_ORDER.forEach((layer) => {
             if (!lockedCategories[layer]) {
                 currentTraits[layer] = Math.floor(
-                    Math.random() * TRAITS[layer].length,
+                    Math.random() * TRAITS[layer].length
                 );
             }
         });
     }
 
-    function exportPng() {
-        if (!canvasElement) return;
+    async function exportPng() {
+        const hiRes = document.createElement("canvas");
+        hiRes.width = 2048;
+        hiRes.height = 2048;
+        await drawComposite(hiRes, { ...currentTraits }, currentBgIndex, currentRing);
         const link = document.createElement("a");
         link.download = "win98-avatar.png";
-        link.href = canvasElement.toDataURL();
+        link.href = hiRes.toDataURL("image/png");
         link.click();
+    }
+
+    async function saveAsMyAvatar() {
+        if (!requireXLogin("Login with X (Twitter) to set this character as your persona avatar across Chat, MySpace, and Desktop.")) {
+            return;
+        }
+        isSavingAvatar = true;
+        try {
+            const res = await savePersonaAvatar({ ...currentTraits });
+            if (res.ok) {
+                triggerTooltip("Persona Avatar saved! (Transparent character sprite for Chat & Desktop Pet)");
+            } else {
+                triggerTooltip("Failed to save avatar.");
+            }
+        } finally {
+            isSavingAvatar = false;
+        }
     }
 </script>
 
@@ -122,15 +144,21 @@
             <canvas
                 bind:this={canvasElement}
                 class:is-loading={isRendering}
-                width="2048"
-                height="2048"
+                width="512"
+                height="512"
             ></canvas>
         </div>
         <div class="action-row">
             <button class="win98-btn" onclick={randomize}>🎲 Randomize</button>
-            <button class="win98-btn save-btn" onclick={exportPng}
-                >💾 Save Avatar</button
+            <button class="win98-btn" onclick={exportPng}>💾 Export PNG</button>
+            <button
+                class="win98-btn save-btn"
+                onclick={saveAsMyAvatar}
+                disabled={isSavingAvatar}
+                title="Save this character as your persona avatar across X profile, Global Chat, and Desktop Pet"
             >
+                {isSavingAvatar ? "Saving..." : "⭐ Set Persona Avatar"}
+            </button>
         </div>
     </div>
 
@@ -198,7 +226,7 @@
 
         <div role="tabpanel" class="tab-panel">
             <div class="tooltip-toast" class:show={showTooltip}>
-                Unlock the category first to change traits!
+                {tooltipText}
             </div>
 
             <div
@@ -206,7 +234,9 @@
                 class:locked-grid={lockedCategories[activeTab]}
             >
                 {#if lockedCategories[activeTab] && activeTab !== "background" && activeTab !== "ring"}
-                    <div class="locked-overlay" onclick={triggerTooltip}></div>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div class="locked-overlay" onclick={() => triggerTooltip()}></div>
                 {/if}
 
                 {#if activeTab === "ring"}
@@ -252,10 +282,9 @@
 </div>
 
 <style>
-    /* All previous CSS remains exactly the same! */
     .pfp-maker-layout {
         display: flex;
-        gap: 14px;
+        gap: 8px;
         height: 100%;
         width: 100%;
         background: #c0c0c0;
@@ -267,10 +296,8 @@
     .preview-box {
         display: flex;
         flex-direction: column;
-        background: #ececec;
-        padding: 6px;
-        border: 2px solid;
-        border-color: #000000 #ffffff #ffffff #000000;
+        background: #c0c0c0;
+        padding: 4px;
         flex-grow: 1;
         min-width: 250px;
     }
@@ -281,7 +308,7 @@
         min-height: 0;
         background: #000;
         border: 2px solid;
-        border-color: #000000 #ffffff #ffffff #000000;
+        border-color: #808080 #ffffff #ffffff #808080;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -307,8 +334,8 @@
     .action-row {
         display: flex;
         flex-direction: row;
-        gap: 6px;
-        margin-top: 8px;
+        gap: 4px;
+        margin-top: 6px;
     }
 
     .action-row button {
@@ -327,8 +354,9 @@
     .win98-btn {
         font-family: inherit;
         font-weight: bold;
-        padding: 6px 12px;
+        padding: 6px 8px;
         background: #c0c0c0;
+        color: #000000;
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
         cursor: pointer;
@@ -369,7 +397,7 @@
         border-color: #ffffff #000000 #000000 #ffffff;
         cursor: pointer;
         padding: 0;
-        font-size: 1rem;
+        font-size: 0.95rem;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -387,16 +415,15 @@
 
     .tab-name-btn {
         background: #c0c0c0;
+        color: #000000;
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
-        border-top-left-radius: 3px;
-        border-bottom-left-radius: 3px;
         padding: 8px 12px;
+        font-family: inherit;
         font-weight: bold;
         cursor: pointer;
         flex-grow: 1;
         text-align: left;
-        transition: all 0.1s ease;
     }
 
     .tab-name-btn.locked {
@@ -413,7 +440,6 @@
 
     .tab-name-btn.full-width {
         width: 100%;
-        border-radius: 3px 0 0 3px;
     }
 
     .win98-tabs li[aria-selected="true"] .tab-name-btn {
@@ -445,10 +471,10 @@
         box-sizing: border-box;
         overflow-y: auto;
         min-height: 0;
-
-        padding: 12px;
-        padding-bottom: calc(80px + env(safe-area-inset-bottom));
-
+        border: 2px solid;
+        border-color: #ffffff #000000 #000000 #ffffff;
+        padding: 8px;
+        padding-bottom: calc(40px + env(safe-area-inset-bottom));
         -webkit-overflow-scrolling: touch;
     }
 
@@ -474,7 +500,6 @@
         flex-direction: column;
         gap: 6px;
         position: relative;
-        transition: all 0.2s ease;
     }
 
     .locked-grid {
@@ -485,7 +510,7 @@
     /* --- TOOLTIP --- */
     .tooltip-toast {
         position: fixed;
-        bottom: 40px;
+        bottom: 45px;
         left: 50%;
         transform: translateX(-50%);
         background: #ffffe1;
@@ -507,9 +532,10 @@
 
     .trait-option {
         background: #c0c0c0;
+        color: #000000;
         border: 2px solid;
         border-color: #ffffff #000000 #000000 #ffffff;
-        padding: 10px;
+        padding: 9px 10px;
         text-align: left;
         cursor: pointer;
         font-family: inherit;
@@ -517,21 +543,21 @@
 
     .trait-option:active {
         border-color: #000000 #ffffff #ffffff #000000;
-        padding: 11px 9px 9px 11px;
+        padding: 10px 9px 8px 11px;
     }
 
     .trait-option.selected {
         background: #000080;
         color: white;
         border-color: #000000 #ffffff #ffffff #000000;
-        padding: 11px 9px 9px 11px;
+        padding: 10px 9px 8px 11px;
         outline: 1px dotted #e0e0e0;
         outline-offset: -4px;
     }
 
     .option-title {
         font-weight: bold;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
     }
 
     .title-with-swatch {
@@ -559,15 +585,6 @@
     }
 
     @media (max-width: 768px) {
-        :global(.win98-window .window-body) {
-            display: flex !important;
-            flex-direction: column !important;
-            overflow: hidden !important;
-            padding: 4px !important;
-            flex: 1 !important;
-            min-height: 0 !important;
-        }
-
         .pfp-maker-layout {
             flex-direction: column;
             flex: 1;
@@ -577,7 +594,7 @@
 
         .preview-box {
             width: 100%;
-            max-height: 45vh;
+            max-height: 44vh;
             box-sizing: border-box;
             flex-shrink: 0;
             display: flex;
@@ -588,20 +605,6 @@
         .canvas-container {
             flex: 1;
             min-height: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        canvas {
-            max-width: 100%;
-            max-height: 100%;
-            aspect-ratio: 1;
-            object-fit: contain;
-        }
-
-        .action-row {
-            flex-shrink: 0;
         }
 
         .control-box {
@@ -630,24 +633,14 @@
         }
 
         .mini-lock-btn {
-            height: 28px;
+            height: 26px;
             width: 100%;
-            border-radius: 3px;
-        }
-
-        .mini-lock-btn.locked {
-            padding: 2px 0 0 2px;
         }
 
         .tab-name-btn {
-            border-radius: 3px 3px 0 0;
             text-align: center;
             width: 100%;
-            padding: 6px 12px;
-        }
-
-        .tab-name-btn.full-width {
-            border-radius: 3px 3px 0 0;
+            padding: 6px 10px;
         }
 
         .win98-tabs li[aria-selected="true"] .tab-name-btn {
@@ -655,13 +648,8 @@
             border-bottom: 2px solid #c0c0c0;
             margin-right: 0;
             margin-bottom: -2px;
-            padding-right: 12px;
+            padding-right: 10px;
             padding-bottom: 8px;
-        }
-
-        .win98-tabs li[aria-selected="true"] .tab-name-btn.locked {
-            border-bottom-color: transparent;
-            border-right-color: #000000;
         }
 
         .tab-separator {
@@ -670,7 +658,7 @@
             background: #808080;
             border-bottom: none;
             border-right: 1px solid #ffffff;
-            margin: 0 4px 0 4px;
+            margin: 0 4px;
         }
 
         .tab-panel {
@@ -680,7 +668,6 @@
             overflow-y: auto;
             min-height: 0;
             height: 0;
-            -webkit-overflow-scrolling: touch;
         }
 
         .tooltip-toast {
