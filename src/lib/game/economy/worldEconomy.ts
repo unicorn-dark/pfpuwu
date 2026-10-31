@@ -54,17 +54,28 @@ export async function loadSavedGraffitiWall(): Promise<string | null> {
     try {
         const { data, error } = await supabase
             .from('uwu_graffiti_wall')
-            .select('data_url')
-            .eq('room_id', 'main')
+            .select('id, pixels, updated_at')
+            .eq('id', 'main')
             .maybeSingle();
 
-        if (!error && data?.data_url) {
-            if (typeof window !== 'undefined') {
-                try {
-                    localStorage.setItem(LOCAL_GRAFFITI_KEY, data.data_url);
-                } catch {}
+        if (!error && data?.pixels) {
+            const p = data.pixels as any;
+            const remoteDataUrl =
+                typeof p === 'string'
+                    ? p
+                    : typeof p?.data_url === 'string'
+                      ? p.data_url
+                      : typeof p?.dataUrl === 'string'
+                        ? p.dataUrl
+                        : null;
+            if (remoteDataUrl && remoteDataUrl.startsWith('data:image/')) {
+                if (typeof window !== 'undefined') {
+                    try {
+                        localStorage.setItem(LOCAL_GRAFFITI_KEY, remoteDataUrl);
+                    } catch {}
+                }
+                return remoteDataUrl;
             }
-            return data.data_url;
         }
     } catch {}
 
@@ -72,10 +83,10 @@ export async function loadSavedGraffitiWall(): Promise<string | null> {
 }
 
 /**
- * Saves 48x32 Graffiti Wall PNG data URL to localStorage and Supabase
+ * Saves 48x32 Graffiti Wall PNG data URL to localStorage and Supabase (`pixels` JSONB column)
  */
 export async function saveGraffitiWallState(dataUrl: string, username = 'anon'): Promise<void> {
-    if (!dataUrl) return;
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) return;
     if (typeof window !== 'undefined') {
         try {
             localStorage.setItem(LOCAL_GRAFFITI_KEY, dataUrl);
@@ -85,12 +96,12 @@ export async function saveGraffitiWallState(dataUrl: string, username = 'anon'):
     try {
         await supabase.from('uwu_graffiti_wall').upsert(
             {
-                room_id: 'main',
-                data_url: dataUrl,
+                id: 'main',
+                pixels: { data_url: dataUrl },
                 updated_by: username,
                 updated_at: new Date().toISOString()
             },
-            { onConflict: 'room_id' }
+            { onConflict: 'id' }
         );
     } catch {}
 }

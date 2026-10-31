@@ -8,10 +8,15 @@
         showAvatarCustomizer
     } from "$lib/stores/auth";
     import {
+        activeWindows,
         isChatDrawerOpen,
         openChatDrawer,
         closeChatDrawer
     } from "$lib/stores/os";
+
+    const isUwUWorldActive = $derived(
+        $activeWindows.some((w) => w.id === "uwu-world" && w.isOpen && !w.isMinimized)
+    );
 
     interface ChatMessage {
         id: string | number;
@@ -319,7 +324,7 @@
 </script>
 
 <div
-    class="bottom-right-chat-drawer {$isChatDrawerOpen ? 'drawer-open' : 'drawer-collapsed'}"
+    class="bottom-right-chat-drawer {$isChatDrawerOpen ? 'drawer-open' : 'drawer-collapsed'} {isUwUWorldActive ? 'uwu-world-active' : ''}"
 >
     <!-- Single Sleek Blue Bar (Windows 98 Active Titlebar) -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1044,13 +1049,18 @@
         font-size: 11px;
     }
 
-    @media (max-width: 600px) {
+    @media (max-width: 768px) {
         .bottom-right-chat-drawer {
             right: 4px;
             left: 4px;
             width: auto;
             max-width: none;
             height: 75vh;
+        }
+
+        /* Prevent collapsed Global Chat bar from covering UwU World's bottom action bar on mobile */
+        .bottom-right-chat-drawer.drawer-collapsed.uwu-world-active {
+            display: none !important;
         }
     }
 </style>

@@ -66,8 +66,8 @@ CREATE POLICY "Players can insert transfers"
 
 -- 3. PERSISTENT 48x32 GRAFFITI WALL TABLE
 CREATE TABLE IF NOT EXISTS public.uwu_graffiti_wall (
-    room_id TEXT PRIMARY KEY DEFAULT 'main',
-    data_url TEXT NOT NULL,
+    id TEXT PRIMARY KEY DEFAULT 'main',
+    pixels JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_by TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

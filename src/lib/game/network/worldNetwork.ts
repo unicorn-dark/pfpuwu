@@ -2,13 +2,13 @@
 /**
  * Supabase Realtime network synchronization for UwU World
  * Handles:
- * - Presence tracking (who is online in the room)
+ * - Presence tracking (who is online in the room & which zone they are in)
  * - Position broadcasting with dead-reckoning interpolation (16Hz -> 60FPS)
  * - 6 Dance moves sync
  * - Text chat speech bubbles
- * - Economy, Leaderboard stats sync, P2P $UWU Chip Transfers & Persistent Graffiti Wall Sync
- * - Mini-game state synchronization (Dice Duel, Roulette, Blackjack/Slots/Crash/Mines Jackpot, Vault, DJ)
- * - WebRTC signaling for proximity voice chat
+ * - Economy, Leaderboard stats sync, P2P $UWU Chip Transfers & Persistent Graffiti Wall Sync (Broadcast + Postgres Changes)
+ * - Mini-game state synchronization (Dice Duel, Roulette, Casino Jackpot, DJ, Forest Social Games)
+ * - WebRTC mesh signaling & automatic peer connection lifecycle for proximity voice chat
  */
 
 import { supabase } from '$lib/supabaseClient';
@@ -23,10 +23,12 @@ export interface RemotePlayer extends PlayerAvatarState {
     targetX: number;
     targetY: number;
     lastNetworkTs: number;
+    zone: 'casino' | 'forest';
 }
 
 export class WorldNetworkManager {
     private channel: any = null;
+    private dbChannel: any = null;
     private channelName = 'uwu_world_lounge_v2';
     private localUserId: string;
     private localPlayerState: PlayerAvatarState;
@@ -39,13 +41,15 @@ export class WorldNetworkManager {
     // Event callbacks
     public onChatReceived: (senderId: string, username: string, text: string) => void = () => {};
     public onEmoteReceived: (senderId: string, emote: string) => void = () => {};
-    public onVaultUnlocked: (heroes: string[]) => void = () => {};
     public onDJTrackChanged: (trackId: number, djUser: string) => void = () => {};
     public onGraffitiPixel: (x: number, y: number, color: string, brush?: number) => void = () => {};
     public onGraffitiSnapshot: (dataUrl: string) => void = () => {};
     public onWebRTCSignal: (fromUserId: string, payload: any) => void = () => {};
+    public onPeerJoined: (peerId: string) => void = () => {};
+    public onPeerLeft: (peerId: string) => void = () => {};
     public onOnlineCountChanged: (count: number) => void = () => {};
     public onCasinoJackpot: (username: string, game: string, amount: number) => void = () => {};
+    public onForestEventReceived: (payload: any) => void = () => {};
 
     // Economy & P2P Transfer Callbacks
     public onStatsUpdated: (stats: PlayerEconomyStats) => void = () => {};
@@ -59,7 +63,7 @@ export class WorldNetworkManager {
 
     constructor(localUserId: string, initialPlayer: PlayerAvatarState) {
         this.localUserId = localUserId;
-        this.localPlayerState = { ...initialPlayer };
+        this.localPlayerState = { zone: 'casino', ...initialPlayer };
     }
 
     public init() {
@@ -76,6 +80,7 @@ export class WorldNetworkManager {
             .on('presence', { event: 'sync' }, () => {
                 const presenceState = this.channel.presenceState();
                 const activeIds = new Set<string>();
+                const newlyJoined: string[] = [];
 
                 for (const key of Object.keys(presenceState)) {
                     const presences = presenceState[key];
@@ -103,8 +108,13 @@ export class WorldNetworkManager {
                                     chips: data.chips ?? 2500,
                                     wins: data.wins ?? 0,
                                     losses: data.losses ?? 0,
+                                    zone: data.zone || 'casino',
                                     lastNetworkTs: Date.now()
                                 });
+                                newlyJoined.push(data.id);
+                            } else {
+                                const existing = this.remotePlayers.get(data.id)!;
+                                if (data.zone) existing.zone = data.zone;
                             }
                         }
                     }
@@ -113,7 +123,12 @@ export class WorldNetworkManager {
                 for (const [id] of this.remotePlayers.entries()) {
                     if (!activeIds.has(id)) {
                         this.remotePlayers.delete(id);
+                        this.onPeerLeft(id);
                     }
+                }
+
+                for (const peerId of newlyJoined) {
+                    this.onPeerJoined(peerId);
                 }
 
                 this.onOnlineCountChanged(this.remotePlayers.size + 1);
@@ -122,8 +137,14 @@ export class WorldNetworkManager {
                 if (!payload || payload.id === this.localUserId) return;
                 const p = this.remotePlayers.get(payload.id);
                 if (p) {
+                    const zoneChanged = payload.zone && payload.zone !== p.zone;
                     p.targetX = payload.x;
                     p.targetY = payload.y;
+                    if (zoneChanged) {
+                        p.x = payload.x;
+                        p.y = payload.y;
+                        p.zone = payload.zone;
+                    }
                     p.dir = payload.dir;
                     p.isWalking = payload.isWalking;
                     p.isDancing = payload.isDancing;
@@ -151,8 +172,11 @@ export class WorldNetworkManager {
                         chips: payload.chips ?? 2500,
                         wins: payload.wins ?? 0,
                         losses: payload.losses ?? 0,
+                        zone: payload.zone || 'casino',
                         lastNetworkTs: Date.now()
                     });
+                    this.onPeerJoined(payload.id);
+                    this.onOnlineCountChanged(this.remotePlayers.size + 1);
                 }
             })
             .on('broadcast', { event: 'chat' }, ({ payload }: any) => {
@@ -180,10 +204,6 @@ export class WorldNetworkManager {
                     };
                 }
             })
-            .on('broadcast', { event: 'vault_unlocked' }, ({ payload }: any) => {
-                if (!payload) return;
-                this.onVaultUnlocked(payload.heroes || []);
-            })
             .on('broadcast', { event: 'dj_track' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onDJTrackChanged(payload.trackId, payload.djUser);
@@ -195,6 +215,10 @@ export class WorldNetworkManager {
             .on('broadcast', { event: 'graffiti_snapshot' }, ({ payload }: any) => {
                 if (!payload || !payload.dataUrl) return;
                 this.onGraffitiSnapshot(payload.dataUrl);
+            })
+            .on('broadcast', { event: 'forest_event' }, ({ payload }: any) => {
+                if (!payload) return;
+                this.onForestEventReceived(payload);
             })
             .on('broadcast', { event: 'dice_seat_update' }, ({ payload }: any) => {
                 if (!payload) return;
@@ -250,12 +274,31 @@ export class WorldNetworkManager {
                     x: this.localPlayerState.x,
                     y: this.localPlayerState.y,
                     dir: this.localPlayerState.dir,
+                    zone: this.localPlayerState.zone || 'casino',
                     chips: this.localPlayerState.chips ?? 2500,
                     wins: this.localPlayerState.wins ?? 0,
                     losses: this.localPlayerState.losses ?? 0
                 });
             }
         });
+
+        // Also subscribe to Postgres changes on public.uwu_graffiti_wall so any DB save syncs across tabs
+        try {
+            this.dbChannel = supabase
+                .channel('uwu_graffiti_db_sync')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'uwu_graffiti_wall' },
+                    (payload: any) => {
+                        const row = payload?.new;
+                        const dataUrl = row?.pixels?.data_url || row?.pixels?.dataUrl;
+                        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+                            this.onGraffitiSnapshot(dataUrl);
+                        }
+                    }
+                )
+                .subscribe();
+        } catch {}
     }
 
     public broadcastPosition(
@@ -266,7 +309,8 @@ export class WorldNetworkManager {
         isDancing: boolean,
         isSpeaking: boolean,
         danceMove: DanceMoveType = 'disco',
-        force = false
+        force = false,
+        zone: 'casino' | 'forest' = 'casino'
     ) {
         this.localPlayerState.x = x;
         this.localPlayerState.y = y;
@@ -275,6 +319,7 @@ export class WorldNetworkManager {
         this.localPlayerState.isDancing = isDancing;
         this.localPlayerState.danceMove = danceMove;
         this.localPlayerState.isSpeaking = isSpeaking;
+        this.localPlayerState.zone = zone;
 
         const now = Date.now();
         if (!force && now - this.lastBroadcastTime < this.broadcastIntervalMs) {
@@ -297,6 +342,7 @@ export class WorldNetworkManager {
                     isDancing,
                     danceMove,
                     isSpeaking,
+                    zone,
                     chips: this.localPlayerState.chips,
                     wins: this.localPlayerState.wins,
                     losses: this.localPlayerState.losses
@@ -362,15 +408,6 @@ export class WorldNetworkManager {
         });
     }
 
-    public broadcastVaultUnlocked(heroes: string[]) {
-        if (!this.channel) return;
-        this.channel.send({
-            type: 'broadcast',
-            event: 'vault_unlocked',
-            payload: { heroes }
-        });
-    }
-
     public broadcastDJTrack(trackId: number, djUser: string) {
         if (!this.channel) return;
         this.channel.send({
@@ -395,6 +432,15 @@ export class WorldNetworkManager {
             type: 'broadcast',
             event: 'graffiti_snapshot',
             payload: { dataUrl }
+        });
+    }
+
+    public broadcastForestEvent(payload: any) {
+        if (!this.channel || !payload) return;
+        this.channel.send({
+            type: 'broadcast',
+            event: 'forest_event',
+            payload
         });
     }
 
@@ -469,8 +515,20 @@ export class WorldNetworkManager {
         });
     }
 
-    public getRemotePlayers(): RemotePlayer[] {
-        return Array.from(this.remotePlayers.values());
+    public getRemotePlayers(zoneFilter?: 'casino' | 'forest'): RemotePlayer[] {
+        const all = Array.from(this.remotePlayers.values());
+        if (!zoneFilter) return all;
+        return all.filter((p) => (p.zone || 'casino') === zoneFilter);
+    }
+
+    public getZonePlayerCounts(myZone: 'casino' | 'forest'): { casino: number; forest: number } {
+        let casino = myZone === 'casino' ? 1 : 0;
+        let forest = myZone === 'forest' ? 1 : 0;
+        this.remotePlayers.forEach((p) => {
+            if ((p.zone || 'casino') === 'forest') forest++;
+            else casino++;
+        });
+        return { casino, forest };
     }
 
     public getOnlinePeerEconomyStats(): PlayerEconomyStats[] {
@@ -496,10 +554,12 @@ export class WorldNetworkManager {
         return list;
     }
 
-    public getRemotePositions(): Map<string, { x: number; y: number }> {
+    public getRemotePositions(zoneFilter?: 'casino' | 'forest'): Map<string, { x: number; y: number }> {
         const map = new Map<string, { x: number; y: number }>();
         this.remotePlayers.forEach((p, id) => {
-            map.set(id, { x: p.x, y: p.y });
+            if (!zoneFilter || (p.zone || 'casino') === zoneFilter) {
+                map.set(id, { x: p.x, y: p.y });
+            }
         });
         return map;
     }
@@ -508,6 +568,12 @@ export class WorldNetworkManager {
         if (this.channel) {
             this.channel.unsubscribe();
             this.channel = null;
+        }
+        if (this.dbChannel) {
+            try {
+                supabase.removeChannel(this.dbChannel);
+            } catch {}
+            this.dbChannel = null;
         }
         this.remotePlayers.clear();
         this.peerEconomyStats.clear();

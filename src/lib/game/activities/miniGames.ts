@@ -1,23 +1,13 @@
 // src/lib/game/activities/miniGames.ts
 /**
- * Collaborative activities, multi-genre Web Audio synthesizer (Classical, House, Electronic, Techno, Rave),
- * casino sound effects, and Vault Heist manager for UwU World.
+ * Collaborative activities, multi-genre Web Audio synthesizer (Ambient Forest, Classical, House, Electronic, Techno, Rave),
+ * casino & nature sound effects, and Forest Social Game banks (Campfire Trivia/Icebreakers, Koi Pond Fishing, Picnic Gomoku).
  */
 
-import { gridDistance } from '../isometric/isoMath';
 export { DiceDuelManager, type DiceSeat, type PlayerScore, type DiceGamePhase } from './diceDuel';
 export { RouletteGameManager, ROULETTE_SECTORS, BETTABLE_ROULETTE_SECTORS, type RouletteSector } from './rouletteGame';
 
-export interface VaultState {
-    pads: [boolean, boolean, boolean, boolean];
-    padOccupants: [string | null, string | null, string | null, string | null];
-    holoDecoysActive: boolean;
-    isUnlocked: boolean;
-    unlockedAt?: number;
-    heroes?: string[];
-}
-
-export type MusicGenre = 'Classical' | 'House' | 'Electronic' | 'Techno' | 'Rave';
+export type MusicGenre = 'Ambient' | 'Classical' | 'House' | 'Electronic' | 'Techno' | 'Rave';
 
 export interface DJTrack {
     id: number;
@@ -32,6 +22,50 @@ export interface DJTrack {
 }
 
 export const DJ_TRACKS: DJTrack[] = [
+    // --- AMBIENT / FOREST (Calm Nature Soundtrack) ---
+    {
+        id: 11,
+        genre: 'Ambient',
+        title: '\u{1F332} Whispering Pine Lullaby (Forest Calm)',
+        bpm: 72,
+        wave: 'sine',
+        bassWave: 'triangle',
+        notes: [
+            329.63, 392.0, 440.0, 523.25, 587.33, 523.25, 440.0, 392.0,
+            293.66, 349.23, 440.0, 523.25, 493.88, 440.0, 392.0, 329.63
+        ],
+        bassNotes: [130.81, 164.81, 146.83, 196.0, 110.0, 146.83, 130.81, 164.81],
+        drumPattern: 'none'
+    },
+    {
+        id: 12,
+        genre: 'Ambient',
+        title: '\u{1F338} Sakura Stream & Kalimba Chimes',
+        bpm: 68,
+        wave: 'triangle',
+        bassWave: 'sine',
+        notes: [
+            523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33, 523.25,
+            440.0, 523.25, 659.25, 783.99, 659.25, 587.33, 523.25, 440.0
+        ],
+        bassNotes: [130.81, 130.81, 174.61, 174.61, 110.0, 110.0, 146.83, 196.0],
+        drumPattern: 'none'
+    },
+    {
+        id: 13,
+        genre: 'Ambient',
+        title: '\u{1F525} Starlight Campfire Reverie',
+        bpm: 76,
+        wave: 'sine',
+        bassWave: 'sine',
+        notes: [
+            261.63, 329.63, 392.0, 493.88, 523.25, 493.88, 392.0, 329.63,
+            220.0, 293.66, 349.23, 440.0, 392.0, 349.23, 293.66, 261.63
+        ],
+        bassNotes: [130.81, 98.0, 110.0, 87.31, 130.81, 98.0, 87.31, 98.0],
+        drumPattern: 'none'
+    },
+
     // --- CLASSICAL ---
     {
         id: 1,
@@ -160,8 +194,179 @@ export const RETRO_PALETTE_16 = [
     '#000080', '#0000ff', '#800080', '#ff00ff'
 ];
 
+// ============================================================================
+// FOREST SOCIAL GAMES DATA BANKS (Campfire Trivia, Icebreakers, Koi Pond)
+// ============================================================================
+
+export interface CampfireTriviaQuestion {
+    id: number;
+    category: string;
+    question: string;
+    options: [string, string, string, string];
+    correctIndex: number;
+}
+
+export interface CampfireIcebreakerPrompt {
+    id: number;
+    prompt: string;
+    optionA: string;
+    optionB: string;
+}
+
+export const CAMPFIRE_TRIVIA_BANK: CampfireTriviaQuestion[] = [
+    {
+        id: 1,
+        category: 'Crypto & Web3 Lore',
+        question: 'In what year was the Bitcoin whitepaper published by Satoshi Nakamoto?',
+        options: ['2006', '2008', '2010', '2011'],
+        correctIndex: 1
+    },
+    {
+        id: 2,
+        category: 'Retro OS & Tech',
+        question: 'What was the default desktop background color hex of classic Windows 98?',
+        options: ['Teal (#008080)', 'Navy (#000080)', 'Olive (#808000)', 'Slate (#404040)'],
+        correctIndex: 0
+    },
+    {
+        id: 3,
+        category: 'Nature & Forest',
+        question: 'Which tree species is famous for its pink spring blossoms ("Sakura") in Japan?',
+        options: ['Red Maple', 'Weeping Willow', 'Cherry Blossom', 'Silver Birch'],
+        correctIndex: 2
+    },
+    {
+        id: 4,
+        category: 'Gaming History',
+        question: 'Which 1997 MMORPG popularized isometric open-world player housing and socializing?',
+        options: ['Ultima Online', 'Quake II', 'StarCraft', 'GoldenEye 007'],
+        correctIndex: 0
+    },
+    {
+        id: 5,
+        category: 'Nature & Wildlife',
+        question: 'How do fireflies produce their signature warm bioluminescent glow at night?',
+        options: ['Static electricity', 'Luciferin chemical reaction', 'Moonlight reflection', 'Phosphor pollen'],
+        correctIndex: 1
+    },
+    {
+        id: 6,
+        category: 'Internet Culture',
+        question: 'What does the classic Japanese emoticon / internet expression "UwU" represent?',
+        options: ['A happy/cozy face with closed eyes', 'An angry owl', 'Ultra Wide Universe', 'Under Water Unit'],
+        correctIndex: 0
+    },
+    {
+        id: 7,
+        category: 'Aquatic Lore',
+        question: 'How long can prized Japanese Koi fish live in a well-kept garden pond?',
+        options: ['Up to 5 years', '10 to 15 years', '40 to 100+ years', 'Only 2 summers'],
+        correctIndex: 2
+    },
+    {
+        id: 8,
+        category: 'Retro Computing',
+        question: 'How much data could a standard 3.5-inch high-density floppy disk store?',
+        options: ['1.44 MB', '64 MB', '512 KB', '10 MB'],
+        correctIndex: 0
+    }
+];
+
+export const CAMPFIRE_ICEBREAKER_BANK: CampfireIcebreakerPrompt[] = [
+    {
+        id: 1,
+        prompt: 'Would you rather hang out in a cozy rainy forest cabin or a neon cyberpunk penthouse?',
+        optionA: '🌲 Cozy Forest Cabin',
+        optionB: '🌆 Neon Penthouse'
+    },
+    {
+        id: 2,
+        prompt: 'What is your ideal late-night gaming vibe with friends?',
+        optionA: '🎧 Chill Voice Chat & Lo-Fi',
+        optionB: '🔥 High-Stakes Competitive'
+    },
+    {
+        id: 3,
+        prompt: 'If you could time-travel your setup, which era do you pick?',
+        optionA: '💾 1998 CRT & LAN Parties',
+        optionB: '🛸 2099 Neural Full-Dive VR'
+    },
+    {
+        id: 4,
+        prompt: 'Pick a mythical forest companion to follow your Unicorn avatar:',
+        optionA: '🦊 Glowing Spirit Fox',
+        optionB: '🐉 Pocket Emerald Dragon'
+    },
+    {
+        id: 5,
+        prompt: 'Campfire snack showdown: what are you roasting over the fire tonight?',
+        optionA: '🍫 Golden S’mores',
+        optionB: '🍵 Matcha Mochi Skewers'
+    }
+];
+
+export interface KoiSpecimen {
+    id: string;
+    name: string;
+    icon: string;
+    rarity: 'Common' | 'Uncommon' | 'Rare' | 'Mythic';
+    color: string;
+    description: string;
+}
+
+export const KOI_POND_SPECIMENS: KoiSpecimen[] = [
+    {
+        id: 'kohaku_koi',
+        name: 'Kohaku Red-White Koi',
+        icon: '🐟',
+        rarity: 'Common',
+        color: '#ff6b4a',
+        description: 'Classic crimson and snow-white pond swimmer.'
+    },
+    {
+        id: 'jade_frog',
+        name: 'Mossy Jade Treefrog',
+        icon: '🐸',
+        rarity: 'Common',
+        color: '#4ade80',
+        description: 'Loves sitting on lilypads listening to lo-fi chimes.'
+    },
+    {
+        id: 'pond_turtle',
+        name: 'Ancient Terrapin Turtle',
+        icon: '🐢',
+        rarity: 'Uncommon',
+        color: '#34d399',
+        description: 'Has been vibing in Whispering Woods since Windows 95.'
+    },
+    {
+        id: 'sakura_axolotl',
+        name: 'Sakura Pink Axolotl',
+        icon: '🦎',
+        rarity: 'Rare',
+        color: '#f472b6',
+        description: 'Smiles perpetually under drifting cherry blossom petals.'
+    },
+    {
+        id: 'emperor_gold_koi',
+        name: 'Golden Emperor Yamabuki Koi',
+        icon: '🐠',
+        rarity: 'Rare',
+        color: '#facc15',
+        description: 'Scales shimmer like pure 24k gold in the moonlight.'
+    },
+    {
+        id: 'celestial_dragonfish',
+        name: 'Emerald Spirit Dragonfish',
+        icon: '🐉',
+        rarity: 'Mythic',
+        color: '#38bdf8',
+        description: 'A legendary guardian of the Whispering Woods spring!'
+    }
+];
+
 /**
- * Multi-Genre Web Audio Synthesizer & Casino SFX Engine
+ * Multi-Genre Web Audio Synthesizer & Casino/Nature SFX Engine
  */
 export class RetroSynthesizer {
     private ctx: AudioContext | null = null;
@@ -192,7 +397,7 @@ export class RetroSynthesizer {
         this.currentTrackIndex = DJ_TRACKS.indexOf(track);
         this.step = 0;
 
-        // 16th-note / 8th-note step clock
+        // 8th-note step clock
         const intervalMs = (60 / track.bpm / 2) * 1000;
         this.timerId = window.setInterval(() => {
             this.playNextStep(track);
@@ -209,6 +414,42 @@ export class RetroSynthesizer {
         this.step++;
 
         try {
+            // Special calm polyphonic synthesis for Forest Ambient tracks
+            if (track.genre === 'Ambient') {
+                // Soft harp / kalimba pluck with gentle attack and long warm decay
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = track.wave;
+                osc.frequency.setValueAtTime(noteFreq, now);
+
+                gain.gain.setValueAtTime(0.001, now);
+                gain.gain.linearRampToValueAtTime(0.032, now + 0.04);
+                gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.65);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.68);
+
+                // Warm fifth/octave shimmer on every 4th step
+                if (stepIdx % 4 === 0) {
+                    const pad = this.ctx.createOscillator();
+                    const padGain = this.ctx.createGain();
+                    pad.type = 'sine';
+                    pad.frequency.setValueAtTime(bassFreq * 2, now);
+
+                    padGain.gain.setValueAtTime(0.001, now);
+                    padGain.gain.linearRampToValueAtTime(0.024, now + 0.12);
+                    padGain.gain.exponentialRampToValueAtTime(0.0008, now + 1.1);
+
+                    pad.connect(padGain);
+                    padGain.connect(this.ctx.destination);
+                    pad.start(now);
+                    pad.stop(now + 1.15);
+                }
+                return;
+            }
+
             // 1. Lead Synth Channel
             const osc = this.ctx.createOscillator();
             const gain = this.ctx.createGain();
@@ -243,7 +484,6 @@ export class RetroSynthesizer {
 
             // 3. Drum / Percussion Synthesis
             if (track.drumPattern !== 'none') {
-                // Four-on-the-floor kick on even steps
                 if (stepIdx % 2 === 0) {
                     const kick = this.ctx.createOscillator();
                     const kickGain = this.ctx.createGain();
@@ -260,7 +500,6 @@ export class RetroSynthesizer {
                     kick.start(now);
                     kick.stop(now + 0.15);
                 } else {
-                    // Off-beat open hi-hat / synth tick for House, Techno & Rave
                     const hat = this.ctx.createOscillator();
                     const hatGain = this.ctx.createGain();
                     hat.type = 'square';
@@ -275,6 +514,29 @@ export class RetroSynthesizer {
                     hat.stop(now + 0.05);
                 }
             }
+        } catch {}
+    }
+
+    public playNatureChimeSfx() {
+        this.initContext();
+        if (this.isMuted || !this.ctx) return;
+
+        try {
+            const notes = [523.25, 659.25, 783.99, 1046.5];
+            notes.forEach((freq, idx) => {
+                const osc = this.ctx!.createOscillator();
+                const gain = this.ctx!.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, this.ctx!.currentTime + idx * 0.09);
+
+                gain.gain.setValueAtTime(0.05, this.ctx!.currentTime + idx * 0.09);
+                gain.gain.exponentialRampToValueAtTime(0.0008, this.ctx!.currentTime + idx * 0.09 + 0.45);
+
+                osc.connect(gain);
+                gain.connect(this.ctx!.destination);
+                osc.start(this.ctx!.currentTime + idx * 0.09);
+                osc.stop(this.ctx!.currentTime + idx * 0.09 + 0.48);
+            });
         } catch {}
     }
 
@@ -393,89 +655,6 @@ export class RetroSynthesizer {
         if (this.timerId) {
             clearInterval(this.timerId);
             this.timerId = null;
-        }
-    }
-}
-
-export class VaultManager {
-    public state: VaultState = {
-        pads: [false, false, false, false],
-        padOccupants: [null, null, null, null],
-        holoDecoysActive: false,
-        isUnlocked: false
-    };
-
-    public readonly padCoordinates = [
-        { x: 4.5, y: 14.5, label: 'Pad 1 (NW)' },
-        { x: 6.5, y: 14.5, label: 'Pad 2 (NE)' },
-        { x: 4.5, y: 18.5, label: 'Pad 3 (SW)' },
-        { x: 6.5, y: 18.5, label: 'Pad 4 (SE)' }
-    ];
-
-    public onStateChanged: () => void = () => {};
-
-    public toggleHoloDecoys() {
-        this.state.holoDecoysActive = !this.state.holoDecoysActive;
-        this.onStateChanged();
-    }
-
-    public forceUnlock(heroName: string, onUnlock: (heroes: string[]) => void) {
-        if (this.state.isUnlocked) return;
-        this.state.isUnlocked = true;
-        this.state.unlockedAt = Date.now();
-        this.state.pads = [true, true, true, true];
-        const heroes = [heroName];
-        this.state.heroes = heroes;
-        this.onStateChanged();
-        onUnlock(heroes);
-    }
-
-    public update(
-        players: Array<{ id: string; username: string; x: number; y: number }>,
-        onUnlock: (heroes: string[]) => void
-    ) {
-        const newOccupants: [string | null, string | null, string | null, string | null] = [null, null, null, null];
-        const newPads: [boolean, boolean, boolean, boolean] = [false, false, false, false];
-
-        let changed = false;
-
-        this.padCoordinates.forEach((coord, index) => {
-            for (const p of players) {
-                if (gridDistance(p.x, p.y, coord.x, coord.y) <= 0.85) {
-                    newPads[index] = true;
-                    newOccupants[index] = p.username;
-                    break;
-                }
-            }
-            if (!newPads[index] && this.state.holoDecoysActive && index > 0) {
-                newPads[index] = true;
-                newOccupants[index] = `HoloClone-${index}`;
-            }
-            if (newPads[index] !== this.state.pads[index] || newOccupants[index] !== this.state.padOccupants[index]) {
-                changed = true;
-            }
-        });
-
-        this.state.pads = newPads;
-        this.state.padOccupants = newOccupants;
-
-        const allActive = newPads[0] && newPads[1] && newPads[2] && newPads[3];
-
-        if (allActive && !this.state.isUnlocked) {
-            this.state.isUnlocked = true;
-            this.state.unlockedAt = Date.now();
-            const heroes = newOccupants.filter((u): u is string => u !== null);
-            this.state.heroes = heroes;
-            this.state.holoDecoysActive = false;
-            changed = true;
-            onUnlock(heroes);
-        } else if (!allActive && this.state.isUnlocked && Date.now() - (this.state.unlockedAt || 0) > 20000) {
-            this.state.isUnlocked = false;
-            changed = true;
-        }
-
-        if (changed) {
-            this.onStateChanged();
         }
     }
 }

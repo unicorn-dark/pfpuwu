@@ -2,6 +2,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { userProfile } from "$lib/stores/auth";
+    import { openChatDrawer } from "$lib/stores/os";
     import {
         gridToScreen,
         screenToGrid,
@@ -18,13 +19,19 @@
         WORLD_OBJECTS,
         COLLISION_MAP,
         ANIMATED_TILE_COORDS,
+        FOREST_TILES,
+        FOREST_OBJECTS,
+        FOREST_COLLISION_MAP,
+        FOREST_ANIMATED_TILE_COORDS,
         StaticFloorCache,
         drawRichIsometricTile,
         resolveMoveWithSliding,
         getCurrentZone,
-        type WorldObject
+        type WorldObject,
+        type WorldZone
     } from "$lib/game/isometric/worldMap";
     import { findPath, type Point } from "$lib/game/isometric/pathfinding";
+    import { preloadIsoAssets, drawIsoObjectSprite } from "$lib/game/isometric/isoAssetLoader";
     import {
         renderPlayerAvatar,
         getTransparentDealerDataUrl,
@@ -35,13 +42,16 @@
     import { ProximityVoiceManager } from "$lib/game/audio/proximityVoice";
     import {
         RetroSynthesizer,
-        VaultManager,
         DiceDuelManager,
         RouletteGameManager,
         ROULETTE_SECTORS,
         BETTABLE_ROULETTE_SECTORS,
         DJ_TRACKS,
         RETRO_PALETTE_16,
+        CAMPFIRE_TRIVIA_BANK,
+        CAMPFIRE_ICEBREAKER_BANK,
+        KOI_POND_SPECIMENS,
+        type KoiSpecimen,
         type MusicGenre
     } from "$lib/game/activities/miniGames";
     import {
@@ -64,15 +74,17 @@
     let networkManager = $state<WorldNetworkManager | null>(null);
     let voiceManager: ProximityVoiceManager | null = null;
     const synth = new RetroSynthesizer();
-    const vaultManager = new VaultManager();
     const diceManager = new DiceDuelManager();
     const rouletteManager = new RouletteGameManager();
     const floorCache = new StaticFloorCache();
+    const forestFloorCache = new StaticFloorCache();
+
+    // Active World Zone ('casino' | 'forest')
+    let currentZone = $state<WorldZone>("casino");
 
     // Svelte 5 Reactivity Version Counters
     let diceTick = $state(0);
     let rouletteTick = $state(0);
-    let vaultTick = $state(0);
 
     // Local Player State — Spawn on the wide-open Central VIP Crosswalk (15.5, 16.5)
     let myId = $state("");
@@ -140,7 +152,7 @@
     let recentChatLog = $state<Array<{ user: string; text: string; ts: number }>>([]);
     let isMusicPlaying = $state(true);
     let currentTrackId = $state(3); // Start on Ibiza Deep House Groove
-    const DJ_GENRE_FILTERS: Array<MusicGenre | "All"> = ["All", "Classical", "House", "Electronic", "Techno", "Rave"];
+    const DJ_GENRE_FILTERS: Array<MusicGenre | "All"> = ["All", "Classical", "House", "Electronic", "Techno", "Rave", "Ambient"];
     let selectedGenreFilter = $state<MusicGenre | "All">("All");
     let roomHype = $state(42);
     let isMuted = $state(false);
@@ -152,7 +164,6 @@
     let showGuideModal = $state(false);
     let showGraffitiModal = $state(false);
     let showDJModal = $state(false);
-    let showArcadeModal = $state(false);
 
     // Persistent Offscreen Graffiti Canvas (48x32)
     let persistentGraffitiCanvas: HTMLCanvasElement | null = null;
@@ -164,8 +175,19 @@
     let isGraffitiPainting = false;
     let graffitiSaveTimeout: number | null = null;
 
-    // Active Proximity Game Station (Strictly ONE station active at a time, with tight 2.3-tile radius!)
-    let activeStation = $state<"none" | "dice" | "roulette" | "blackjack" | "slots" | "crash" | "mines" | "vault">("none");
+    // Active Proximity Game Station (Strictly ONE station active at a time)
+    let activeStation = $state<
+        | "none"
+        | "dice"
+        | "roulette"
+        | "blackjack"
+        | "slots"
+        | "crash"
+        | "campfire"
+        | "picnic"
+        | "fishing"
+        | "fireflies"
+    >("none");
     let isSeatedAtDiceTable = $state(false);
     let myDiceSeatIndex = $state(-1);
     let amIReady = $state(false);
@@ -201,7 +223,7 @@
     let isSlotSpinning = $state(false);
     let slotMessage = $state("Match 3 across or first 2 symbols to win! (House Edge: 9%)");
 
-    // --- NEW GAME 1: ROCKET CRASH MULTIPLIER STATE ---
+    // --- ROCKET CRASH MULTIPLIER STATE ---
     let crashPhase = $state<"idle" | "flying" | "crashed" | "cashed_out">("idle");
     let crashMultiplier = $state(1.0);
     let crashTargetPoint = 1.0;
@@ -210,25 +232,41 @@
     let crashTimerId: number | null = null;
     let crashHistory = $state<number[]>([1.42, 2.85, 1.0, 4.12, 1.18]);
 
-    // --- NEW GAME 2: CYBER MINES (5x5 Grid) STATE ---
-    let minesPhase = $state<"idle" | "playing" | "boom" | "cashed">("idle");
-    let minesBombCount = $state(5);
-    let minesBetAmount = $state(100);
-    let minesRevealed = $state<boolean[]>(Array(25).fill(false));
-    let minesBombLocations = $state<boolean[]>(Array(25).fill(false));
-    let minesSafeClicks = $state(0);
-    let minesCurrentMultiplier = $state(1.0);
-    let minesMessage = $state("Reveal safe 💎 tiles to multiply your bet—cash out before hitting a 💣!");
+    // --- WHISPERING WOODS SOCIAL ACTIVITIES (NON-GAMBLING) ---
+    // 1. Campfire Story & Trivia Circle
+    let campfireMode = $state<"trivia" | "icebreaker">("trivia");
+    let campfireQuestionIndex = $state(0);
+    let campfireRevealed = $state(false);
+    let campfireVotes = $state<Record<number, string[]>>({});
+    let myCampfireVote = $state<number | null>(null);
+    let campfireCustomStory = $state("");
+    let campfireStories = $state<Array<{ user: string; text: string }>>([
+        { user: "UnicornGuide", text: "Welcome to the Whispering Woods! Gather by the warmth of the fire 🔥" }
+    ]);
 
-    // --- 90s ARCADE: CYBER COIN RUSH MINI-GAME ---
-    let arcadeActive = $state(false);
-    let arcadeScore = $state(0);
-    let arcadeHighScore = $state(120);
-    let arcadeTimeLeft = $state(20);
-    let arcadePlayerX = $state(50);
-    let arcadeItems = $state<Array<{ id: number; x: number; y: number; type: "coin" | "gem" | "bomb"; speed: number }>>([]);
-    let arcadeTimerId: number | null = null;
-    let arcadeTickId: number | null = null;
+    // 2. Woodland Tea & Berry Picnic
+    const PICNIC_TREATS = [
+        { id: "matcha", icon: "🍵", name: "Forest Matcha Tea", vibe: "+15 Cozy Vibes" },
+        { id: "dango", icon: "🍡", name: "Hanami Sweet Dango", vibe: "+20 Sweet Vibes" },
+        { id: "pie", icon: "🥧", name: "Wild Berry Tart", vibe: "+25 Warm Vibes" },
+        { id: "bento", icon: "🍱", name: "Woodland Picnic Bento", vibe: "+30 Friendly Vibes" }
+    ];
+    let picnicComboCount = $state(0);
+    let picnicRecentFeed = $state<string[]>(["🧺 Share tea & treats with friends around the grove!"]);
+
+    // 3. Peaceful Koi Pond Catch & Release
+    let fishingState = $state<"idle" | "waiting" | "bite" | "caught">("idle");
+    let fishingHookTimer: number | null = null;
+    let caughtKoi = $state<KoiSpecimen | null>(null);
+    let koiCollection = $state<string[]>([]);
+
+    // 4. Firefly Meadow & Wishing Shrine
+    let fireflyJarCount = $state(0);
+    let fireflyCommunityGoal = $state(12);
+    let fireflyWishes = $state<Array<{ user: string; wish: string }>>([
+        { user: "SakuraSpirit", wish: "May all frens find cozy vibes in UwU World ✨" }
+    ]);
+    let fireflyWishInput = $state("");
 
     let hoveredTile = $state<{ x: number; y: number } | null>(null);
 
@@ -397,7 +435,12 @@
     }
 
     onMount(() => {
-        floorCache.build();
+        floorCache.build("casino");
+        forestFloorCache.build("forest");
+        preloadIsoAssets(() => {
+            floorCache.build("casino");
+            forestFloorCache.build("forest");
+        });
         initPersistentGraffitiCanvas();
         dealerAvatarSrc = getTransparentDealerDataUrl();
 
@@ -417,9 +460,6 @@
         };
         rouletteManager.onStateChanged = () => {
             rouletteTick++;
-        };
-        vaultManager.onStateChanged = () => {
-            vaultTick++;
         };
 
         const profile = $userProfile;
@@ -472,12 +512,22 @@
             walkAnimTick: 0,
             chips,
             wins: myWins,
-            losses: myLosses
+            losses: myLosses,
+            zone: "casino"
         };
 
         networkManager = new WorldNetworkManager(myId, initialAvatar);
         networkManager.onOnlineCountChanged = (count) => {
             onlineCount = count;
+        };
+        networkManager.onPeerJoined = (peerId) => {
+            voiceManager?.connectToPeer(peerId, true);
+            if (persistentGraffitiCanvas) {
+                networkManager?.broadcastGraffitiSnapshot(persistentGraffitiCanvas.toDataURL("image/png"));
+            }
+        };
+        networkManager.onPeerLeft = (peerId) => {
+            voiceManager?.removePeer(peerId);
         };
         networkManager.onChatReceived = (_senderId, senderName, text) => {
             recentChatLog = [...recentChatLog.slice(-14), { user: senderName, text, ts: Date.now() }];
@@ -515,12 +565,36 @@
                 );
             }
         };
-        networkManager.onVaultUnlocked = (heroes) => {
-            triggerConfettiCelebration();
-            synth.playWinFanfare();
-            hasVaultCrown = true;
-            recordGameOutcome(1000, "win", 1000);
-            showToast(`💎 VAULT CRACKED BY ${heroes.join(", ")}! (+1,000 $UWU Bonus!)`, 8000);
+        networkManager.onForestEventReceived = (payload) => {
+            if (!payload) return;
+            if (payload.kind === "campfire_vote") {
+                const votes = { ...campfireVotes };
+                const arr = votes[payload.optionIdx] ? [...votes[payload.optionIdx]] : [];
+                if (!arr.includes(payload.user)) arr.push(payload.user);
+                votes[payload.optionIdx] = arr;
+                campfireVotes = votes;
+            } else if (payload.kind === "campfire_next") {
+                campfireQuestionIndex = payload.questionIndex;
+                campfireRevealed = false;
+                campfireVotes = {};
+                myCampfireVote = null;
+            } else if (payload.kind === "campfire_story") {
+                campfireStories = [...campfireStories.slice(-8), { user: payload.user, text: payload.text }];
+                showToast(`🔥 @${payload.user} shared a campfire story!`, 4000);
+            } else if (payload.kind === "picnic_treat") {
+                picnicComboCount++;
+                picnicRecentFeed = [
+                    `${payload.icon} @${payload.user} shared ${payload.name}!`,
+                    ...picnicRecentFeed.slice(0, 4)
+                ];
+                showToast(`${payload.icon} @${payload.user} shared ${payload.name} at the Picnic!`, 3500);
+            } else if (payload.kind === "koi_caught") {
+                showToast(`🐟 @${payload.user} caught & admired a ${payload.koiName} at the Koi Pond!`, 4000);
+            } else if (payload.kind === "firefly_wish") {
+                fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
+                fireflyWishes = [{ user: payload.user, wish: payload.wish }, ...fireflyWishes.slice(0, 6)];
+                showToast(`✨ @${payload.user} released a Firefly Wish at the Shrine!`, 4500);
+            }
         };
         networkManager.onDJTrackChanged = (trackId, djUser) => {
             currentTrackId = trackId;
@@ -648,7 +722,8 @@
                 isDancing,
                 isSpeaking,
                 DANCE_MOVES[currentDanceIndex].id,
-                true
+                true,
+                currentZone
             );
         };
         voiceManager.onSignalingMessage = (toUserId, payload) => {
@@ -668,7 +743,7 @@
         if (dailyClockInterval) clearInterval(dailyClockInterval);
         if (crashTimerId) clearInterval(crashTimerId);
         if (graffitiSaveTimeout) clearTimeout(graffitiSaveTimeout);
-        stopArcadeMiniGame();
+        if (fishingHookTimer) clearTimeout(fishingHookTimer);
         synth.stop();
         diceManager.destroy();
         rouletteManager.destroy();
@@ -691,6 +766,7 @@
 
     async function ensureVoiceInitialized() {
         if (!voiceManager) return;
+        voiceManager.unlockAudio();
         if (!hasMicPermission) {
             hasMicPermission = await voiceManager.init();
         }
@@ -699,18 +775,7 @@
     function handleKeyDown(e: KeyboardEvent) {
         if (isChatFocused || showTransferModal || document.activeElement === chatInputEl) return;
 
-        if (showArcadeModal && arcadeActive) {
-            if (e.code === "ArrowLeft" || e.code === "KeyA") {
-                e.preventDefault();
-                arcadePlayerX = Math.max(8, arcadePlayerX - 9);
-                return;
-            }
-            if (e.code === "ArrowRight" || e.code === "KeyD") {
-                e.preventDefault();
-                arcadePlayerX = Math.min(92, arcadePlayerX + 9);
-                return;
-            }
-        }
+        voiceManager?.unlockAudio();
 
         if (e.code === "Space" && !e.repeat) {
             e.preventDefault();
@@ -775,7 +840,8 @@
             isDancing,
             isSpeaking,
             move.id,
-            true
+            true,
+            currentZone
         );
     }
 
@@ -785,13 +851,53 @@
         networkManager?.broadcastEmote(emote);
     }
 
-    function teleportTo(gx: number, gy: number, zoneTitle: string) {
-        const resolved = resolveMoveWithSliding(gx, gy, 0, 0, 0.22);
+    function switchWorldZone(targetZone: WorldZone, spawnX: number, spawnY: number, notice?: string) {
+        currentZone = targetZone;
+        const resolved = resolveMoveWithSliding(spawnX, spawnY, 0, 0, 0.22, targetZone);
         myX = resolved.x;
         myY = resolved.y;
         activeWaypoints = [];
         pendingInteractionTarget = null;
+        activeStation = "none";
+
+        const cam = gridToScreen(myX, myY, 0, 0, 0, canvasWidth, canvasHeight);
+        cameraX = cam.x - canvasWidth / 2;
+        cameraY = cam.y - canvasHeight / 2;
+
+        if (targetZone === "forest") {
+            currentTrackId = 11; // Whispering Woods Lullaby (Ambient)
+            if (isMusicPlaying) synth.playTrack(11);
+            showToast(notice || "🌲 Entered the Whispering Woods — Calm Acoustic Social Sanctuary!", 4500);
+        } else {
+            if (currentTrackId >= 11) currentTrackId = 3;
+            if (isMusicPlaying) synth.playTrack(currentTrackId);
+            showToast(notice || "🎲 Returned to the High Roller Casino Lounge!", 4000);
+        }
+
+        networkManager?.broadcastPosition(
+            myX,
+            myY,
+            myDir,
+            false,
+            isDancing,
+            isSpeaking,
+            DANCE_MOVES[currentDanceIndex].id,
+            true,
+            currentZone
+        );
+    }
+
+    function teleportTo(gx: number, gy: number, zoneTitle: string, targetZone: WorldZone = "casino") {
         showGuideModal = false;
+        if (currentZone !== targetZone) {
+            switchWorldZone(targetZone, gx, gy, `⚡ Teleported to ${zoneTitle}!`);
+            return;
+        }
+        const resolved = resolveMoveWithSliding(gx, gy, 0, 0, 0.22, currentZone);
+        myX = resolved.x;
+        myY = resolved.y;
+        activeWaypoints = [];
+        pendingInteractionTarget = null;
         showToast(`⚡ Teleported to ${zoneTitle}!`, 3000);
         networkManager?.broadcastPosition(
             myX,
@@ -801,43 +907,51 @@
             isDancing,
             isSpeaking,
             DANCE_MOVES[currentDanceIndex].id,
-            true
+            true,
+            currentZone
         );
     }
 
     function handleInteraction() {
-        if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
-            showDJModal = true;
-            return;
-        }
-        if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
-            openGraffitiModal();
-            return;
-        }
-        if (gridDistance(myX, myY, 27.5, 12.5) <= 3.0) {
-            openArcadeModal();
-            return;
-        }
-        if (activeStation === "dice") {
-            startInstantSoloDiceDuel();
-            return;
-        }
-        if (activeStation === "roulette") {
-            spinRouletteWithBet();
-            return;
-        }
-        if (activeStation === "blackjack") {
-            if (bjPhase === "betting" || bjPhase === "done") dealBlackjackHand();
-            return;
-        }
-        if (activeStation === "slots") {
-            spinSlotMachine();
-            return;
-        }
-        if (activeStation === "crash") {
-            if (crashPhase === "flying") cashOutRocketCrash();
-            else startRocketCrash();
-            return;
+        if (currentZone === "casino") {
+            if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
+                showDJModal = true;
+                return;
+            }
+            if (gridDistance(myX, myY, 27.5, 15.5) <= 3.5) {
+                openGraffitiModal();
+                return;
+            }
+            if (activeStation === "dice") {
+                startInstantSoloDiceDuel();
+                return;
+            }
+            if (activeStation === "roulette") {
+                spinRouletteWithBet();
+                return;
+            }
+            if (activeStation === "blackjack") {
+                if (bjPhase === "betting" || bjPhase === "done") dealBlackjackHand();
+                return;
+            }
+            if (activeStation === "slots") {
+                spinSlotMachine();
+                return;
+            }
+            if (activeStation === "crash") {
+                if (crashPhase === "flying") cashOutRocketCrash();
+                else startRocketCrash();
+                return;
+            }
+        } else {
+            if (activeStation === "fishing") {
+                castFishingLine();
+                return;
+            }
+            if (activeStation === "fireflies") {
+                catchFirefly();
+                return;
+            }
         }
     }
 
@@ -847,7 +961,7 @@
         if (dailyStatus.canClaim) {
             showToast(`🪙 Low on $UWU! Click "🎁 Daily +1,000" in the top bar to claim your daily reward!`, 4500);
         } else {
-            showToast(`🪙 Insufficient $UWU (Need ${wager} $UWU). Play the 90s Arcade or wait for Daily Reward!`, 4500);
+            showToast(`🪙 Insufficient $UWU (Need ${wager} $UWU). Wait for your Daily Reward or ask a friend!`, 4500);
         }
         return false;
     }
@@ -1184,142 +1298,135 @@
         crashMessage = `💰 CASHED OUT at ${crashMultiplier.toFixed(2)}x! Won +${win} $UWU! (Crashed at ${crashTargetPoint.toFixed(2)}x)`;
     }
 
-    // --- 6. NEW GAME: CYBER MINES (5x5 Grid with 8% House Edge) ---
-    function startCyberMines() {
-        if (!ensureEnoughChips(selectedWager)) return;
-        minesBetAmount = selectedWager;
-        recordGameOutcome(-minesBetAmount, "neutral", 0);
+    // --- WHISPERING WOODS SOCIAL ACTIVITIES (NON-GAMBLING) ---
+    function voteCampfireOption(optionIdx: number) {
+        myCampfireVote = optionIdx;
+        campfireRevealed = true;
+        synth.playNatureChimeSfx();
+        const votes = { ...campfireVotes };
+        const arr = votes[optionIdx] ? [...votes[optionIdx]] : [];
+        if (!arr.includes(myUsername)) arr.push(myUsername);
+        votes[optionIdx] = arr;
+        campfireVotes = votes;
+        networkManager?.broadcastForestEvent({
+            kind: "campfire_vote",
+            user: myUsername,
+            optionIdx
+        });
+    }
 
-        const bombs = Array(25).fill(false);
-        let placed = 0;
-        while (placed < minesBombCount) {
-            const idx = Math.floor(Math.random() * 25);
-            if (!bombs[idx]) {
-                bombs[idx] = true;
-                placed++;
+    function nextCampfirePrompt() {
+        synth.playNatureChimeSfx();
+        const bankLen =
+            campfireMode === "trivia" ? CAMPFIRE_TRIVIA_BANK.length : CAMPFIRE_ICEBREAKER_BANK.length;
+        campfireQuestionIndex = (campfireQuestionIndex + 1) % bankLen;
+        campfireRevealed = false;
+        campfireVotes = {};
+        myCampfireVote = null;
+        networkManager?.broadcastForestEvent({
+            kind: "campfire_next",
+            questionIndex: campfireQuestionIndex
+        });
+    }
+
+    function postCampfireStory() {
+        const text = campfireCustomStory.trim();
+        if (!text) return;
+        campfireCustomStory = "";
+        synth.playNatureChimeSfx();
+        campfireStories = [...campfireStories.slice(-8), { user: myUsername, text }];
+        speechBubble = { text: `🔥 ${text}`, expiresAt: Date.now() + 6500 };
+        networkManager?.broadcastChat(`🔥 ${text}`);
+        networkManager?.broadcastForestEvent({
+            kind: "campfire_story",
+            user: myUsername,
+            text
+        });
+    }
+
+    function sharePicnicTreat(treat: (typeof PICNIC_TREATS)[number]) {
+        synth.playNatureChimeSfx();
+        picnicComboCount++;
+        picnicRecentFeed = [`${treat.icon} You shared ${treat.name} (${treat.vibe})!`, ...picnicRecentFeed.slice(0, 4)];
+        triggerEmote(treat.icon);
+        networkManager?.broadcastForestEvent({
+            kind: "picnic_treat",
+            user: myUsername,
+            icon: treat.icon,
+            name: treat.name
+        });
+    }
+
+    function castFishingLine() {
+        if (fishingState === "waiting") return;
+        if (fishingState === "bite") {
+            // Reel in the Koi!
+            if (fishingHookTimer) clearTimeout(fishingHookTimer);
+            const specimen = KOI_POND_SPECIMENS[Math.floor(Math.random() * KOI_POND_SPECIMENS.length)];
+            caughtKoi = specimen;
+            fishingState = "caught";
+            if (!koiCollection.includes(specimen.id)) {
+                koiCollection = [...koiCollection, specimen.id];
             }
+            synth.playNatureChimeSfx();
+            triggerEmote(specimen.icon);
+            showToast(`🐟 Caught & admired a ${specimen.rarity} ${specimen.name}!`, 4500);
+            networkManager?.broadcastForestEvent({
+                kind: "koi_caught",
+                user: myUsername,
+                koiName: `${specimen.icon} ${specimen.name}`
+            });
+            return;
         }
-        minesBombLocations = bombs;
-        minesRevealed = Array(25).fill(false);
-        minesSafeClicks = 0;
-        minesCurrentMultiplier = 1.0;
-        minesPhase = "playing";
-        minesMessage = `Pick a tile! (${25 - minesBombCount} 💎 Gems, ${minesBombCount} 💣 Bombs hidden)`;
-        synth.playChipSfx();
-    }
 
-    function clickMinesTile(idx: number) {
-        if (minesPhase !== "playing" || minesRevealed[idx]) return;
-        minesRevealed[idx] = true;
-        minesRevealed = [...minesRevealed];
-
-        if (minesBombLocations[idx]) {
-            minesPhase = "boom";
-            synth.playDiceRollSfx();
-            recordGameOutcome(0, "loss", 0);
-            minesMessage = `💥 BOOM! You hit a Glitch Bomb! House takes ${minesBetAmount} $UWU.`;
-        } else {
-            minesSafeClicks++;
-            // Combinatorial multiplier with 8% House Edge (0.92 factor)
-            let prob = 1.0;
-            for (let i = 0; i < minesSafeClicks; i++) {
-                prob *= (25 - minesBombCount - i) / (25 - i);
-            }
-            minesCurrentMultiplier = Math.max(1.05, Math.floor((0.92 / prob) * 100) / 100);
-            synth.playChipSfx();
-            minesMessage = `💎 Safe! Multiplier: ${minesCurrentMultiplier.toFixed(2)}x (${Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU)`;
-        }
-    }
-
-    function cashOutCyberMines() {
-        if (minesPhase !== "playing" || minesSafeClicks === 0) return;
-        minesPhase = "cashed";
-        const win = Math.round(minesBetAmount * minesCurrentMultiplier);
-        recordGameOutcome(win, "win", win - minesBetAmount);
-        synth.playWinFanfare();
-        minesMessage = `💰 CASHED OUT +${win} $UWU (${minesCurrentMultiplier.toFixed(2)}x)!`;
-    }
-
-    // --- 7. 90s ARCADE: CYBER COIN RUSH ---
-    function openArcadeModal() {
-        showArcadeModal = true;
-        startArcadeMiniGame();
-    }
-
-    function startArcadeMiniGame() {
-        stopArcadeMiniGame();
-        arcadeActive = true;
-        arcadeScore = 0;
-        arcadeTimeLeft = 20;
-        arcadePlayerX = 50;
-        arcadeItems = [];
-
-        arcadeTimerId = window.setInterval(() => {
-            arcadeTimeLeft--;
-            if (arcadeTimeLeft <= 0) {
-                finishArcadeMiniGame();
-            }
-        }, 1000);
-
-        let nextId = 1;
-        arcadeTickId = window.setInterval(() => {
-            if (!arcadeActive) return;
-            if (Math.random() < 0.35) {
-                const rand = Math.random();
-                const type = rand < 0.25 ? "bomb" : rand < 0.45 ? "gem" : "coin";
-                arcadeItems.push({
-                    id: nextId++,
-                    x: 10 + Math.random() * 80,
-                    y: 0,
-                    type,
-                    speed: 3.5 + Math.random() * 2.5
-                });
-            }
-
-            const remaining: typeof arcadeItems = [];
-            for (const item of arcadeItems) {
-                item.y += item.speed;
-                if (item.y >= 82 && item.y <= 96 && Math.abs(item.x - arcadePlayerX) <= 13) {
-                    if (item.type === "coin") {
-                        arcadeScore += 10;
-                        synth.playChipSfx();
-                    } else if (item.type === "gem") {
-                        arcadeScore += 25;
-                        synth.playWinFanfare();
-                    } else {
-                        arcadeScore = Math.max(0, arcadeScore - 30);
-                        synth.playDiceRollSfx();
-                    }
-                } else if (item.y < 100) {
-                    remaining.push(item);
+        // Start casting
+        caughtKoi = null;
+        fishingState = "waiting";
+        synth.playNatureChimeSfx();
+        if (fishingHookTimer) clearTimeout(fishingHookTimer);
+        fishingHookTimer = window.setTimeout(() => {
+            fishingState = "bite";
+            synth.playNatureChimeSfx();
+            fishingHookTimer = window.setTimeout(() => {
+                if (fishingState === "bite") {
+                    fishingState = "idle";
+                    showToast("🐟 The Koi swam away gently! Cast your line again.", 3000);
                 }
-            }
-            arcadeItems = remaining;
-        }, 50);
+            }, 3500);
+        }, 1800 + Math.random() * 1800);
     }
 
-    function finishArcadeMiniGame() {
-        stopArcadeMiniGame();
-        if (arcadeScore > arcadeHighScore) {
-            arcadeHighScore = arcadeScore;
-        }
-        if (arcadeScore > 0) {
-            recordGameOutcome(arcadeScore, "win", arcadeScore);
-            synth.playWinFanfare();
-            showToast(`🕹️ Arcade Complete! You earned +${arcadeScore} $UWU Chips!`, 5000);
+    function catchFirefly() {
+        synth.playNatureChimeSfx();
+        fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
+        triggerEmote("✨");
+        for (let i = 0; i < 16; i++) {
+            particles.push({
+                x: myX + (Math.random() - 0.5) * 3,
+                y: myY + (Math.random() - 0.5) * 3,
+                vx: (Math.random() - 0.5) * 0.08,
+                vy: (Math.random() - 0.5) * 0.08,
+                color: "#ccff66",
+                size: 4,
+                life: 0,
+                maxLife: 55
+            });
         }
     }
 
-    function stopArcadeMiniGame() {
-        arcadeActive = false;
-        if (arcadeTimerId) {
-            clearInterval(arcadeTimerId);
-            arcadeTimerId = null;
-        }
-        if (arcadeTickId) {
-            clearInterval(arcadeTickId);
-            arcadeTickId = null;
-        }
+    function releaseFireflyWish() {
+        const wish = fireflyWishInput.trim() || "Wishing peace & cozy vibes to everyone in UwU World ✨";
+        fireflyWishInput = "";
+        synth.playNatureChimeSfx();
+        triggerConfettiCelebration();
+        fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
+        fireflyWishes = [{ user: myUsername, wish }, ...fireflyWishes.slice(0, 6)];
+        speechBubble = { text: `🏮 ${wish}`, expiresAt: Date.now() + 6500 };
+        networkManager?.broadcastForestEvent({
+            kind: "firefly_wish",
+            user: myUsername,
+            wish
+        });
     }
 
     // --- POINTER & PATHFINDING NAVIGATION ---
@@ -1345,6 +1452,8 @@
     function handleCanvasPointerDown(e: MouseEvent | TouchEvent) {
         if (!canvasElement || e.target !== canvasElement) return;
 
+        voiceManager?.unlockAudio();
+
         if (isChatFocused || document.activeElement === chatInputEl) {
             chatInputEl?.blur();
             isChatFocused = false;
@@ -1361,31 +1470,34 @@
         const gx = Math.floor(gridPos.x);
         const gy = Math.floor(gridPos.y);
 
-        // 1. Direct click on Roulette Betting Mats
-        const clickedSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === gx && s.tile.y === gy);
-        if (clickedSector) {
-            selectRouletteSector(clickedSector.id);
-            return;
+        if (currentZone === "casino") {
+            // 1. Direct click on Roulette Betting Mats
+            const clickedSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === gx && s.tile.y === gy);
+            if (clickedSector) {
+                selectRouletteSector(clickedSector.id);
+                return;
+            }
+
+            // 2. Direct click on Dice Seats
+            const clickedSeatIdx = diceManager.seats.findIndex((s) => s.tile.x === gx && s.tile.y === gy);
+            if (clickedSeatIdx !== -1) {
+                sitAtDiceSeat(clickedSeatIdx);
+                return;
+            }
+
+            // 3. Direct click on interactive 3D world objects
+            pendingInteractionTarget = null;
+            if (gx >= 26 && gx <= 28 && gy === 15) {
+                pendingInteractionTarget = "graffiti";
+            } else if ((gx === 15 || gx === 16) && gy === 2) {
+                pendingInteractionTarget = "dj";
+            }
+        } else {
+            pendingInteractionTarget = null;
         }
 
-        // 2. Direct click on Dice Seats
-        const clickedSeatIdx = diceManager.seats.findIndex((s) => s.tile.x === gx && s.tile.y === gy);
-        if (clickedSeatIdx !== -1) {
-            sitAtDiceSeat(clickedSeatIdx);
-            return;
-        }
-
-        // 3. Direct click on interactive 3D world objects
-        pendingInteractionTarget = null;
-        if (gx >= 26 && gx <= 28 && gy === 15) {
-            pendingInteractionTarget = "graffiti";
-        } else if ((gx === 26 || gx === 28) && gy === 12) {
-            pendingInteractionTarget = "arcade";
-        } else if ((gx === 15 || gx === 16) && gy === 2) {
-            pendingInteractionTarget = "dj";
-        }
-
-        activeWaypoints = findPath(myX, myY, gridPos.x, gridPos.y, COLLISION_MAP, MAP_SIZE);
+        const activeCollision = currentZone === "forest" ? FOREST_COLLISION_MAP : COLLISION_MAP;
+        activeWaypoints = findPath(myX, myY, gridPos.x, gridPos.y, activeCollision, MAP_SIZE);
         waypointStuckFrames = 0;
     }
 
@@ -1592,7 +1704,7 @@
         let moveY = 0;
         const speed = 4.8;
 
-        if (!isChatFocused && !showArcadeModal && !showTransferModal) {
+        if (!isChatFocused && !showTransferModal) {
             if (keysPressed["KeyW"] || keysPressed["ArrowUp"] || keysPressed["w"]) {
                 moveX -= 1;
                 moveY -= 1;
@@ -1633,7 +1745,6 @@
                 waypointStuckFrames = 0;
                 if (activeWaypoints.length === 0 && pendingInteractionTarget) {
                     if (pendingInteractionTarget === "graffiti") openGraffitiModal();
-                    else if (pendingInteractionTarget === "arcade") openArcadeModal();
                     else if (pendingInteractionTarget === "dj") showDJModal = true;
                     pendingInteractionTarget = null;
                 }
@@ -1648,7 +1759,7 @@
             const stepX = (moveX / len) * speed * deltaSec;
             const stepY = (moveY / len) * speed * deltaSec;
 
-            const res = resolveMoveWithSliding(myX, myY, stepX, stepY, 0.22);
+            const res = resolveMoveWithSliding(myX, myY, stepX, stepY, 0.22, currentZone);
             myX = res.x;
             myY = res.y;
 
@@ -1668,13 +1779,22 @@
             isDancing = false;
             walkAnimTick += deltaSec * 6.5;
         } else {
-            const safeRes = resolveMoveWithSliding(myX, myY, 0, 0, 0.22);
+            const safeRes = resolveMoveWithSliding(myX, myY, 0, 0, 0.22, currentZone);
             myX = safeRes.x;
             myY = safeRes.y;
             isWalking = false;
             if (isDancing) {
                 walkAnimTick += deltaSec * 5.8;
             }
+        }
+
+        // Seamless East/West Portal Edge Walking Transition between Casino & Whispering Woods
+        if (currentZone === "casino" && myX >= 30.2 && myY >= 13.8 && myY <= 18.0) {
+            switchWorldZone("forest", 2.4, 16.0);
+            return;
+        } else if (currentZone === "forest" && myX <= 1.6 && myY >= 13.8 && myY <= 18.0) {
+            switchWorldZone("casino", 29.4, 16.0);
+            return;
         }
 
         const playerScreen = gridToScreen(myX, myY, 0, 0, 0, canvasWidth, canvasHeight);
@@ -1688,76 +1808,95 @@
             isWalking,
             isDancing,
             isSpeaking,
-            DANCE_MOVES[currentDanceIndex].id
+            DANCE_MOVES[currentDanceIndex].id,
+            false,
+            currentZone
         );
 
         networkManager?.tickInterpolation(deltaSec);
 
         if (voiceManager && networkManager) {
-            voiceManager.updateSpatialVolumes({ x: myX, y: myY }, networkManager.getRemotePositions());
+            voiceManager.updateSpatialVolumes({ x: myX, y: myY }, networkManager.getRemotePositions(currentZone));
         }
 
-        const allPlayers = [
-            {
-                id: myId,
-                username: myUsername,
-                avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
-                x: myX,
-                y: myY
-            },
-            ...(networkManager?.getRemotePlayers() || [])
-        ];
+        if (currentZone === "casino") {
+            const allPlayers = [
+                {
+                    id: myId,
+                    username: myUsername,
+                    avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
+                    x: myX,
+                    y: myY
+                },
+                ...(networkManager?.getRemotePlayers("casino") || [])
+            ];
 
-        vaultManager.update(allPlayers, (heroes) => {
-            triggerConfettiCelebration();
-            synth.playWinFanfare();
-            hasVaultCrown = true;
-            recordGameOutcome(1000, "win", 1000);
-            showToast(`💎 VAULT UNLOCKED! +1,000 $UWU Heist Bonus!`, 7000);
-            networkManager?.broadcastVaultUnlocked(heroes);
-        });
+            diceManager.updateOccupants(allPlayers);
 
-        diceManager.updateOccupants(allPlayers);
+            // Well-Separated Casino Station Proximity Detection
+            const stationCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
+                { id: "dice", dist: gridDistance(myX, myY, 11.5, 13.5), maxRadius: 2.35 },
+                { id: "roulette", dist: gridDistance(myX, myY, 19.5, 14.0), maxRadius: 2.5 },
+                { id: "blackjack", dist: gridDistance(myX, myY, 11.5, 19.5), maxRadius: 2.35 },
+                { id: "slots", dist: gridDistance(myX, myY, 21.0, 19.5), maxRadius: 2.25 },
+                { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 }
+            ];
 
-        // Well-Separated Station Proximity Detection (Strictly ONE active station within 2.35 tiles!)
-        const stationCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
-            { id: "dice", dist: gridDistance(myX, myY, 11.5, 13.5), maxRadius: 2.35 },
-            { id: "roulette", dist: gridDistance(myX, myY, 19.5, 14.0), maxRadius: 2.5 },
-            { id: "blackjack", dist: gridDistance(myX, myY, 11.5, 19.5), maxRadius: 2.35 },
-            { id: "slots", dist: gridDistance(myX, myY, 21.0, 19.5), maxRadius: 2.25 },
-            { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 },
-            { id: "mines", dist: gridDistance(myX, myY, 27.5, 19.5), maxRadius: 2.35 },
-            { id: "vault", dist: gridDistance(myX, myY, 5.5, 16.5), maxRadius: 3.4 }
-        ];
-
-        let closestStation: typeof activeStation = "none";
-        let bestDist = Infinity;
-        for (const cand of stationCandidates) {
-            if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
-                bestDist = cand.dist;
-                closestStation = cand.id;
+            let closestStation: typeof activeStation = "none";
+            let bestDist = Infinity;
+            for (const cand of stationCandidates) {
+                if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
+                    bestDist = cand.dist;
+                    closestStation = cand.id;
+                }
             }
-        }
-        activeStation = closestStation;
+            activeStation = closestStation;
 
-        myDiceSeatIndex = diceManager.getSeatedPlayerSeat(myId);
-        isSeatedAtDiceTable = myDiceSeatIndex !== -1;
-        if (isSeatedAtDiceTable) {
-            amIReady = diceManager.seats[myDiceSeatIndex].isReady;
+            myDiceSeatIndex = diceManager.getSeatedPlayerSeat(myId);
+            isSeatedAtDiceTable = myDiceSeatIndex !== -1;
+            if (isSeatedAtDiceTable) {
+                amIReady = diceManager.seats[myDiceSeatIndex].isReady;
+            }
+
+            // Auto-select Roulette sector when stepping onto a Roulette floor mat (x: 18..20, y: 14..15)
+            const curTx = Math.floor(myX);
+            const curTy = Math.floor(myY);
+            const matSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === curTx && s.tile.y === curTy);
+            if (matSector && activeRouletteBet !== matSector.id) {
+                activeRouletteBet = matSector.id;
+                synth.playChipSfx();
+                showToast(`🎰 Selected ${matSector.icon} ${matSector.name} (${matSector.multiplier}x)! Click LOCK BET & SPIN!`, 2800);
+            }
+        } else {
+            // Whispering Woods Social Station Proximity Detection
+            const forestCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
+                { id: "campfire", dist: gridDistance(myX, myY, 16.0, 16.0), maxRadius: 3.4 },
+                {
+                    id: "picnic",
+                    dist: Math.min(gridDistance(myX, myY, 10.0, 9.0), gridDistance(myX, myY, 23.0, 10.0)),
+                    maxRadius: 2.9
+                },
+                { id: "fishing", dist: gridDistance(myX, myY, 11.0, 22.0), maxRadius: 3.2 },
+                { id: "fireflies", dist: gridDistance(myX, myY, 22.0, 23.0), maxRadius: 3.2 }
+            ];
+
+            let closestStation: typeof activeStation = "none";
+            let bestDist = Infinity;
+            for (const cand of forestCandidates) {
+                if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
+                    bestDist = cand.dist;
+                    closestStation = cand.id;
+                }
+            }
+            activeStation = closestStation;
         }
 
-        // Auto-select Roulette sector when stepping onto a Roulette floor mat (x: 18..20, y: 14..15)
-        const curTx = Math.floor(myX);
-        const curTy = Math.floor(myY);
-        const matSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === curTx && s.tile.y === curTy);
-        if (matSector && activeRouletteBet !== matSector.id) {
-            activeRouletteBet = matSector.id;
-            synth.playChipSfx();
-            showToast(`🎰 Selected ${matSector.icon} ${matSector.name} (${matSector.multiplier}x)! Click LOCK BET & SPIN!`, 2800);
-        }
-
-        const zone = getCurrentZone(myX, myY);
-        currentZoneName = zone ? zone.name : "🎲 High Roller Casino Lounge";
+        const zone = getCurrentZone(myX, myY, currentZone);
+        currentZoneName = zone
+            ? zone.name
+            : currentZone === "forest"
+              ? "🌲 Whispering Woods Sanctuary"
+              : "🎲 High Roller Casino Lounge";
 
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
@@ -1780,22 +1919,30 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         const grad = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-        grad.addColorStop(0, "#050510");
-        grad.addColorStop(0.5, "#0d061c");
-        grad.addColorStop(1, "#18092c");
+        if (currentZone === "forest") {
+            grad.addColorStop(0, "#061814");
+            grad.addColorStop(0.5, "#0c2922");
+            grad.addColorStop(1, "#14382c");
+        } else {
+            grad.addColorStop(0, "#050510");
+            grad.addColorStop(0.5, "#0d061c");
+            grad.addColorStop(1, "#18092c");
+        }
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        if (floorCache.canvas) {
+        const activeFloor = currentZone === "forest" ? forestFloorCache : floorCache;
+        if (activeFloor.canvas) {
             const mapOriginScreenX = canvasWidth / 2 - cameraX;
             const mapOriginScreenY = canvasHeight / 2 - cameraY;
-            const drawX = Math.round(mapOriginScreenX - floorCache.originX);
-            const drawY = Math.round(mapOriginScreenY - floorCache.originY);
-            ctx.drawImage(floorCache.canvas, drawX, drawY);
+            const drawX = Math.round(mapOriginScreenX - activeFloor.originX);
+            const drawY = Math.round(mapOriginScreenY - activeFloor.originY);
+            ctx.drawImage(activeFloor.canvas, drawX, drawY);
         }
 
-        for (let i = 0; i < ANIMATED_TILE_COORDS.length; i++) {
-            const t = ANIMATED_TILE_COORDS[i];
+        const animCoords = currentZone === "forest" ? FOREST_ANIMATED_TILE_COORDS : ANIMATED_TILE_COORDS;
+        for (let i = 0; i < animCoords.length; i++) {
+            const t = animCoords[i];
             const screen = gridToScreen(t.x + 0.5, t.y + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
             if (
                 screen.x < -TILE_WIDTH ||
@@ -1808,7 +1955,7 @@
             drawRichIsometricTile(ctx, screen.x, screen.y, t.type, t.x, t.y, timeMs);
         }
 
-        drawVaultConduitLines(ctx);
+        const activeCollision = currentZone === "forest" ? FOREST_COLLISION_MAP : COLLISION_MAP;
 
         if (hoveredTile) {
             const hx = hoveredTile.x;
@@ -1822,7 +1969,7 @@
             ctx.lineTo(sc.x - TILE_WIDTH / 2, sc.y);
             ctx.closePath();
 
-            const isSolid = COLLISION_MAP[hy]?.[hx];
+            const isSolid = activeCollision[hy]?.[hx];
             ctx.strokeStyle = isSolid ? "rgba(255, 180, 0, 0.85)" : "rgba(0, 255, 255, 0.9)";
             ctx.fillStyle = isSolid ? "rgba(255, 180, 0, 0.14)" : "rgba(0, 255, 255, 0.18)";
             ctx.lineWidth = 2;
@@ -1831,50 +1978,53 @@
             ctx.restore();
         }
 
-        if (activeRouletteBet) {
-            const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.id === activeRouletteBet);
-            if (sec) {
-                const sc = gridToScreen(sec.tile.x + 0.5, sec.tile.y + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
-                ctx.save();
-                const pulse = Math.sin(timeMs / 180) * 2;
-                ctx.strokeStyle = "#ffd700";
-                ctx.lineWidth = 2.5;
-                ctx.beginPath();
-                ctx.ellipse(sc.x, sc.y, 17 + pulse, 8.5 + pulse / 2, 0, 0, Math.PI * 2);
-                ctx.stroke();
-
-                for (let c = 0; c < 4; c++) {
-                    ctx.fillStyle = c % 2 === 0 ? "#ffd700" : "#ff0055";
+        if (currentZone === "casino") {
+            if (activeRouletteBet) {
+                const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.id === activeRouletteBet);
+                if (sec) {
+                    const sc = gridToScreen(sec.tile.x + 0.5, sec.tile.y + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
+                    ctx.save();
+                    const pulse = Math.sin(timeMs / 180) * 2;
+                    ctx.strokeStyle = "#ffd700";
+                    ctx.lineWidth = 2.5;
                     ctx.beginPath();
-                    ctx.ellipse(sc.x, sc.y - 3 - c * 3.5, 10, 5, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = "#ffffff";
-                    ctx.lineWidth = 0.8;
+                    ctx.ellipse(sc.x, sc.y, 17 + pulse, 8.5 + pulse / 2, 0, 0, Math.PI * 2);
                     ctx.stroke();
-                }
-                ctx.restore();
-            }
-        }
 
-        for (let i = 0; i < diceManager.seats.length; i++) {
-            const seat = diceManager.seats[i];
-            if (seat.occupant) {
-                const sc = gridToScreen(seat.coord.x, seat.coord.y, 0, cameraX, cameraY, canvasWidth, canvasHeight);
-                ctx.save();
-                ctx.strokeStyle = seat.isReady || diceManager.phase !== "idle" ? "#00ff88" : "#ffff00";
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.ellipse(sc.x, sc.y, 18, 9, 0, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
+                    for (let c = 0; c < 4; c++) {
+                        ctx.fillStyle = c % 2 === 0 ? "#ffd700" : "#ff0055";
+                        ctx.beginPath();
+                        ctx.ellipse(sc.x, sc.y - 3 - c * 3.5, 10, 5, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = "#ffffff";
+                        ctx.lineWidth = 0.8;
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+            }
+
+            for (let i = 0; i < diceManager.seats.length; i++) {
+                const seat = diceManager.seats[i];
+                if (seat.occupant) {
+                    const sc = gridToScreen(seat.coord.x, seat.coord.y, 0, cameraX, cameraY, canvasWidth, canvasHeight);
+                    ctx.save();
+                    ctx.strokeStyle = seat.isReady || diceManager.phase !== "idle" ? "#00ff88" : "#ffff00";
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.ellipse(sc.x, sc.y, 18, 9, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
             }
         }
 
         // 3. Collect & Depth-Sort 3D World Objects, Standing Transparent Unicorn House Dealers & Players
         renderEntities.length = 0;
 
-        for (let i = 0; i < WORLD_OBJECTS.length; i++) {
-            const obj = WORLD_OBJECTS[i];
+        const objectsList = currentZone === "forest" ? FOREST_OBJECTS : WORLD_OBJECTS;
+        for (let i = 0; i < objectsList.length; i++) {
+            const obj = objectsList[i];
             renderEntities.push({
                 depth: calculateDepth(obj.x, obj.y, obj.z || 0, obj.depthOffset || 0),
                 type: "obj",
@@ -1882,47 +2032,49 @@
             });
         }
 
-        // Standing 100% Transparent Unicorn House Dealer at Craps Table (NEVER occupies P1-P4 seats!)
-        renderEntities.push({
-            depth: calculateDepth(10.6, 12.4, 0, 40),
-            type: "remote",
-            payload: {
-                id: "craps_house_dealer",
-                username: "🦄 Craps Dealer",
-                avatarUrl: "dealer_unicorn",
-                isHouseDealer: true,
-                x: 10.6,
-                y: 12.4,
-                dir: "SE",
-                isWalking: false,
-                isDancing: diceManager.phase !== "idle",
-                danceMove: "disco",
-                isSpeaking: false,
-                walkAnimTick: timeMs / 250
-            }
-        });
+        if (currentZone === "casino") {
+            // Standing 100% Transparent Unicorn House Dealer at Craps Table (NEVER occupies P1-P4 seats!)
+            renderEntities.push({
+                depth: calculateDepth(10.6, 12.4, 0, 40),
+                type: "remote",
+                payload: {
+                    id: "craps_house_dealer",
+                    username: "🦄 Craps Dealer",
+                    avatarUrl: "dealer_unicorn",
+                    isHouseDealer: true,
+                    x: 10.6,
+                    y: 12.4,
+                    dir: "SE",
+                    isWalking: false,
+                    isDancing: diceManager.phase !== "idle",
+                    danceMove: "disco",
+                    isSpeaking: false,
+                    walkAnimTick: timeMs / 250
+                }
+            });
 
-        // Standing 100% Transparent Unicorn House Dealer at Blackjack 21 Table
-        renderEntities.push({
-            depth: calculateDepth(10.6, 18.6, 0, 40),
-            type: "remote",
-            payload: {
-                id: "blackjack_house_dealer",
-                username: "🦄 House Dealer",
-                avatarUrl: "dealer_unicorn",
-                isHouseDealer: true,
-                x: 10.6,
-                y: 18.6,
-                dir: "SE",
-                isWalking: false,
-                isDancing: bjPhase === "dealer",
-                danceMove: "wave",
-                isSpeaking: false,
-                walkAnimTick: timeMs / 250
-            }
-        });
+            // Standing 100% Transparent Unicorn House Dealer at Blackjack 21 Table
+            renderEntities.push({
+                depth: calculateDepth(10.6, 18.6, 0, 40),
+                type: "remote",
+                payload: {
+                    id: "blackjack_house_dealer",
+                    username: "🦄 House Dealer",
+                    avatarUrl: "dealer_unicorn",
+                    isHouseDealer: true,
+                    x: 10.6,
+                    y: 18.6,
+                    dir: "SE",
+                    isWalking: false,
+                    isDancing: bjPhase === "dealer",
+                    danceMove: "wave",
+                    isSpeaking: false,
+                    walkAnimTick: timeMs / 250
+                }
+            });
+        }
 
-        const remotes = networkManager?.getRemotePlayers() || [];
+        const remotes = networkManager?.getRemotePlayers(currentZone) || [];
         for (let i = 0; i < remotes.length; i++) {
             const p = remotes[i];
             renderEntities.push({
@@ -2011,22 +2163,6 @@
             renderHoverTooltip(ctx, hoveredTile.x, hoveredTile.y);
         }
 
-        ctx.restore();
-    }
-
-    function drawVaultConduitLines(ctx: CanvasRenderingContext2D) {
-        const vaultSc = gridToScreen(5.5, 16.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
-        ctx.save();
-        vaultManager.padCoordinates.forEach((pad, idx) => {
-            const padSc = gridToScreen(pad.x, pad.y, 0, cameraX, cameraY, canvasWidth, canvasHeight);
-            const active = vaultManager.state.pads[idx];
-            ctx.strokeStyle = active ? "#00ff88" : "rgba(255, 50, 100, 0.45)";
-            ctx.lineWidth = active ? 3 : 1.5;
-            ctx.beginPath();
-            ctx.moveTo(padSc.x, padSc.y);
-            ctx.lineTo(vaultSc.x, vaultSc.y);
-            ctx.stroke();
-        });
         ctx.restore();
     }
 
@@ -2166,14 +2302,17 @@
             ctx.ellipse(0, 4, 34, 17, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            drawIsoPrism(ctx, 31, 15.5, 20, "#5c2410", "#421808", "#2e1005", "#ffd700");
+            if (!drawIsoObjectSprite(ctx, "table_decorated", 0, 0, 68, 12)) {
+                drawIsoPrism(ctx, 31, 15.5, 20, "#5c2410", "#421808", "#2e1005", "#ffd700");
+            }
 
-            ctx.fillStyle = "#086638";
+            // Emerald Craps Felt Top Overlay + Animated Dice
+            ctx.fillStyle = "rgba(8, 102, 56, 0.85)";
             ctx.beginPath();
-            ctx.moveTo(0, -13 - 20);
-            ctx.lineTo(26, -20);
-            ctx.lineTo(0, 13 - 20);
-            ctx.lineTo(-26, -20);
+            ctx.moveTo(0, -11 - 21);
+            ctx.lineTo(22, -21);
+            ctx.lineTo(0, 11 - 21);
+            ctx.lineTo(-22, -21);
             ctx.closePath();
             ctx.fill();
             ctx.strokeStyle = "#ffd700";
@@ -2187,29 +2326,31 @@
             const d2 = isRolling ? ((Math.floor(timeMs / 60) + 3) % 6) + 1 : diceManager.tableDice[1];
 
             ctx.fillStyle = "#ffffff";
-            ctx.fillRect(-10, -25 - bounce, 8, 8);
+            ctx.fillRect(-10, -26 - bounce, 8, 8);
             ctx.strokeStyle = "#aa0000";
-            ctx.strokeRect(-10, -25 - bounce, 8, 8);
+            ctx.strokeRect(-10, -26 - bounce, 8, 8);
             ctx.fillStyle = "#cc0000";
             ctx.font = "bold 7px monospace";
             ctx.textAlign = "center";
-            ctx.fillText(String(d1), -6, -19 - bounce);
+            ctx.fillText(String(d1), -6, -20 - bounce);
 
             ctx.fillStyle = "#ffffff";
-            ctx.fillRect(2, -25 - bounce * 0.8, 8, 8);
-            ctx.strokeRect(2, -25 - bounce * 0.8, 8, 8);
+            ctx.fillRect(2, -26 - bounce * 0.8, 8, 8);
+            ctx.strokeRect(2, -26 - bounce * 0.8, 8, 8);
             ctx.fillStyle = "#cc0000";
-            ctx.fillText(String(d2), 6, -19 - bounce * 0.8);
+            ctx.fillText(String(d2), 6, -20 - bounce * 0.8);
         } else if (obj.type === "roulette_wheel") {
             ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
             ctx.beginPath();
             ctx.ellipse(0, 4, 34, 17, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            drawIsoPrism(ctx, 30, 15, 19, "#3d1c0a", "#2b1206", "#1f0c04", "#ffd700");
+            if (!drawIsoObjectSprite(ctx, "table_round_chairs", 0, 0, 68, 12)) {
+                drawIsoPrism(ctx, 30, 15, 19, "#3d1c0a", "#2b1206", "#1f0c04", "#ffd700");
+            }
 
             ctx.save();
-            ctx.translate(0, -20);
+            ctx.translate(0, -22);
             ctx.scale(1, 0.5);
             ctx.rotate(rouletteManager.currentAngle);
 
@@ -2218,7 +2359,7 @@
                 ctx.fillStyle = ROULETTE_SECTORS[i].color;
                 ctx.beginPath();
                 ctx.moveTo(0, 0);
-                ctx.arc(0, 0, 23, (i * Math.PI * 2) / sectors, ((i + 1) * Math.PI * 2) / sectors);
+                ctx.arc(0, 0, 22, (i * Math.PI * 2) / sectors, ((i + 1) * Math.PI * 2) / sectors);
                 ctx.closePath();
                 ctx.fill();
                 ctx.strokeStyle = "#111111";
@@ -2230,21 +2371,21 @@
             ctx.strokeStyle = "#ffd700";
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.ellipse(0, -20, 23, 11.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, -22, 22, 11, 0, 0, Math.PI * 2);
             ctx.stroke();
 
             // Golden Pointer Needle at Top of Wheel
             ctx.fillStyle = "#ffff00";
             ctx.beginPath();
-            ctx.moveTo(0, -29);
-            ctx.lineTo(-4, -35);
-            ctx.lineTo(4, -35);
+            ctx.moveTo(0, -31);
+            ctx.lineTo(-4, -37);
+            ctx.lineTo(4, -37);
             ctx.closePath();
             ctx.fill();
 
             ctx.fillStyle = "#ffd700";
             ctx.beginPath();
-            ctx.ellipse(0, -21, 5, 3, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, -23, 5, 3, 0, 0, Math.PI * 2);
             ctx.fill();
         } else if (obj.type === "blackjack_table") {
             ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
@@ -2252,39 +2393,45 @@
             ctx.ellipse(0, 4, 34, 17, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            drawIsoPrism(ctx, 30, 15, 19, "#0d3b66", "#2a160c", "#1c0e07", "#00ffff");
+            if (!drawIsoObjectSprite(ctx, "table_round_chairs", 0, 0, 68, 12)) {
+                drawIsoPrism(ctx, 30, 15, 19, "#0d3b66", "#2a160c", "#1c0e07", "#00ffff");
+            }
 
-            ctx.strokeStyle = "rgba(255, 215, 0, 0.85)";
-            ctx.lineWidth = 1.5;
+            ctx.fillStyle = "rgba(13, 59, 102, 0.85)";
             ctx.beginPath();
-            ctx.ellipse(0, -19, 18, 9, 0, 0, Math.PI);
+            ctx.ellipse(0, -22, 20, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255, 215, 0, 0.9)";
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
             ctx.fillStyle = "#ffffff";
-            ctx.fillRect(-9, -23, 6, 8);
-            ctx.fillRect(2, -23, 6, 8);
+            ctx.fillRect(-9, -25, 6, 8);
+            ctx.fillRect(2, -25, 6, 8);
 
             ctx.font = "bold 8px monospace";
             ctx.fillStyle = "#ffd700";
             ctx.textAlign = "center";
-            ctx.fillText("21", 0, -27);
+            ctx.fillText("21", 0, -29);
         } else if (obj.type === "slot_machine") {
             ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
             ctx.beginPath();
-            ctx.ellipse(0, 3, 18, 9, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 3, 20, 10, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            drawIsoPrism(ctx, 16, 8, 42, "#ffd700", "#2a1442", "#1a0b2e", "#ffd700");
+            if (!drawIsoObjectSprite(ctx, "slot_machine", 0, 0, 42, 8)) {
+                drawIsoPrism(ctx, 16, 8, 42, "#ffd700", "#2a1442", "#1a0b2e", "#ffd700");
+            }
 
             ctx.fillStyle = "#ffffff";
-            ctx.fillRect(-10, -34, 20, 11);
+            ctx.fillRect(-10, -32, 20, 11);
             ctx.strokeStyle = "#ff00aa";
             ctx.lineWidth = 1.5;
-            ctx.strokeRect(-10, -34, 20, 11);
+            ctx.strokeRect(-10, -32, 20, 11);
 
             ctx.font = "8px sans-serif";
             ctx.textAlign = "center";
-            ctx.fillText("🍒🐸🚀", 0, -26);
+            ctx.fillText("🍒🐸🚀", 0, -24);
 
             const flash = Math.floor(timeMs / 200) % 2 === 0;
             ctx.fillStyle = flash ? "#ff0055" : "#ffff00";
@@ -2292,35 +2439,33 @@
             ctx.arc(0, -45, 4, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.strokeStyle = "#c0c0c0";
+            ctx.strokeStyle = "#ffd700";
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(15, -24);
-            ctx.lineTo(20, -35);
+            ctx.moveTo(15, -22);
+            ctx.lineTo(20, -34);
             ctx.stroke();
             ctx.fillStyle = "#ff0033";
             ctx.beginPath();
-            ctx.arc(20, -36, 3, 0, Math.PI * 2);
+            ctx.arc(20, -35, 3, 0, Math.PI * 2);
             ctx.fill();
         } else if (obj.type === "crash_rocket") {
             // 3D Isometric Rocket Crash Launchpad Terminal
-            drawIsoPrism(ctx, 26, 13, 22, "#1a103c", "#110a28", "#0a0518", "#ff0055");
+            ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 28, 14, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "table_round", 0, 0, 56, 10)) {
+                drawIsoPrism(ctx, 26, 13, 22, "#1a103c", "#110a28", "#0a0518", "#ff0055");
+            }
             const rocketLift = crashPhase === "flying" ? Math.min(28, (crashMultiplier - 1) * 10) : 0;
             ctx.font = "20px sans-serif";
             ctx.textAlign = "center";
-            ctx.fillText(crashPhase === "crashed" ? "💥" : "🚀", 0, -26 - rocketLift);
+            ctx.fillText(crashPhase === "crashed" ? "💥" : "🚀", 0, -28 - rocketLift);
             ctx.font = "bold 8px monospace";
             ctx.fillStyle = "#00ff88";
-            ctx.fillText("CRASH", 0, -10);
-        } else if (obj.type === "mines_table") {
-            // 3D Isometric Cyber Mines Table
-            drawIsoPrism(ctx, 26, 13, 20, "#0b3b3c", "#072627", "#041819", "#00ff88");
-            ctx.font = "14px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("💎💣", 0, -23);
-            ctx.font = "bold 8px monospace";
-            ctx.fillStyle = "#ffd700";
-            ctx.fillText("MINES", 0, -9);
+            ctx.fillText("CRASH", 0, -12);
         } else if (obj.type === "graffiti_wall") {
             [-28, 28].forEach((px) => {
                 ctx.fillStyle = "#1c222b";
@@ -2353,61 +2498,39 @@
             ctx.fillStyle = "#00ffff";
             ctx.textAlign = "center";
             ctx.fillText("🎨 LIVE GRAFFITI WALL [CLICK / E]", 0, -78);
-        } else if (obj.type === "arcade") {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-            ctx.beginPath();
-            ctx.ellipse(0, 3, 17, 8.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            drawIsoPrism(ctx, 15, 7.5, 44, "#ff00aa", "#1e1238", "#120924", "#00ffff");
-
-            ctx.fillStyle = "#001f29";
-            ctx.fillRect(-9, -35, 18, 13);
-            ctx.strokeStyle = "#00ffff";
-            ctx.lineWidth = 1;
-            ctx.strokeRect(-9, -35, 18, 13);
-
-            const hop = Math.abs(Math.sin(timeMs / 150)) * 3;
-            ctx.fillStyle = "#ffcc00";
-            ctx.fillRect(-3, -29 - hop, 6, 6);
         } else if (obj.type === "fountain") {
             ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
             ctx.beginPath();
-            ctx.ellipse(0, 4, 44, 22, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 6, 52, 26, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = "#5c6470";
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 42, 21, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = "#0099cc";
-            ctx.beginPath();
-            ctx.ellipse(0, -2, 37, 18, 0, 0, Math.PI * 2);
-            ctx.fill();
+            if (!drawIsoObjectSprite(ctx, "fountain_round", 0, 0, 108, 22)) {
+                ctx.fillStyle = "#5c6470";
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 42, 21, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
 
-            ctx.fillStyle = "#848d99";
-            ctx.fillRect(-7, -30, 14, 28);
-            ctx.fillStyle = "#00ccff";
-            ctx.beginPath();
-            ctx.ellipse(0, -30, 19, 9.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-
+            // Animated sparkling water arcs rising from the 3D stone fountain
             const spray = Math.sin(timeMs / 150) * 5;
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+            ctx.strokeStyle = "rgba(180, 245, 255, 0.85)";
             ctx.lineWidth = 1.8;
             ctx.beginPath();
-            ctx.moveTo(0, -30);
-            ctx.quadraticCurveTo(-18, -48 + spray, -26, -8);
-            ctx.moveTo(0, -30);
-            ctx.quadraticCurveTo(18, -48 + spray, 26, -8);
+            ctx.moveTo(0, -34);
+            ctx.quadraticCurveTo(-20, -54 + spray, -28, -12);
+            ctx.moveTo(0, -34);
+            ctx.quadraticCurveTo(20, -54 + spray, 28, -12);
+            ctx.moveTo(0, -34);
+            ctx.quadraticCurveTo(0, -60 - spray, 0, -18);
             ctx.stroke();
         } else if (obj.type === "dj_booth") {
             drawIsoPrism(ctx, 44, 20, 26, "#18182c", "#101020", "#0a0a16", "#00ffff");
+            drawIsoObjectSprite(ctx, "radio_deck", 0, -20, 28, 4);
 
             ctx.fillStyle = "#222233";
             ctx.beginPath();
-            ctx.ellipse(-16, -26, 9, 5, 0, 0, Math.PI * 2);
-            ctx.ellipse(16, -26, 9, 5, 0, 0, Math.PI * 2);
+            ctx.ellipse(-18, -26, 9, 5, 0, 0, Math.PI * 2);
+            ctx.ellipse(18, -26, 9, 5, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = "#ff00ff";
             ctx.lineWidth = 1.2;
@@ -2418,88 +2541,206 @@
                 ctx.fillStyle = b % 2 === 0 ? "#00ffff" : "#ff00aa";
                 ctx.fillRect(b * 6 - 2, -6 - bh, 4, bh);
             }
-        } else if (obj.type === "vault") {
-            const isUnlocked = vaultManager.state.isUnlocked;
-            drawIsoPrism(
-                ctx,
-                28,
-                14,
-                48,
-                isUnlocked ? "#164a3b" : "#2b323d",
-                isUnlocked ? "#0f382c" : "#1f252e",
-                "#151920",
-                isUnlocked ? "#00ff88" : "#ff3366"
-            );
-
-            ctx.save();
-            ctx.translate(0, -24);
-            if (isUnlocked) ctx.rotate(timeMs / 400);
-            ctx.fillStyle = "#ffd700";
+        } else if (obj.type === "club_speaker") {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
             ctx.beginPath();
-            ctx.arc(0, 0, 12, 0, Math.PI * 2);
+            ctx.ellipse(0, 3, 14, 7, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = "#000000";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.restore();
-
-            ctx.font = "bold 9px monospace";
-            ctx.fillStyle = isUnlocked ? "#00ff88" : "#ffffff";
-            ctx.textAlign = "center";
-            ctx.fillText(isUnlocked ? "VAULT OPEN" : "BANK SAFE", 0, -54);
-        } else if (obj.type === "pressure_pad") {
-            const padIndex = (obj.data?.index || 1) - 1;
-            const isPressed = vaultManager.state.pads[padIndex];
-            ctx.fillStyle = isPressed ? "rgba(0, 255, 136, 0.85)" : "rgba(50, 55, 70, 0.9)";
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 16, 8, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = isPressed ? "#ffffff" : "#ff3366";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            ctx.font = "bold 8px monospace";
-            ctx.fillStyle = isPressed ? "#000000" : "#ffffff";
-            ctx.textAlign = "center";
-            ctx.fillText(`PAD ${padIndex + 1}`, 0, 3);
+            drawIsoObjectSprite(ctx, "speaker_club", 0, 0, 24, 6);
         } else if (obj.type === "street_lamp") {
-            ctx.fillStyle = "#222222";
-            ctx.fillRect(-2, -44, 4, 44);
-            ctx.fillStyle = "#fffae0";
-            ctx.beginPath();
-            ctx.arc(0, -46, 6, 0, Math.PI * 2);
-            ctx.fill();
-
-            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 34);
-            glow.addColorStop(0, "rgba(255, 235, 160, 0.26)");
+            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 38);
+            glow.addColorStop(0, "rgba(255, 235, 160, 0.34)");
             glow.addColorStop(1, "rgba(255, 235, 160, 0)");
             ctx.fillStyle = glow;
             ctx.beginPath();
-            ctx.ellipse(0, 0, 34, 17, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, 38, 19, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const lampKey = currentZone === "forest" ? "lantern_street" : "lightpost_double";
+            const lampW = currentZone === "forest" ? 16 : 32;
+            if (!drawIsoObjectSprite(ctx, lampKey, 0, 0, lampW, 5)) {
+                ctx.fillStyle = "#222222";
+                ctx.fillRect(-2, -44, 4, 44);
+            }
+
+            // Warm top lantern halo
+            const halo = ctx.createRadialGradient(0, -48, 2, 0, -48, 16);
+            halo.addColorStop(0, "rgba(255, 245, 180, 0.7)");
+            halo.addColorStop(1, "rgba(255, 220, 120, 0)");
+            ctx.fillStyle = halo;
+            ctx.beginPath();
+            ctx.arc(0, -48, 16, 0, Math.PI * 2);
             ctx.fill();
         } else if (obj.type === "palm_tree") {
-            ctx.fillStyle = "#5c3c1e";
-            ctx.fillRect(-4, -38, 8, 38);
-            const sway = Math.sin(timeMs / 450 + obj.x) * 2;
-            ctx.fillStyle = "#199e52";
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
             ctx.beginPath();
-            ctx.arc(-12 + sway, -42, 14, 0, Math.PI * 2);
-            ctx.arc(12 + sway, -42, 14, 0, Math.PI * 2);
-            ctx.arc(sway, -52, 16, 0, Math.PI * 2);
+            ctx.ellipse(0, 3, 22, 11, 0, 0, Math.PI * 2);
             ctx.fill();
-        } else if (obj.type === "sofa" || obj.type === "bar_counter") {
-            drawIsoPrism(
-                ctx,
-                22,
-                11,
-                16,
-                obj.type === "bar_counter" ? "#00d2ff" : "#8a1540",
-                "#5c0d2a",
-                "#3d081b",
-                "#ffd700"
-            );
+
+            const palmKey = Math.floor(obj.x + obj.y) % 2 === 0 ? "tree_palm" : "tree_palm_bend";
+            if (!drawIsoObjectSprite(ctx, palmKey, 0, 0, 58, 7)) {
+                ctx.fillStyle = "#5c3c1e";
+                ctx.fillRect(-4, -38, 8, 38);
+            }
+        } else if (obj.type === "pine_tree") {
+            ctx.fillStyle = "rgba(0,0,0,0.38)";
+            ctx.beginPath();
+            ctx.ellipse(0, 3, 22, 11, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const pineVariants = ["tree_pine_tall", "tree_pine_round", "tree_pine_default"];
+            const pineKey = pineVariants[Math.abs(Math.floor(obj.x * 3 + obj.y * 5)) % pineVariants.length];
+            const targetW = pineKey === "tree_pine_round" ? 44 : 36;
+            if (!drawIsoObjectSprite(ctx, pineKey, 0, 0, targetW, 6)) {
+                ctx.fillStyle = "#4a2c14";
+                ctx.fillRect(-4, -22, 8, 22);
+            }
+        } else if (obj.type === "sakura_tree") {
+            ctx.fillStyle = "rgba(0,0,0,0.38)";
+            ctx.beginPath();
+            ctx.ellipse(0, 3, 24, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const sakuraVariants = ["tree_sakura_1", "tree_sakura_2", "tree_sakura_3"];
+            const sakuraKey = sakuraVariants[Math.abs(Math.floor(obj.x * 7 + obj.y * 3)) % sakuraVariants.length];
+            if (!drawIsoObjectSprite(ctx, sakuraKey, 0, 0, 52, 7)) {
+                drawIsoObjectSprite(ctx, "tree_oak", 0, 0, 52, 7);
+            }
+
+            // Gentle drifting cherry-blossom petals around 3D Sakura trees
+            const pPhase = timeMs / 650 + obj.x * 2.1;
+            ctx.fillStyle = "rgba(255, 182, 210, 0.88)";
+            ctx.beginPath();
+            ctx.arc(Math.sin(pPhase) * 16, -24 + ((timeMs / 45 + obj.y * 10) % 24), 2, 0, Math.PI * 2);
+            ctx.arc(Math.cos(pPhase * 0.8) * 14, -32 + ((timeMs / 55 + obj.x * 12) % 26), 1.8, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (obj.type === "campfire_pit") {
+            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 62);
+            glow.addColorStop(0, "rgba(255, 150, 45, 0.5)");
+            glow.addColorStop(0.6, "rgba(255, 95, 15, 0.18)");
+            glow.addColorStop(1, "rgba(255, 100, 0, 0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 62, 31, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Render 3D Kenney stone ring + stacked campfire logs
+            drawIsoObjectSprite(ctx, "campfire_stones", 0, 0, 44, 9);
+            drawIsoObjectSprite(ctx, "campfire_logs", 0, -2, 28, 7);
+
+            const flicker = Math.sin(timeMs / 90) * 4;
+            ctx.fillStyle = "rgba(255, 85, 0, 0.9)";
+            ctx.beginPath();
+            ctx.moveTo(0, -30 + flicker);
+            ctx.lineTo(11, -5);
+            ctx.lineTo(-11, -5);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "rgba(255, 215, 40, 0.95)";
+            ctx.beginPath();
+            ctx.moveTo(0, -21 - flicker * 0.6);
+            ctx.lineTo(6, -6);
+            ctx.lineTo(-6, -6);
+            ctx.closePath();
+            ctx.fill();
+        } else if (obj.type === "log_bench") {
+            ctx.fillStyle = "rgba(0,0,0,0.32)";
+            ctx.beginPath();
+            ctx.ellipse(0, 3, 20, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const isNE = (obj.x < 16 && obj.y < 16) || (obj.x > 16 && obj.y > 16);
+            if (!drawIsoObjectSprite(ctx, isNE ? "log_seat_nw" : "log_seat_ne", 0, 0, 42, 8)) {
+                drawIsoPrism(ctx, 20, 9, 10, "#754724", "#593418", "#3d220e", "#a66c38");
+            }
+        } else if (obj.type === "picnic_table") {
+            // Cozy woven picnic rug underneath + 3D cloth table + treats
+            drawIsoObjectSprite(ctx, "rug_rectangle", 0, 6, 78, 16, 0.92);
+            if (!drawIsoObjectSprite(ctx, "table_cloth", 0, 0, 52, 10)) {
+                drawIsoPrism(ctx, 30, 15, 16, "#d32f2f", "#5c3818", "#3e240e", "#ffffff");
+            }
+            ctx.font = "12px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("🍵🍡🧺", 0, -24);
+        } else if (obj.type === "koi_dock") {
+            if (!drawIsoObjectSprite(ctx, "bridge_wood", 0, 4, 72, 16)) {
+                drawIsoPrism(ctx, 28, 14, 10, "#8c5828", "#69401a", "#4d2d10", "#b87a40");
+            }
+            ctx.font = "14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("🎣🐟", 0, -24);
+        } else if (obj.type === "firefly_shrine") {
+            const pulse = 0.55 + Math.sin(timeMs / 220) * 0.35;
+            const aura = ctx.createRadialGradient(0, -16, 4, 0, -16, 46);
+            aura.addColorStop(0, `rgba(190, 255, 110, ${0.42 * pulse})`);
+            aura.addColorStop(1, "rgba(0, 255, 140, 0)");
+            ctx.fillStyle = aura;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 44, 22, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "statue_obelisk", 0, 0, 36, 8)) {
+                drawIsoPrism(ctx, 22, 11, 32, "#788496", "#586270", "#3e4652", "#ccff66");
+            }
+
+            // Orbiting bioluminescent fireflies around the 3D stone shrine
+            for (let f = 0; f < 4; f++) {
+                const ang = timeMs / 420 + (f * Math.PI) / 2;
+                const fx = Math.cos(ang) * 20;
+                const fy = -24 + Math.sin(ang * 1.5) * 10;
+                ctx.fillStyle = "#ccff66";
+                ctx.beginPath();
+                ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.font = "13px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("🏮✨", 0, -54);
+        } else if (obj.type === "sofa") {
+            ctx.fillStyle = "rgba(0,0,0,0.38)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 26, 13, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            const sofaKey = obj.id.endsWith("3") ? "sofa_long_ne" : obj.x > 5.5 ? "sofa_vip_se" : "sofa_vip_ne";
+            if (!drawIsoObjectSprite(ctx, sofaKey, 0, 0, 54, 10)) {
+                drawIsoPrism(ctx, 22, 11, 16, "#8a1540", "#5c0d2a", "#3d081b", "#ffd700");
+            }
+        } else if (obj.type === "bar_counter") {
+            ctx.fillStyle = "rgba(0,0,0,0.38)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 24, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "bar_counter", 0, 0, 42, 9)) {
+                drawIsoPrism(ctx, 22, 11, 16, "#00d2ff", "#5c0d2a", "#3d081b", "#ffd700");
+            }
+            drawIsoObjectSprite(ctx, "stool_bar", 18, 6, 18, 5);
         } else if (obj.type === "vip_pillar") {
-            drawIsoPrism(ctx, 10, 5, 38, "#ffd700", "#282238", "#181424", "#ffd700");
+            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            ctx.beginPath();
+            ctx.ellipse(0, 3, 16, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "pillar_ornate", 0, 0, 26, 6)) {
+                drawIsoPrism(ctx, 10, 5, 38, "#ffd700", "#282238", "#181424", "#ffd700");
+            }
+        } else if (obj.type === "bush") {
+            const bushKey = Math.floor(obj.x + obj.y) % 2 === 0 ? "bush_detailed" : "bush_large";
+            drawIsoObjectSprite(ctx, bushKey, 0, 0, 26, 5);
+        } else if (obj.type === "rock") {
+            const rockKey = Math.floor(obj.x * 2 + obj.y) % 2 === 0 ? "rock_large" : "stone_moss";
+            drawIsoObjectSprite(ctx, rockKey, 0, 0, 36, 6);
+        } else if (obj.type === "camp_tent") {
+            ctx.fillStyle = "rgba(0,0,0,0.38)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 28, 14, 0, 0, Math.PI * 2);
+            ctx.fill();
+            drawIsoObjectSprite(ctx, "tent_open", 0, 0, 62, 11);
+        } else if (obj.type === "canoe_prop") {
+            const bob = Math.sin(timeMs / 360) * 1.5;
+            drawIsoObjectSprite(ctx, "canoe", 0, bob, 48, 8);
         }
 
         ctx.restore();
@@ -2507,24 +2748,36 @@
 
     function renderProximityPill(ctx: CanvasRenderingContext2D) {
         let promptText = "";
-        if (activeStation === "dice") {
-            promptText = "🎲 Craps Table: Click [🎲 Roll 3-Round Duel vs House Dealer] in the HUD!";
-        } else if (activeStation === "roulette") {
-            promptText = "🎡 Meme Roulette: Pick a sector & click [🎰 LOCK BET & SPIN] in the HUD!";
-        } else if (activeStation === "blackjack") {
-            promptText = "🃏 Cyber Blackjack 21: Play against the Unicorn House Dealer in the HUD!";
-        } else if (activeStation === "slots") {
-            promptText = "🎰 Golden UwU Slots: Press [E] or click PULL LEVER in the HUD!";
-        } else if (activeStation === "crash") {
-            promptText = "🚀 Rocket Crash: Launch & Cash Out before the explosion!";
-        } else if (activeStation === "mines") {
-            promptText = "💣 Cyber Mines: Reveal safe gems in the HUD to multiply your bet!";
-        } else if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
-            promptText = "🪩 DJ Stage: Press [E] to pick Classical, House, Electronic, Techno, or Rave!";
-        } else if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
-            promptText = "🎨 Live Graffiti Wall: Press [E] or click wall to paint (Saved permanently)!";
-        } else if (gridDistance(myX, myY, 27.5, 12.5) <= 2.8) {
-            promptText = "🕹️ 90s Arcade Cabinet: Press [E] to play Cyber Coin Rush!";
+        if (currentZone === "casino") {
+            if (activeStation === "dice") {
+                promptText = "🎲 Craps Table: Click [🎲 Roll 3-Round Duel vs House Dealer] in the HUD!";
+            } else if (activeStation === "roulette") {
+                promptText = "🎡 Meme Roulette: Pick a sector & click [🎰 LOCK BET & SPIN] in the HUD!";
+            } else if (activeStation === "blackjack") {
+                promptText = "🃏 Cyber Blackjack 21: Play against the Unicorn House Dealer in the HUD!";
+            } else if (activeStation === "slots") {
+                promptText = "🎰 Golden UwU Slots: Press [E] or click PULL LEVER in the HUD!";
+            } else if (activeStation === "crash") {
+                promptText = "🚀 Rocket Crash: Launch & Cash Out before the explosion!";
+            } else if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
+                promptText = "🪩 DJ Stage: Press [E] to pick Classical, House, Electronic, Techno, Rave, or Ambient!";
+            } else if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
+                promptText = "🎨 Live Graffiti Wall: Press [E] or click wall to paint (Saved permanently)!";
+            } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
+                promptText = "🌲 East Portal: Walk off the East edge to enter the Whispering Woods Social Zone!";
+            }
+        } else {
+            if (activeStation === "campfire") {
+                promptText = "🔥 Campfire Circle: Answer Trivia, Icebreakers & share stories in the HUD!";
+            } else if (activeStation === "picnic") {
+                promptText = "🧺 Woodland Picnic: Share Matcha Tea & treats with friends in the HUD!";
+            } else if (activeStation === "fishing") {
+                promptText = "🎣 Peaceful Koi Pond: Press [E] or click Cast Line in the HUD!";
+            } else if (activeStation === "fireflies") {
+                promptText = "✨ Firefly Wishing Shrine: Catch fireflies & release a lantern wish in the HUD!";
+            } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
+                promptText = "🎲 West Portal: Walk off the West edge to return to the Casino Lounge!";
+            }
         }
 
         if (promptText) {
@@ -2552,23 +2805,33 @@
 
     function renderHoverTooltip(ctx: CanvasRenderingContext2D, hx: number, hy: number) {
         let hoverLabel = "";
-        if (hx === 10 && hy === 13) hoverLabel = "🎲 Dice Seat P1 (Click to Sit)";
-        else if (hx === 12 && hy === 13) hoverLabel = "🎲 Dice Seat P2 (Click to Sit)";
-        else if (hx === 11 && hy === 12) hoverLabel = "🎲 Dice Seat P3 (Click to Sit)";
-        else if (hx === 11 && hy === 14) hoverLabel = "🎲 Dice Seat P4 (Click to Sit)";
-        else if (hx === 11 && hy === 13) hoverLabel = "🎲 3-Round Craps Table (NW Pit)";
-        else if (hx === 19 && hy === 12) hoverLabel = "🎡 Meme Roulette Wheel (NE Pit)";
-        else if (hx === 11 && hy === 19) hoverLabel = "🃏 Cyber Blackjack 21 (SW Pit)";
-        else if ((hx === 20 || hx === 21) && hy === 19) hoverLabel = "🎰 Golden UwU Slot Machine (SE Pit)";
-        else if (hx === 15 && hy === 12) hoverLabel = "🚀 Rocket Crash Terminal";
-        else if (hx === 27 && hy === 19) hoverLabel = "💣 Cyber Mines Table";
-        else if (hx >= 18 && hx <= 20 && (hy === 14 || hy === 15)) {
-            const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === hx && s.tile.y === hy);
-            if (sec) hoverLabel = `${sec.icon} Bet ${sec.name} (${sec.multiplier}x — ${sec.weight}% odds)`;
-        } else if ((hx === 15 || hx === 16) && hy === 2) hoverLabel = "🪩 Multi-Genre DJ Booth";
-        else if ((hx === 27 || hx === 28) && hy === 15) hoverLabel = "🎨 Persistent Live Graffiti Mural";
-        else if ((hx === 26 || hx === 28) && hy === 12) hoverLabel = "🕹️ 90s Arcade (Cyber Coin Rush)";
-        else if (hx === 5 && hy === 16) hoverLabel = "💎 Armored Bank Vault";
+        if (currentZone === "casino") {
+            if (hx === 10 && hy === 13) hoverLabel = "🎲 Dice Seat P1 (Click to Sit)";
+            else if (hx === 12 && hy === 13) hoverLabel = "🎲 Dice Seat P2 (Click to Sit)";
+            else if (hx === 11 && hy === 12) hoverLabel = "🎲 Dice Seat P3 (Click to Sit)";
+            else if (hx === 11 && hy === 14) hoverLabel = "🎲 Dice Seat P4 (Click to Sit)";
+            else if (hx === 11 && hy === 13) hoverLabel = "🎲 3-Round Craps Table (NW Pit)";
+            else if (hx === 19 && hy === 12) hoverLabel = "🎡 Meme Roulette Wheel (NE Pit)";
+            else if (hx === 11 && hy === 19) hoverLabel = "🃏 Cyber Blackjack 21 (SW Pit)";
+            else if ((hx === 20 || hx === 21) && hy === 19) hoverLabel = "🎰 Golden UwU Slot Machine (SE Pit)";
+            else if (hx === 15 && hy === 12) hoverLabel = "🚀 Rocket Crash Terminal";
+            else if (hx >= 18 && hx <= 20 && (hy === 14 || hy === 15)) {
+                const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === hx && s.tile.y === hy);
+                if (sec) hoverLabel = `${sec.icon} Bet ${sec.name} (${sec.multiplier}x — ${sec.weight}% odds)`;
+            } else if ((hx === 15 || hx === 16) && hy === 2) hoverLabel = "🪩 Multi-Genre DJ Booth";
+            else if ((hx === 27 || hx === 28) && hy === 15) hoverLabel = "🎨 Persistent Live Graffiti Mural";
+            else if (hx >= 30 && hy >= 14 && hy <= 17) hoverLabel = "🌲 Walk East to Whispering Woods Social Zone";
+        } else {
+            if (hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17) hoverLabel = "🔥 Campfire Story & Trivia Circle";
+            else if (
+                (hx >= 9 && hx <= 11 && hy >= 8 && hy <= 10) ||
+                (hx >= 22 && hx <= 24 && hy >= 9 && hy <= 11)
+            )
+                hoverLabel = "🧺 Woodland Tea & Berry Picnic";
+            else if (hx >= 9 && hx <= 13 && hy >= 20 && hy <= 25) hoverLabel = "🎣 Peaceful Koi Pond Dock";
+            else if (hx >= 21 && hx <= 23 && hy >= 21 && hy <= 24) hoverLabel = "✨ Firefly Wishing Shrine";
+            else if (hx <= 1 && hy >= 14 && hy <= 17) hoverLabel = "🎲 Walk West to Return to Casino Lounge";
+        }
 
         if (hoverLabel) {
             const sc = gridToScreen(hx + 0.5, hy + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
@@ -2619,11 +2882,11 @@
         <!-- Quick Travel District Navigator -->
         <div class="quick-travel-bar">
             <span class="qt-label">⚡ Travel:</span>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(15.5, 16.5, "Casino Center")}>🎲 Casino</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 6.5, "Cyber Nightclub")}>🪩 Club</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza")}>⛲ Plaza</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(7.5, 16.5, "Bank Vault")}>💎 Vault</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(25.5, 14.5, "90s Arcade")}>🕹️ Arcade</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(15.5, 16.5, "Casino Center", "casino")}>🎲 Casino</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 6.5, "Cyber Nightclub", "casino")}>🪩 Club</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza", "casino")}>⛲ Plaza</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(25.5, 15.5, "Graffiti Wall", "casino")}>🎨 Wall</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>🌲 Woods</button>
         </div>
 
         <div class="toolbar-right">
@@ -2633,6 +2896,10 @@
 
             <button class="win98-btn send-uwu-btn" onclick={() => openSendUwuModal("")}>
                 💸 Send $UWU
+            </button>
+
+            <button class="win98-btn guide-btn" onclick={() => openChatDrawer()} title="Open Global Chat">
+                💬 Chat
             </button>
 
             <button class="win98-btn guide-btn" onclick={() => (showGuideModal = true)}>
@@ -3034,113 +3301,225 @@
             </div>
         {/if}
 
-        <!-- 6. NEW GAME: CYBER MINES 5x5 GRID HUD (East Alley South: 27.5, 19.5) -->
-        {#if activeStation === "mines"}
+        <!-- 6. WHISPERING WOODS: CAMPFIRE STORY & TRIVIA CIRCLE HUD (Center Clearing: 16.0, 16.0) -->
+        {#if activeStation === "campfire"}
+            {@const currentTrivia = CAMPFIRE_TRIVIA_BANK[campfireQuestionIndex % CAMPFIRE_TRIVIA_BANK.length]}
+            {@const currentIcebreaker = CAMPFIRE_ICEBREAKER_BANK[campfireQuestionIndex % CAMPFIRE_ICEBREAKER_BANK.length]}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">💣 Cyber Mines (5x5 High-Stakes Grid)</span>
+                    <span class="win98-title">🔥 Campfire Story & Trivia Circle (Social Hangout)</span>
                 </div>
                 <div class="hud-body">
                     <div class="wager-selector">
-                        <span>Bet:</span>
-                        {#each WAGER_OPTIONS as w}
-                            <button
-                                class="win98-btn wager-btn"
-                                class:active-wager={selectedWager === w}
-                                disabled={minesPhase === "playing"}
-                                onclick={() => (selectedWager = w)}
-                            >
-                                {w}
-                            </button>
-                        {/each}
-                        <span style="margin-left:auto">Bombs:</span>
-                        {#each [3, 5, 8] as bCount}
-                            <button
-                                class="win98-btn wager-btn"
-                                class:active-wager={minesBombCount === bCount}
-                                disabled={minesPhase === "playing"}
-                                onclick={() => (minesBombCount = bCount)}
-                            >
-                                {bCount}💣
-                            </button>
-                        {/each}
-                    </div>
-
-                    <div class="mines-grid">
-                        {#each Array(25) as _, idx}
-                            <button
-                                class="win98-btn mines-cell"
-                                class:revealed={minesRevealed[idx]}
-                                disabled={minesPhase !== "playing" || minesRevealed[idx]}
-                                onclick={() => clickMinesTile(idx)}
-                            >
-                                {#if minesRevealed[idx] || minesPhase === "boom" || minesPhase === "cashed"}
-                                    {minesBombLocations[idx] ? "💣" : "💎"}
-                                {:else}
-                                    ?
-                                {/if}
-                            </button>
-                        {/each}
-                    </div>
-
-                    <div class="bj-status-msg">{minesMessage}</div>
-
-                    {#if minesPhase === "playing"}
+                        <span>Mode:</span>
                         <button
-                            class="win98-btn cashout-btn"
-                            disabled={minesSafeClicks === 0}
-                            onclick={cashOutCyberMines}
+                            class="win98-btn wager-btn"
+                            class:active-wager={campfireMode === "trivia"}
+                            onclick={() => {
+                                campfireMode = "trivia";
+                                campfireRevealed = false;
+                            }}
                         >
-                            💰 CASH OUT +{Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU ({minesCurrentMultiplier.toFixed(2)}x)
+                            🧠 Cozy Trivia
                         </button>
+                        <button
+                            class="win98-btn wager-btn"
+                            class:active-wager={campfireMode === "icebreaker"}
+                            onclick={() => {
+                                campfireMode = "icebreaker";
+                                campfireRevealed = false;
+                            }}
+                        >
+                            💬 Icebreakers
+                        </button>
+                        <button class="win98-btn wager-btn" style="margin-left:auto" onclick={nextCampfirePrompt}>
+                            ⏭️ Next Prompt
+                        </button>
+                    </div>
+
+                    {#if campfireMode === "trivia"}
+                        <div class="hud-instructions">
+                            <strong>{currentTrivia.question}</strong>
+                        </div>
+                        <div class="hud-actions-col">
+                            {#each currentTrivia.options as opt, oIdx}
+                                {@const voters = campfireVotes[oIdx] || []}
+                                <button
+                                    class="win98-btn"
+                                    class:active-wager={myCampfireVote === oIdx}
+                                    onclick={() => voteCampfireOption(oIdx)}
+                                >
+                                    {campfireRevealed && oIdx === currentTrivia.correctIndex ? "✅ " : ""}{opt}
+                                    {#if voters.length > 0}
+                                        <small>({voters.join(", ")})</small>
+                                    {/if}
+                                </button>
+                            {/each}
+                        </div>
                     {:else}
-                        <button class="win98-btn primary-start-btn" onclick={startCyberMines}>
-                            💣 START MINES GAME ({selectedWager} $UWU)
-                        </button>
+                        <div class="hud-instructions">
+                            <strong>{currentIcebreaker.prompt}</strong>
+                        </div>
+                        <div class="hud-actions-col">
+                            {#each [currentIcebreaker.optionA, currentIcebreaker.optionB] as opt, oIdx}
+                                {@const voters = campfireVotes[oIdx] || []}
+                                <button
+                                    class="win98-btn"
+                                    class:active-wager={myCampfireVote === oIdx}
+                                    onclick={() => voteCampfireOption(oIdx)}
+                                >
+                                    {opt}
+                                    {#if voters.length > 0}
+                                        <small>({voters.join(", ")})</small>
+                                    {/if}
+                                </button>
+                            {/each}
+                        </div>
                     {/if}
+
+                    <div class="scores-table" style="background:#101c16; padding:5px; border:1px solid #2e7d32;">
+                        {#each campfireStories.slice(-3) as st}
+                            <div class="player-score-row" style="color:#e8f5e9;">
+                                <span>🔥 <strong>@{st.user}:</strong> {st.text}</span>
+                            </div>
+                        {/each}
+                    </div>
+
+                    <div class="bj-actions-row">
+                        <input
+                            type="text"
+                            class="win98-input"
+                            style="flex:1; padding:4px 6px; font-size:11px;"
+                            placeholder="Share a cozy story or thought..."
+                            bind:value={campfireCustomStory}
+                            maxlength="90"
+                        />
+                        <button class="win98-btn primary-start-btn" onclick={postCampfireStory}>Share</button>
+                    </div>
                 </div>
             </div>
         {/if}
 
-        <!-- 7. ARMORED BANK VAULT CO-OP & SOLO HEIST HUD -->
-        {#if activeStation === "vault"}
-            <div class="game-hud win98-window" data-tick={vaultTick}>
+        <!-- 7. WHISPERING WOODS: WOODLAND TEA & BERRY PICNIC HUD (NW Grove: 10.5, 9.5) -->
+        {#if activeStation === "picnic"}
+            <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">💎 Armored Bank Vault Heist</span>
+                    <span class="win98-title">🧺 Woodland Tea & Berry Picnic (Co-Op Social)</span>
                 </div>
                 <div class="hud-body">
                     <div class="hud-instructions">
-                        <strong>How to Play:</strong> Activate all 4 Pressure Pads simultaneously! Playing solo? Deploy <strong>Holo-Clones</strong> onto Pads 2–4 and step onto <strong>Pad 1 (NW)</strong>!
+                        <strong>Cozy Picnic Blanket:</strong> Share freshly brewed Matcha Tea, Sweet Dango, and Berry Tarts with everyone in the grove! Shared Treats: <strong>{picnicComboCount}</strong>
                     </div>
 
-                    <div class="dice-seats-row">
-                        {#each vaultManager.padCoordinates as pad, idx}
-                            <button
-                                class="seat-badge"
-                                class:ready={vaultManager.state.pads[idx]}
-                                onclick={() => {
-                                    activeWaypoints = findPath(myX, myY, pad.x, pad.y, COLLISION_MAP, MAP_SIZE);
-                                }}
-                            >
-                                <span class="seat-title">Pad {idx + 1}</span>
-                                <span class="seat-status">
-                                    {vaultManager.state.pads[idx] ? "🟢 ACTIVE" : "🔴 IDLE"}
-                                </span>
+                    <div class="roulette-grid" style="grid-template-columns: repeat(2, 1fr);">
+                        {#each PICNIC_TREATS as treat}
+                            <button class="win98-btn meme-tile-btn" onclick={() => sharePicnicTreat(treat)}>
+                                <span class="meme-icon">{treat.icon}</span>
+                                <span class="meme-title">{treat.name}</span>
+                                <span class="meme-multiplier" style="color:#1b5e20;">{treat.vibe}</span>
                             </button>
                         {/each}
                     </div>
 
-                    <div class="hud-actions-col">
-                        <button
-                            class="win98-btn bot-test-btn"
-                            onclick={() => {
-                                vaultManager.toggleHoloDecoys();
-                                synth.playChipSfx();
-                            }}
-                        >
-                            {vaultManager.state.holoDecoysActive
-                                ? "🤖 Holo-Clones Deployed on Pads 2–4! (Step on Pad 1)"
-                                : "🤖 Deploy Solo Holo-Clones on Pads 2–4"}
+                    <div class="scores-table" style="background:#1b2e22; padding:5px; border:1px solid #66bb6a;">
+                        {#each picnicRecentFeed as item}
+                            <div class="player-score-row" style="color:#ffffff;">
+                                <span>{item}</span>
+                            </div>
+                        {/each}
+                    </div>
+                </div>
+            </div>
+        {/if}
+
+        <!-- 8. WHISPERING WOODS: PEACEFUL KOI POND CATCH & RELEASE HUD (NE Pond: 21.5, 9.5) -->
+        {#if activeStation === "fishing"}
+            <div class="game-hud win98-window">
+                <div class="win98-title-bar">
+                    <span class="win98-title">🎣 Peaceful Koi Pond (Catch, Admire & Release)</span>
+                </div>
+                <div class="hud-body">
+                    <div class="hud-instructions">
+                        <strong>How to Play:</strong> Cast your bamboo line into the tranquil Koi Pond, wait for a gentle ripple, and reel in rare Koi specimens to admire with friends!
+                    </div>
+
+                    <div class="roulette-status-bar">
+                        <span>Pond Discovered: <strong>{koiCollection.length} / {KOI_POND_SPECIMENS.length}</strong></span>
+                        <span>
+                            {#if fishingState === "waiting"}
+                                🌊 Waiting for ripples...
+                            {:else if fishingState === "bite"}
+                                ❗ <strong>SPLASH! REEL IN NOW!</strong>
+                            {:else}
+                                🌿 Calm Waters
+                            {/if}
+                        </span>
+                    </div>
+
+                    {#if caughtKoi}
+                        <div class="bj-dealer-banner" style="background: linear-gradient(90deg, #0a2e36, #144952);">
+                            <span style="font-size:28px;">{caughtKoi.icon}</span>
+                            <div class="bj-dealer-info">
+                                <strong>{caughtKoi.name} ({caughtKoi.rarity})</strong>
+                                <span>{caughtKoi.description}</span>
+                            </div>
+                        </div>
+                    {/if}
+
+                    <button
+                        class="win98-btn"
+                        class:cashout-btn={fishingState === "bite"}
+                        class:primary-start-btn={fishingState !== "bite"}
+                        disabled={fishingState === "waiting"}
+                        onclick={castFishingLine}
+                    >
+                        {#if fishingState === "waiting"}
+                            🌊 Watching the float...
+                        {:else if fishingState === "bite"}
+                            🐟 REEL IN KOI NOW! [Click / E]
+                        {:else}
+                            🎣 Cast Bamboo Fishing Line [Click / E]
+                        {/if}
+                    </button>
+                </div>
+            </div>
+        {/if}
+
+        <!-- 9. WHISPERING WOODS: FIREFLY MEADOW & WISHING SHRINE HUD (SE Meadow: 22.0, 21.5) -->
+        {#if activeStation === "fireflies"}
+            <div class="game-hud win98-window">
+                <div class="win98-title-bar">
+                    <span class="win98-title">✨ Firefly Meadow & Wishing Shrine</span>
+                </div>
+                <div class="hud-body">
+                    <div class="hud-instructions">
+                        <strong>Twilight Lantern Shrine:</strong> Catch glowing meadow fireflies and release a sky lantern wish that floats across the Whispering Woods!
+                    </div>
+
+                    <div class="roulette-status-bar">
+                        <span>✨ Meadow Fireflies Gathered: <strong>{fireflyJarCount} / {fireflyCommunityGoal}</strong></span>
+                        <button class="win98-btn wager-btn" onclick={catchFirefly}>✨ Catch Firefly</button>
+                    </div>
+
+                    <div class="scores-table" style="background:#14241b; padding:5px; border:1px solid #ccff66;">
+                        {#each fireflyWishes.slice(0, 3) as w}
+                            <div class="player-score-row" style="color:#f0fff0;">
+                                <span>🏮 <strong>@{w.user}:</strong> {w.wish}</span>
+                            </div>
+                        {/each}
+                    </div>
+
+                    <div class="bj-actions-row">
+                        <input
+                            type="text"
+                            class="win98-input"
+                            style="flex:1; padding:4px 6px; font-size:11px;"
+                            placeholder="Write a lantern wish for the forest..."
+                            bind:value={fireflyWishInput}
+                            maxlength="90"
+                        />
+                        <button class="win98-btn primary-start-btn" onclick={releaseFireflyWish}>
+                            🏮 Release Wish
                         </button>
                     </div>
                 </div>
@@ -3454,97 +3833,44 @@
         <div class="modal-overlay" onclick={() => (showGuideModal = false)}>
             <div class="win98-window guide-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">📖 UwU World MMO — All 8 Games & Districts Guide</span>
+                    <span class="win98-title">📖 UwU World MMO — Casino & Whispering Woods Guide</span>
                     <button class="win98-close" onclick={() => (showGuideModal = false)}>X</button>
                 </div>
                 <div class="win98-body guide-body">
                     <p class="guide-intro">
-                        All casino games are well-spaced across the 4 corners of the Casino Lounge and feature realistic Vegas house-edge odds:
+                        Explore the High Roller Casino Lounge or walk East through the portal (or click <strong>🌲 Woods</strong>) to hang out in the lush Whispering Woods social sanctuary:
                     </p>
                     <div class="guide-grid">
                         <div class="guide-card">
                             <div class="guide-card-title">🎲 3-Round Craps Duel (NW Pit)</div>
                             <p>Roll 3 rounds of 2 dice against the standing <strong>Unicorn House Dealer</strong> or PvP players. Pays 1.8x (10% House Edge).</p>
-                            <button class="win98-btn" onclick={() => teleportTo(11.5, 14.5, "Craps Table")}>Teleport to Craps</button>
+                            <button class="win98-btn" onclick={() => teleportTo(11.5, 14.5, "Craps Table", "casino")}>Teleport to Craps</button>
                         </div>
                         <div class="guide-card">
                             <div class="guide-card-title">🎡 Meme Roulette (NE Pit)</div>
                             <p>100-pocket weighted wheel with 3x–25x sectors and a 12% <strong>💀 House Zero</strong> pocket. Lock your bet & spin!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(19.5, 14.5, "Meme Roulette")}>Teleport to Roulette</button>
+                            <button class="win98-btn" onclick={() => teleportTo(19.5, 14.5, "Meme Roulette", "casino")}>Teleport to Roulette</button>
                         </div>
                         <div class="guide-card">
                             <div class="guide-card-title">🃏 Cyber Blackjack 21 (SW Pit)</div>
                             <p>Beat the standing Unicorn House Dealer without busting over 21. Natural 21 pays 2.2x!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(11.5, 20.5, "Cyber Blackjack")}>Teleport to Blackjack</button>
+                            <button class="win98-btn" onclick={() => teleportTo(11.5, 20.5, "Cyber Blackjack", "casino")}>Teleport to Blackjack</button>
                         </div>
                         <div class="guide-card">
                             <div class="guide-card-title">🎰 Golden UwU Slots (SE Pit)</div>
                             <p>Separated in the SE Pit! Weighted reels with `💀` blanks, front-pair 1.6x, and 3-of-a-kind jackpots up to 60x!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(20.5, 20.5, "Golden Slots")}>Teleport to Slots</button>
+                            <button class="win98-btn" onclick={() => teleportTo(20.5, 20.5, "Golden Slots", "casino")}>Teleport to Slots</button>
                         </div>
                         <div class="guide-card">
                             <div class="guide-card-title">🚀 Rocket Crash (North Center Pit)</div>
                             <p>Watch the rocket multiplier climb from 1.00x upward and Cash Out before it explodes!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(15.5, 13.8, "Rocket Crash")}>Teleport to Crash</button>
+                            <button class="win98-btn" onclick={() => teleportTo(15.5, 13.8, "Rocket Crash", "casino")}>Teleport to Crash</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">💣 Cyber Mines & 🕹️ 90s Arcade</div>
-                            <p>Uncover safe diamonds on the 5x5 Cyber Mines grid or play Cyber Coin Rush & paint on the persistent Graffiti Wall!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(26.5, 19.5, "Cyber Mines")}>Teleport to Mines</button>
+                            <div class="guide-card-title">🌲 Whispering Woods (East Social Zone)</div>
+                            <p>Walk off the East edge (`x=31, y=14..17`) into a lush forest with Campfire Stories, Tea Picnic, Koi Fishing & Firefly Wishes!</p>
+                            <button class="win98-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>Teleport to Woods</button>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    {/if}
-
-    <!-- Modal 2: 90s Arcade "Cyber Coin Rush" Mini-Game -->
-    {#if showArcadeModal}
-        <div
-            class="modal-overlay"
-            onclick={() => {
-                stopArcadeMiniGame();
-                showArcadeModal = false;
-            }}
-        >
-            <div class="win98-window arcade-window" onclick={(e) => e.stopPropagation()}>
-                <div class="win98-title-bar">
-                    <span class="win98-title">🕹️ UWU 98 ARCADE — Cyber Coin Rush</span>
-                    <button
-                        class="win98-close"
-                        onclick={() => {
-                            stopArcadeMiniGame();
-                            showArcadeModal = false;
-                        }}>X</button
-                    >
-                </div>
-                <div class="win98-body">
-                    <div class="arcade-hud-top">
-                        <span>🪙 Score: <strong>{arcadeScore} $UWU</strong></span>
-                        <span>🏆 High: <strong>{arcadeHighScore}</strong></span>
-                        <span>⏱️ Time: <strong>{arcadeTimeLeft}s</strong></span>
-                    </div>
-                    <div
-                        class="arcade-screen"
-                        onmousemove={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            arcadePlayerX = Math.max(8, Math.min(92, ((e.clientX - rect.left) / rect.width) * 100));
-                        }}
-                    >
-                        {#each arcadeItems as item (item.id)}
-                            <div class="arcade-falling-item" style="left: {item.x}%; top: {item.y}%">
-                                {item.type === "coin" ? "🪙" : item.type === "gem" ? "💎" : "💣"}
-                            </div>
-                        {/each}
-                        <div class="arcade-catcher" style="left: {arcadePlayerX}%">🛸</div>
-                    </div>
-                    <div class="arcade-controls-footer">
-                        <span>Move mouse or Left/Right keys to catch 🪙 (+10) & 💎 (+25), dodge 💣 (-30)!</span>
-                        {#if !arcadeActive}
-                            <button class="win98-btn primary-start-btn" onclick={startArcadeMiniGame}>
-                                🔄 Play Again
-                            </button>
-                        {/if}
                     </div>
                 </div>
             </div>
@@ -3611,17 +3937,17 @@
         </div>
     {/if}
 
-    <!-- Modal 4: Multi-Genre DJ Booth (Classical, House, Electronic, Techno, Rave) -->
+    <!-- Modal 4: Multi-Genre DJ Booth (Classical, House, Electronic, Techno, Rave, Ambient) -->
     {#if showDJModal}
         <div class="modal-overlay" onclick={() => (showDJModal = false)}>
             <div class="win98-window dj-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">🪩 Multi-Genre Nightclub DJ Booth (10 Tracks)</span>
+                    <span class="win98-title">🪩 Multi-Genre Nightclub & Forest DJ Booth</span>
                     <button class="win98-close" onclick={() => (showDJModal = false)}>X</button>
                 </div>
                 <div class="win98-body">
                     <div class="genre-tabs">
-                        {#each ["All", "Classical", "House", "Electronic", "Techno", "Rave"] as g}
+                        {#each DJ_GENRE_FILTERS as g}
                             <button
                                 class="win98-btn wager-btn"
                                 class:active-wager={selectedGenreFilter === g}
@@ -4761,9 +5087,14 @@
     }
 
     @media (max-width: 768px) {
-        .desktop-ptt-hint,
-        .quick-travel-bar {
+        .desktop-ptt-hint {
             display: none;
+        }
+        .mmo-action-bar {
+            flex-wrap: wrap;
+            padding: 4px 6px;
+            padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+            z-index: 25;
         }
         .guide-grid,
         .my-stats-banner {
