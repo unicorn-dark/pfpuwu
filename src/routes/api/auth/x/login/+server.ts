@@ -3,20 +3,49 @@ import { redirect, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import crypto from 'node:crypto';
 import { env } from '$env/dynamic/private';
-import { getOAuth1RequestToken } from '$lib/server/twitterOAuth';
-import { resolveAppOrigin } from '$lib/server/origin';
+import { getOAuth1RequestToken, createStatelessOAuth2State } from '$lib/server/twitterOAuth';
+import { resolveAppOrigin, resolveCookieDomain } from '$lib/server/origin';
 
-export const GET: RequestHandler = async ({ url, cookies, request }) => {
+export const GET: RequestHandler = async ({ url, cookies, request, setHeaders }) => {
+    // Prevent browsers, mobile WebViews, and proxies from ever caching a 302 redirect with a used token
+    setHeaders({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+
     const { origin, isHttps } = resolveAppOrigin(url, request);
+    const cookieDomain = resolveCookieDomain(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
     const isProd = isHttps;
+    const requestedFlow = url.searchParams.get('flow'); // 'oauth1' | 'oauth2' | 'force'
 
     const apiKey = env.X_API_KEY;
     const apiSecret = env.X_API_SECRET;
 
-    // 1. Prefer OAuth 1.0a ("Sign in with Twitter") — 100% Free Tier compatible!
+    const setCookieWithDomainFallback = (name: string, value: string, maxAge: number) => {
+        cookies.set(name, value, {
+            path: '/',
+            httpOnly: true,
+            secure: isProd,
+            sameSite: 'lax',
+            maxAge
+        });
+        if (cookieDomain) {
+            cookies.set(name, value, {
+                path: '/',
+                domain: cookieDomain,
+                httpOnly: true,
+                secure: isProd,
+                sameSite: 'lax',
+                maxAge
+            });
+        }
+    };
+
+    // 1. Prefer OAuth 1.0a ("Sign in with X") on api.x.com unless user explicitly chose 'oauth2'
     let oauth1Url: string | null = null;
-    if (apiKey && apiSecret) {
+    if (requestedFlow !== 'oauth2' && apiKey && apiSecret) {
         try {
             const { oauthToken, oauthTokenSecret } = await getOAuth1RequestToken(
                 apiKey,
@@ -24,23 +53,18 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
                 redirectUri
             );
 
-            // Store oauth_token_secret in a secure cookie (both keyed and general fallback)
-            cookies.set(`x_secret_${oauthToken}`, oauthTokenSecret, {
-                path: '/',
-                httpOnly: true,
-                secure: isProd,
-                sameSite: 'lax',
-                maxAge: 60 * 15 // 15 mins
-            });
-            cookies.set('x_oauth1_secret', oauthTokenSecret, {
-                path: '/',
-                httpOnly: true,
-                secure: isProd,
-                sameSite: 'lax',
-                maxAge: 60 * 15
-            });
+            // Store oauth_token_secret in secure cookies (host-only + .uwu.meme domain fallback)
+            setCookieWithDomainFallback(`x_secret_${oauthToken}`, oauthTokenSecret, 60 * 15);
+            setCookieWithDomainFallback('x_oauth1_secret', oauthTokenSecret, 60 * 15);
 
-            oauth1Url = `https://api.twitter.com/oauth/authenticate?oauth_token=${oauthToken}`;
+            // IMPORTANT: Always use api.x.com (NOT api.twitter.com) so X's redirect_x.js script
+            // does not trigger a client-side hostname swap that drops POST form bodies and causes
+            // "Whoa there! There is no request token for this page." for users logged into x.com!
+            if (requestedFlow === 'force') {
+                oauth1Url = `https://api.x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}&force_login=true`;
+            } else {
+                oauth1Url = `https://api.x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
+            }
         } catch (err: any) {
             console.error('OAuth 1.0a initiation failed, falling back to OAuth 2.0:', err);
         }
@@ -53,34 +77,23 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         throw redirect(302, oauth1Url);
     }
 
-    // 2. Fallback to OAuth 2.0 PKCE flow
+    // 2. OAuth 2.0 PKCE flow (native x.com/i/oauth2/authorize without legacy request tokens)
     const clientId = env.X_CLIENT_ID;
+    const clientSecret = env.X_CLIENT_SECRET;
     if (!clientId) {
         return json({ error: 'X credentials (API Key or Client ID) not configured' }, { status: 500 });
     }
 
-    const state = crypto.randomBytes(24).toString('base64url');
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const stateSecret = clientSecret || apiSecret || clientId;
+    const state = createStatelessOAuth2State(codeVerifier, stateSecret);
     const codeChallenge = crypto
         .createHash('sha256')
         .update(codeVerifier)
         .digest('base64url');
 
-    cookies.set('x_oauth_state', state, {
-        path: '/',
-        httpOnly: true,
-        secure: isProd,
-        sameSite: 'lax',
-        maxAge: 60 * 10
-    });
-
-    cookies.set('x_oauth_verifier', codeVerifier, {
-        path: '/',
-        httpOnly: true,
-        secure: isProd,
-        sameSite: 'lax',
-        maxAge: 60 * 10
-    });
+    setCookieWithDomainFallback('x_oauth_state', state, 60 * 15);
+    setCookieWithDomainFallback('x_oauth_verifier', codeVerifier, 60 * 15);
 
     const scope = 'users.read tweet.read';
     const params = new URLSearchParams({

@@ -2,6 +2,40 @@
 import { env } from '$env/dynamic/private';
 
 /**
+ * Canonicalizes uwu.meme hosts so www.uwu.meme and uwu.meme always resolve
+ * to https://uwu.meme (matching the approved callback URL in X Developer Portal).
+ */
+function canonicalizeOrigin(rawOrigin: string): string {
+    const clean = rawOrigin.replace(/\/+$/, '');
+    try {
+        const parsed = new URL(clean);
+        if (parsed.hostname === 'www.uwu.meme' || parsed.hostname === 'uwu.meme') {
+            return 'https://uwu.meme';
+        }
+        return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+        return clean;
+    }
+}
+
+/**
+ * Returns a shared cookie domain (e.g. '.uwu.meme') when running on uwu.meme / www.uwu.meme
+ * so OAuth cookies persist even if the user starts on www.uwu.meme and returns to uwu.meme.
+ */
+export function resolveCookieDomain(url: URL, request: Request): string | undefined {
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const hostHeader = (forwardedHost || request.headers.get('host') || url.hostname || '')
+        .split(',')[0]
+        .trim()
+        .toLowerCase();
+
+    if (hostHeader === 'uwu.meme' || hostHeader.endsWith('.uwu.meme')) {
+        return '.uwu.meme';
+    }
+    return undefined;
+}
+
+/**
  * Robustly resolves the public external origin of the application,
  * taking into account reverse proxies, CDN headers, custom domains (e.g. uwu.meme),
  * and environment variables.
@@ -10,7 +44,7 @@ export function resolveAppOrigin(url: URL, request: Request): { origin: string; 
     // 1. Explicit environment variable (ORIGIN, PUBLIC_SITE_URL, SITE_URL)
     const envOrigin = env.ORIGIN || env.PUBLIC_SITE_URL || env.SITE_URL;
     if (envOrigin) {
-        const clean = envOrigin.replace(/\/+$/, '');
+        const clean = canonicalizeOrigin(envOrigin);
         return { origin: clean, isHttps: clean.startsWith('https://') };
     }
 
@@ -25,14 +59,15 @@ export function resolveAppOrigin(url: URL, request: Request): { origin: string; 
 
         if (!isLocal) {
             const proto = (forwardedProto ? forwardedProto.split(',')[0].trim() : 'https').replace(':', '');
-            return { origin: `${proto}://${firstHost}`, isHttps: proto === 'https' };
+            const clean = canonicalizeOrigin(`${proto}://${firstHost}`);
+            return { origin: clean, isHttps: clean.startsWith('https://') };
         }
     }
 
     // 3. If url.hostname is a live domain
     if (url.hostname && !url.hostname.includes('localhost') && !url.hostname.includes('127.0.0.1')) {
-        const isHttps = url.protocol === 'https:';
-        return { origin: `${url.protocol}//${url.host}`, isHttps };
+        const clean = canonicalizeOrigin(`${url.protocol}//${url.host}`);
+        return { origin: clean, isHttps: clean.startsWith('https://') };
     }
 
     // 4. Localhost development fallback

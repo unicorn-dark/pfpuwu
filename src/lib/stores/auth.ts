@@ -17,6 +17,7 @@ export interface UserProfile {
 export const authLoading = writable<boolean>(true);
 export const userProfile = writable<UserProfile | null>(null);
 export const showAuthModal = writable<boolean>(false);
+export const authError = writable<string>('');
 export const authModalReason = writable<string>(
     'Sign in with X (Twitter) to unlock social features and prevent spam.'
 );
@@ -86,6 +87,19 @@ export async function initAuth() {
     authLoading.set(true);
 
     try {
+        // 0. Check if redirected back with ?auth_error=...
+        const urlParams = new URLSearchParams(window.location.search);
+        const errFromUrl = urlParams.get('auth_error');
+        if (errFromUrl) {
+            authError.set(errFromUrl);
+            showAuthModal.set(true);
+            urlParams.delete('auth_error');
+            const newQuery = urlParams.toString();
+            const cleanUrl =
+                window.location.pathname + (newQuery ? `?${newQuery}` : '') + window.location.hash;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+
         // 1. Check cached profile first for instant UI hydration
         const cached = localStorage.getItem(LOCAL_PROFILE_STORAGE_KEY);
         if (cached) {
@@ -100,12 +114,14 @@ export async function initAuth() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
             await syncSupabaseUserProfile(session.user);
+            authError.set('');
         }
 
         // 3. Listen for OAuth redirects / auth changes
         supabase.auth.onAuthStateChange(async (_event, session) => {
             if (session?.user) {
                 await syncSupabaseUserProfile(session.user);
+                authError.set('');
                 showAuthModal.set(false);
             } else if (_event === 'SIGNED_OUT') {
                 userProfile.set(null);
@@ -213,10 +229,17 @@ export function requireSocialAccess(
     return true;
 }
 
-export async function loginWithX(): Promise<{ ok: boolean; error?: string }> {
+export async function loginWithX(
+    flow: 'oauth1' | 'oauth2' | 'force' = 'oauth1'
+): Promise<{ ok: boolean; error?: string }> {
     try {
+        authError.set('');
         if (typeof window !== 'undefined') {
-            window.location.href = '/api/auth/x/login';
+            const params = new URLSearchParams({
+                _t: String(Date.now()),
+                flow
+            });
+            window.location.href = `/api/auth/x/login?${params.toString()}`;
         }
         return { ok: true };
     } catch (err: any) {

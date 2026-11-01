@@ -2,6 +2,7 @@
     import {
         showAuthModal,
         authModalReason,
+        authError,
         loginWithX,
         userProfile,
         logoutX,
@@ -16,13 +17,14 @@
     function closeModal() {
         showAuthModal.set(false);
         statusMessage = "";
+        authError.set("");
         showDevMode = false;
     }
 
-    async function handleOAuthClick() {
+    async function handleOAuthClick(flow: "oauth1" | "oauth2" | "force" = "oauth1") {
         isSubmitting = true;
         statusMessage = "";
-        const res = await loginWithX();
+        const res = await loginWithX(flow);
         isSubmitting = false;
         if (!res.ok) {
             statusMessage =
@@ -117,17 +119,26 @@
                         <button
                             type="button"
                             class="win98-btn oauth-btn"
-                            onclick={handleOAuthClick}
+                            onclick={() => handleOAuthClick("oauth1")}
                             disabled={isSubmitting}
                         >
                             <span class="x-logo">𝕏</span>
-                            <span>{isSubmitting ? "Connecting to 𝕏..." : "Sign In with 𝕏 (OAuth 2.0)"}</span>
+                            <span>{isSubmitting ? "Connecting to 𝕏..." : "Sign In with 𝕏"}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="win98-btn oauth-alt-btn"
+                            onclick={() => handleOAuthClick("oauth2")}
+                            disabled={isSubmitting}
+                        >
+                            🔄 Having trouble or seeing "No request token"? Use Alt 𝕏 Login (OAuth 2.0)
                         </button>
                     </div>
 
-                    {#if statusMessage}
+                    {#if statusMessage || $authError}
                         <div class="status-box">
-                            <strong>⚠️ Notice:</strong> {statusMessage}
+                            <strong>⚠️ Notice:</strong> {statusMessage || $authError}
                             <div class="dev-toggle-row">
                                 <button
                                     type="button"
@@ -283,6 +294,13 @@
 
     .oauth-btn .x-logo {
         font-size: 16px;
+    }
+
+    .oauth-alt-btn {
+        font-size: 10px !important;
+        padding: 5px 8px !important;
+        color: #000080 !important;
+        font-weight: bold !important;
     }
 
     .win98-fieldset {

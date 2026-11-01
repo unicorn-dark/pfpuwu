@@ -6,13 +6,29 @@ import { createClient } from '@supabase/supabase-js';
 import {
     getOAuth1AccessToken,
     getOAuth1UserProfile,
+    getCachedOAuth1TokenSecret,
+    verifyStatelessOAuth2State,
     type TwitterUser
 } from '$lib/server/twitterOAuth';
-import { resolveAppOrigin } from '$lib/server/origin';
+import { resolveAppOrigin, resolveCookieDomain } from '$lib/server/origin';
 
-export const GET: RequestHandler = async ({ url, cookies, request }) => {
+export const GET: RequestHandler = async ({ url, cookies, request, setHeaders }) => {
+    setHeaders({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    });
+
     const { origin } = resolveAppOrigin(url, request);
+    const cookieDomain = resolveCookieDomain(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
+
+    const clearCookieEverywhere = (name: string) => {
+        cookies.delete(name, { path: '/' });
+        if (cookieDomain) {
+            cookies.delete(name, { path: '/', domain: cookieDomain });
+        }
+    };
 
     const denied = url.searchParams.get('denied');
     if (denied) {
@@ -45,12 +61,11 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         }
 
         const cookieSecretKey = `x_secret_${oauthToken}`;
-        const oauthTokenSecret = cookies.get(cookieSecretKey) || cookies.get('x_oauth1_secret');
-
-        if (!oauthTokenSecret) {
-            console.error('Missing OAuth 1.0a token secret cookie');
-            throw redirect(302, '/?auth_error=Session+expired.+Please+try+signing+in+again.');
-        }
+        const oauthTokenSecret =
+            cookies.get(cookieSecretKey) ||
+            cookies.get('x_oauth1_secret') ||
+            getCachedOAuth1TokenSecret(oauthToken) ||
+            '';
 
         try {
             const tokenRes = await getOAuth1AccessToken(
@@ -70,28 +85,39 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
                 tokenRes.screenName
             );
 
-            cookies.delete(cookieSecretKey, { path: '/' });
-            cookies.delete('x_oauth1_secret', { path: '/' });
+            clearCookieEverywhere(cookieSecretKey);
+            clearCookieEverywhere('x_oauth1_secret');
         } catch (err: any) {
             console.error('OAuth 1.0a token exchange failed:', err);
-            throw redirect(302, `/?auth_error=${encodeURIComponent(err?.message || 'Failed to authenticate with X')}`);
+            throw redirect(
+                302,
+                `/?auth_error=${encodeURIComponent(
+                    'X login session expired or failed. Please try again or click Alt Sign In (OAuth 2.0).'
+                )}`
+            );
         }
     }
     // FLOW B: OAuth 2.0 PKCE
     else if (code && state) {
-        const savedState = cookies.get('x_oauth_state');
-        const codeVerifier = cookies.get('x_oauth_verifier');
-
-        if (!savedState || state !== savedState || !codeVerifier) {
-            console.error('X OAuth 2.0 state mismatch or missing verifier');
-            throw redirect(302, '/?auth_error=State+mismatch+or+expired+session');
-        }
-
         const clientId = env.X_CLIENT_ID;
         const clientSecret = env.X_CLIENT_SECRET;
+        const apiSecret = env.X_API_SECRET;
 
         if (!clientId || !clientSecret) {
             throw redirect(302, '/?auth_error=Server+misconfigured+X_CLIENT_ID');
+        }
+
+        const stateSecret = clientSecret || apiSecret || clientId;
+        const statelessVerifier = verifyStatelessOAuth2State(state, stateSecret);
+        const savedState = cookies.get('x_oauth_state');
+        const cookieVerifier = cookies.get('x_oauth_verifier');
+
+        const codeVerifier =
+            statelessVerifier || (savedState && state === savedState ? cookieVerifier : null);
+
+        if (!codeVerifier) {
+            console.error('X OAuth 2.0 state mismatch or missing verifier');
+            throw redirect(302, '/?auth_error=State+mismatch+or+expired+session.+Please+try+again.');
         }
 
         const tokenParams = new URLSearchParams({
@@ -143,8 +169,8 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
             profileImageUrl: '/unicorn.png'
         };
 
-        cookies.delete('x_oauth_state', { path: '/' });
-        cookies.delete('x_oauth_verifier', { path: '/' });
+        clearCookieEverywhere('x_oauth_state');
+        clearCookieEverywhere('x_oauth_verifier');
     } else {
         throw redirect(302, '/?auth_error=Invalid+authentication+callback');
     }
@@ -190,7 +216,7 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         });
 
         if (createErr || !newUser?.user) {
-            const { data: userList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
+            const { data: userList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
             const matched = userList?.users?.find(
                 (u) => u.email === syntheticEmail || u.user_metadata?.provider_id === xUserId
             );

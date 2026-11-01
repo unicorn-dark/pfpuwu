@@ -622,9 +622,9 @@
         }
     }
 
-    async function handleWorldXLogin() {
+    async function handleWorldXLogin(flow: "oauth1" | "oauth2" | "force" = "oauth1") {
         isLoggingInWithX = true;
-        const res = await loginWithX();
+        const res = await loginWithX(flow);
         isLoggingInWithX = false;
         if (!res.ok) {
             openGlobalXAuthModal();
@@ -5576,11 +5576,20 @@
                             <button
                                 type="button"
                                 class="win98-btn gate-x-login-btn"
-                                onclick={handleWorldXLogin}
+                                onclick={() => handleWorldXLogin("oauth1")}
                                 disabled={isLoggingInWithX}
                             >
                                 <span class="gate-x-logo">𝕏</span>
                                 <span>{isLoggingInWithX ? "Connecting to 𝕏..." : "Sign In with 𝕏 to Play"}</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                class="win98-btn gate-secondary-btn"
+                                onclick={() => handleWorldXLogin("oauth2")}
+                                disabled={isLoggingInWithX}
+                            >
+                                🔄 Alt Sign In (OAuth 2.0 / Fix Token Error)
                             </button>
 
                             <button
