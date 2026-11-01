@@ -37,6 +37,7 @@ export class WorldNetworkManager {
 
     private lastBroadcastTime = 0;
     private broadcastIntervalMs = 60;
+    private hasInitialPresenceSynced = false;
 
     // Event callbacks
     public onChatReceived: (senderId: string, username: string, text: string) => void = () => {};
@@ -44,8 +45,9 @@ export class WorldNetworkManager {
     public onDJTrackChanged: (trackId: number, djUser: string) => void = () => {};
     public onGraffitiPixel: (x: number, y: number, color: string, brush?: number) => void = () => {};
     public onGraffitiSnapshot: (dataUrl: string) => void = () => {};
+    public onGraffitiSyncRequested: (requesterId: string) => void = () => {};
     public onWebRTCSignal: (fromUserId: string, payload: any) => void = () => {};
-    public onPeerJoined: (peerId: string) => void = () => {};
+    public onPeerJoined: (peerId: string, isNewArrival: boolean) => void = () => {};
     public onPeerLeft: (peerId: string) => void = () => {};
     public onOnlineCountChanged: (count: number) => void = () => {};
     public onCasinoJackpot: (username: string, game: string, amount: number) => void = () => {};
@@ -78,6 +80,9 @@ export class WorldNetworkManager {
 
         this.channel
             .on('presence', { event: 'sync' }, () => {
+                const isNewArrival = this.hasInitialPresenceSynced;
+                this.hasInitialPresenceSynced = true;
+
                 const presenceState = this.channel.presenceState();
                 const activeIds = new Set<string>();
                 const newlyJoined: string[] = [];
@@ -86,13 +91,16 @@ export class WorldNetworkManager {
                     const presences = presenceState[key];
                     if (presences && presences.length > 0) {
                         const data = presences[0];
+                        if (!data?.id || String(data.id).startsWith('user_') || /^anon\d*$/i.test(data.username || '')) {
+                            continue;
+                        }
                         activeIds.add(data.id);
 
                         if (data.id !== this.localUserId) {
                             if (!this.remotePlayers.has(data.id)) {
                                 this.remotePlayers.set(data.id, {
                                     id: data.id,
-                                    username: data.username || 'anon',
+                                    username: data.username || 'player',
                                     displayName: data.displayName,
                                     avatarUrl: data.avatarUrl || '/unicorn.png',
                                     x: data.x || 16.0,
@@ -128,13 +136,14 @@ export class WorldNetworkManager {
                 }
 
                 for (const peerId of newlyJoined) {
-                    this.onPeerJoined(peerId);
+                    this.onPeerJoined(peerId, isNewArrival);
                 }
 
                 this.onOnlineCountChanged(this.remotePlayers.size + 1);
             })
             .on('broadcast', { event: 'pos' }, ({ payload }: any) => {
                 if (!payload || payload.id === this.localUserId) return;
+                if (String(payload.id).startsWith('user_') || /^anon\d*$/i.test(payload.username || '')) return;
                 const p = this.remotePlayers.get(payload.id);
                 if (p) {
                     const zoneChanged = payload.zone && payload.zone !== p.zone;
@@ -157,7 +166,7 @@ export class WorldNetworkManager {
                 } else {
                     this.remotePlayers.set(payload.id, {
                         id: payload.id,
-                        username: payload.username || 'anon',
+                        username: payload.username || 'player',
                         avatarUrl: payload.avatarUrl || '/unicorn.png',
                         x: payload.x,
                         y: payload.y,
@@ -175,14 +184,14 @@ export class WorldNetworkManager {
                         zone: payload.zone || 'casino',
                         lastNetworkTs: Date.now()
                     });
-                    this.onPeerJoined(payload.id);
+                    this.onPeerJoined(payload.id, this.hasInitialPresenceSynced);
                     this.onOnlineCountChanged(this.remotePlayers.size + 1);
                 }
             })
             .on('broadcast', { event: 'chat' }, ({ payload }: any) => {
                 if (!payload) return;
                 const p = this.remotePlayers.get(payload.id);
-                const senderName = payload.username || p?.username || 'anon';
+                const senderName = payload.username || p?.username || 'player';
                 this.onChatReceived(payload.id, senderName, payload.text);
 
                 if (p) {
@@ -216,6 +225,10 @@ export class WorldNetworkManager {
                 if (!payload || !payload.dataUrl) return;
                 this.onGraffitiSnapshot(payload.dataUrl);
             })
+            .on('broadcast', { event: 'graffiti_request' }, ({ payload }: any) => {
+                if (!payload || !payload.requesterId || payload.requesterId === this.localUserId) return;
+                this.onGraffitiSyncRequested(payload.requesterId);
+            })
             .on('broadcast', { event: 'forest_event' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onForestEventReceived(payload);
@@ -244,7 +257,7 @@ export class WorldNetworkManager {
                 if (!payload || !payload.stats) return;
                 const st: PlayerEconomyStats = payload.stats;
                 const key = (st.x_username || '').replace(/^@/, '').toLowerCase();
-                if (key) {
+                if (key && !/^anon\d*$/i.test(key)) {
                     this.peerEconomyStats.set(key, st);
                     const p = this.remotePlayers.get(st.user_id);
                     if (p) {
@@ -278,6 +291,12 @@ export class WorldNetworkManager {
                     chips: this.localPlayerState.chips ?? 2500,
                     wins: this.localPlayerState.wins ?? 0,
                     losses: this.localPlayerState.losses ?? 0
+                });
+                // Request authoritative graffiti wall snapshot from any existing peers in the room
+                this.channel.send({
+                    type: 'broadcast',
+                    event: 'graffiti_request',
+                    payload: { requesterId: this.localUserId }
                 });
             }
         });

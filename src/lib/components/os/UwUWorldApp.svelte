@@ -1,7 +1,14 @@
 <!-- src/lib/components/os/UwUWorldApp.svelte -->
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { userProfile } from "$lib/stores/auth";
+    import {
+        userProfile,
+        authLoading,
+        loginWithX,
+        showAuthModal,
+        authModalReason,
+        type UserProfile
+    } from "$lib/stores/auth";
     import { openChatDrawer } from "$lib/stores/os";
     import {
         gridToScreen,
@@ -91,8 +98,10 @@
     let rouletteTick = $state(0);
 
     // Local Player State — Spawn on the wide-open Central VIP Crosswalk (15.5, 16.5)
+    let activeSessionUserId = $state("");
+    let isLoggingInWithX = $state(false);
     let myId = $state("");
-    let myUsername = $state("anon");
+    let myUsername = $state("");
     let myX = $state(15.5);
     let myY = $state(16.5);
     let myDir = $state<IsoDirection>("NW");
@@ -184,6 +193,8 @@
     // Persistent Offscreen Graffiti Canvas (48x32)
     let persistentGraffitiCanvas: HTMLCanvasElement | null = null;
     let persistentGraffitiCtx: CanvasRenderingContext2D | null = null;
+    let defaultGraffitiDataUrl = "";
+    let isGraffitiReady = false;
     let graffitiCanvas: HTMLCanvasElement | null = $state(null);
     let graffitiCtx: CanvasRenderingContext2D | null = null;
     let selectedGraffitiColor = $state("#00ffff");
@@ -611,38 +622,53 @@
         }
     }
 
-    onMount(() => {
-        floorCache.build("casino");
-        forestFloorCache.build("forest");
-        preloadIsoAssets(() => {
-            floorCache.build("casino");
-            forestFloorCache.build("forest");
-        });
-        initPersistentGraffitiCanvas();
-        dealerAvatarSrc = getTransparentDealerDataUrl();
+    async function handleWorldXLogin() {
+        isLoggingInWithX = true;
+        const res = await loginWithX();
+        isLoggingInWithX = false;
+        if (!res.ok) {
+            openGlobalXAuthModal();
+        }
+    }
 
-        // Load persistent Graffiti Wall from Supabase / localStorage so it NEVER resets on join!
+    function openGlobalXAuthModal() {
+        authModalReason.set(
+            "Sign in with 𝕏 to enter UwU World MMO, save your $UWU balance, and paint on the Global Graffiti Wall."
+        );
+        showAuthModal.set(true);
+    }
+
+    function stopAuthenticatedWorldSession() {
+        activeSessionUserId = "";
+        myId = "";
+        myUsername = "";
+        voiceManager?.destroy();
+        voiceManager = null;
+        networkManager?.destroy();
+        networkManager = null;
+    }
+
+    function startAuthenticatedWorldSession(profile: UserProfile) {
+        if (!profile?.id || !profile?.x_username) return;
+        if (activeSessionUserId === profile.id && networkManager) return;
+
+        // Clean up any previous session
+        voiceManager?.destroy();
+        networkManager?.destroy();
+
+        activeSessionUserId = profile.id;
+        myId = profile.id;
+        myUsername = profile.x_username.replace(/^@/, "");
+        const avatarUrl = profile.avatar_url || "/unicorn.png";
+
+        // Load persistent Graffiti Wall from Supabase (source of truth)
         loadSavedGraffitiWall().then((savedDataUrl) => {
             if (savedDataUrl) {
                 applyGraffitiDataUrl(savedDataUrl);
             }
         });
 
-        diceManager.onStateChanged = () => {
-            diceTick++;
-            syncDiceReactiveState();
-        };
-        rouletteManager.onStateChanged = () => {
-            rouletteTick++;
-            syncRouletteReactiveState();
-        };
-
-        const profile = $userProfile;
-        myId = profile?.id || "user_" + Math.random().toString(36).substring(2, 9);
-        myUsername = profile?.x_username || "anon" + Math.floor(Math.random() * 900 + 100);
-        const avatarUrl = profile?.avatar_url || "/unicorn.png";
-
-        loadOrInitPlayerStats(myId, myUsername, avatarUrl, profile?.x_display_name).then((loaded) => {
+        loadOrInitPlayerStats(myId, myUsername, avatarUrl, profile.x_display_name).then((loaded) => {
             chips = loaded.chips;
             myWins = loaded.wins;
             myLosses = loaded.losses;
@@ -652,26 +678,6 @@
             refreshDailyRewardStatus();
             networkManager?.broadcastStats(loaded);
         });
-
-        dailyClockInterval = window.setInterval(() => {
-            refreshDailyRewardStatus();
-        }, 15000);
-
-        updateCanvasDimensions();
-        const initCam = gridToScreen(myX, myY, 0, 0, 0, canvasWidth, canvasHeight);
-        cameraX = initCam.x - canvasWidth / 2;
-        cameraY = initCam.y - canvasHeight / 2;
-
-        if (typeof ResizeObserver !== "undefined" && containerElement) {
-            resizeObserver = new ResizeObserver(() => updateCanvasDimensions());
-            resizeObserver.observe(containerElement);
-        }
-        window.addEventListener("resize", updateCanvasDimensions);
-        window.addEventListener("keydown", handleKeyDown);
-        window.addEventListener("keyup", handleKeyUp);
-
-        lastFrameTime = performance.now();
-        animationFrameId = requestAnimationFrame(gameLoop);
 
         const initialAvatar: PlayerAvatarState = {
             id: myId,
@@ -688,18 +694,21 @@
             chips,
             wins: myWins,
             losses: myLosses,
-            zone: "casino"
+            zone: currentZone
         };
 
         networkManager = new WorldNetworkManager(myId, initialAvatar);
         networkManager.onOnlineCountChanged = (count) => {
             onlineCount = count;
         };
-        networkManager.onPeerJoined = (peerId) => {
+        networkManager.onPeerJoined = (peerId, isNewArrival) => {
             voiceManager?.connectToPeer(peerId, true);
-            if (persistentGraffitiCanvas) {
-                networkManager?.broadcastGraffitiSnapshot(persistentGraffitiCanvas.toDataURL("image/png"));
+            if (isNewArrival) {
+                broadcastAuthoritativeGraffitiIfReady();
             }
+        };
+        networkManager.onGraffitiSyncRequested = () => {
+            broadcastAuthoritativeGraffitiIfReady();
         };
         networkManager.onPeerLeft = (peerId) => {
             voiceManager?.removePeer(peerId);
@@ -828,6 +837,85 @@
 
         networkManager.init();
 
+        voiceManager = new ProximityVoiceManager(myId);
+        voiceManager.onLocalSpeakingChange = (speaking) => {
+            isSpeaking = speaking;
+            networkManager?.broadcastPosition(
+                myX,
+                myY,
+                myDir,
+                isWalking,
+                isDancing,
+                isSpeaking,
+                DANCE_MOVES[currentDanceIndex].id,
+                true,
+                currentZone
+            );
+        };
+        voiceManager.onSignalingMessage = (toUserId, payload) => {
+            networkManager?.sendWebRTCSignal(toUserId, payload);
+        };
+    }
+
+    $effect(() => {
+        const profile = $userProfile;
+        const loading = $authLoading;
+        if (loading) return;
+        if (profile && profile.id && profile.x_username) {
+            if (activeSessionUserId !== profile.id) {
+                startAuthenticatedWorldSession(profile);
+            }
+        } else if (activeSessionUserId !== "" || networkManager !== null) {
+            stopAuthenticatedWorldSession();
+        }
+    });
+
+    onMount(() => {
+        floorCache.build("casino");
+        forestFloorCache.build("forest");
+        preloadIsoAssets(() => {
+            floorCache.build("casino");
+            forestFloorCache.build("forest");
+        });
+        initPersistentGraffitiCanvas();
+        dealerAvatarSrc = getTransparentDealerDataUrl();
+
+        // Load persistent Graffiti Wall from Supabase / localStorage so it NEVER resets on join!
+        loadSavedGraffitiWall().then((savedDataUrl) => {
+            if (savedDataUrl) {
+                applyGraffitiDataUrl(savedDataUrl);
+            }
+        });
+
+        diceManager.onStateChanged = () => {
+            diceTick++;
+            syncDiceReactiveState();
+        };
+        rouletteManager.onStateChanged = () => {
+            rouletteTick++;
+            syncRouletteReactiveState();
+        };
+
+        dailyClockInterval = window.setInterval(() => {
+            refreshDailyRewardStatus();
+        }, 15000);
+
+        updateCanvasDimensions();
+        const initCam = gridToScreen(myX, myY, 0, 0, 0, canvasWidth, canvasHeight);
+        cameraX = initCam.x - canvasWidth / 2;
+        cameraY = initCam.y - canvasHeight / 2;
+
+        if (typeof ResizeObserver !== "undefined" && containerElement) {
+            resizeObserver = new ResizeObserver(() => updateCanvasDimensions());
+            resizeObserver.observe(containerElement);
+        }
+        window.addEventListener("resize", updateCanvasDimensions);
+        window.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("keyup", handleKeyUp);
+
+        lastFrameTime = performance.now();
+        animationFrameId = requestAnimationFrame(gameLoop);
+
         // Local Dice & Roulette Manager Callbacks
         diceManager.onRoundRoll = (round, scores) => {
             synth.playDiceRollSfx();
@@ -895,25 +983,6 @@
                 showToast(`🎡 Roulette landed on ${winner.icon} ${winner.name} (${winner.multiplier}x)!`, 3500);
             }
         };
-
-        voiceManager = new ProximityVoiceManager(myId);
-        voiceManager.onLocalSpeakingChange = (speaking) => {
-            isSpeaking = speaking;
-            networkManager?.broadcastPosition(
-                myX,
-                myY,
-                myDir,
-                isWalking,
-                isDancing,
-                isSpeaking,
-                DANCE_MOVES[currentDanceIndex].id,
-                true,
-                currentZone
-            );
-        };
-        voiceManager.onSignalingMessage = (toUserId, payload) => {
-            networkManager?.sendWebRTCSignal(toUserId, payload);
-        };
     });
 
     onDestroy(() => {
@@ -971,6 +1040,7 @@
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+        if (!$userProfile) return;
         if (isTypingInTextInput(e)) {
             for (const k of Object.keys(keysPressed)) keysPressed[k] = false;
             return;
@@ -2200,6 +2270,7 @@
     }
 
     function handleCanvasPointerDown(e: MouseEvent | TouchEvent) {
+        if (!$userProfile) return;
         if (!canvasElement || e.target !== canvasElement) return;
 
         showTravelMenu = false;
@@ -2329,10 +2400,16 @@
         g.fillStyle = "#00ff88";
         g.fillRect(6, 8, 6, 6);
         g.fillRect(36, 8, 6, 6);
+
+        // Record fallback template data URL so it is NEVER broadcasted or saved over user artwork
+        defaultGraffitiDataUrl = persistentGraffitiCanvas.toDataURL("image/png");
+        isGraffitiReady = false;
     }
 
     function applyGraffitiDataUrl(dataUrl: string) {
         if (!dataUrl || typeof window === "undefined") return;
+        // Ignore the untouched default procedural template so a newly joined peer can never reset the wall
+        if (defaultGraffitiDataUrl && dataUrl === defaultGraffitiDataUrl) return;
         const img = new Image();
         img.onload = () => {
             if (persistentGraffitiCtx) {
@@ -2343,21 +2420,32 @@
                 graffitiCtx.imageSmoothingEnabled = false;
                 graffitiCtx.drawImage(img, 0, 0, graffitiCanvas.width, graffitiCanvas.height);
             }
+            isGraffitiReady = true;
         };
         img.src = dataUrl;
     }
 
+    function broadcastAuthoritativeGraffitiIfReady() {
+        if (!isGraffitiReady || !persistentGraffitiCanvas) return;
+        const dataUrl = persistentGraffitiCanvas.toDataURL("image/png");
+        if (!dataUrl || (defaultGraffitiDataUrl && dataUrl === defaultGraffitiDataUrl)) return;
+        networkManager?.broadcastGraffitiSnapshot(dataUrl);
+    }
+
     function schedulePersistGraffiti() {
+        if (!$userProfile || !myUsername) return;
         if (graffitiSaveTimeout) clearTimeout(graffitiSaveTimeout);
         graffitiSaveTimeout = window.setTimeout(() => {
-            if (!persistentGraffitiCanvas) return;
+            if (!persistentGraffitiCanvas || !isGraffitiReady) return;
             const dataUrl = persistentGraffitiCanvas.toDataURL("image/png");
+            if (!dataUrl || (defaultGraffitiDataUrl && dataUrl === defaultGraffitiDataUrl)) return;
             saveGraffitiWallState(dataUrl, myUsername);
             networkManager?.broadcastGraffitiSnapshot(dataUrl);
         }, 450);
     }
 
     function openGraffitiModal() {
+        if (!$userProfile) return;
         showGraffitiModal = true;
         setTimeout(() => {
             if (!graffitiCanvas || !persistentGraffitiCanvas) return;
@@ -2369,6 +2457,7 @@
     }
 
     function clearGraffitiCanvas() {
+        if (!$userProfile) return;
         if (persistentGraffitiCtx) {
             persistentGraffitiCtx.fillStyle = "#090418";
             persistentGraffitiCtx.fillRect(0, 0, 48, 32);
@@ -2377,10 +2466,12 @@
             graffitiCtx.fillStyle = "#090418";
             graffitiCtx.fillRect(0, 0, 384, 256);
         }
+        isGraffitiReady = true;
         schedulePersistGraffiti();
     }
 
     function handleGraffitiPointerDown(e: MouseEvent | TouchEvent) {
+        if (!$userProfile) return;
         isGraffitiPainting = true;
         paintAtPointer(e);
     }
@@ -2398,7 +2489,7 @@
     }
 
     function paintAtPointer(e: MouseEvent | TouchEvent) {
-        if (!graffitiCanvas) return;
+        if (!graffitiCanvas || !$userProfile) return;
         const rect = graffitiCanvas.getBoundingClientRect();
         const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
         const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
@@ -2423,6 +2514,7 @@
             graffitiCtx.fillStyle = color;
             graffitiCtx.fillRect(x * cellW, y * cellH, cellW * brush, cellH * brush);
         }
+        isGraffitiReady = true;
         if (persist) {
             schedulePersistGraffiti();
         }
@@ -2467,6 +2559,7 @@
     }
 
     function updatePhysics(deltaSec: number) {
+        if (!$userProfile) return;
         let moveX = 0;
         let moveY = 0;
         const speed = 4.8;
@@ -5452,10 +5545,62 @@
             </div>
         </div>
     {/if}
+
+    <!-- Full-Game 𝕏 Authentication Gate Overlay (Prevents anon joins, DB spam & graffiti resets) -->
+    {#if !$userProfile}
+        <div class="world-auth-gate-overlay" onclick={(e) => e.stopPropagation()}>
+            <div class="world-auth-gate-card win98-window">
+                <div class="win98-title-bar">
+                    <span class="win98-title">🔐 UwU World MMO — 𝕏 Login Required</span>
+                </div>
+                <div class="world-auth-gate-body">
+                    <div class="gate-badge">✨ VERIFIED PLAYERS ONLY</div>
+                    <div class="gate-hero-icon">🦄</div>
+                    <h2 class="gate-title">Enter UwU World</h2>
+
+                    {#if $authLoading}
+                        <p class="gate-desc">⏳ Restoring your 𝕏 session...</p>
+                    {:else}
+                        <p class="gate-desc">
+                            Connect your 𝕏 account to join the live isometric Casino Lounge & Whispering Woods, track your <strong>$UWU</strong> chips on the Leaderboard, and paint on the persistent Graffiti Wall.
+                        </p>
+
+                        <div class="gate-feature-pills">
+                            <span class="gate-pill">🪙 2,500 Starting $UWU</span>
+                            <span class="gate-pill">🎨 Global Graffiti</span>
+                            <span class="gate-pill">🏆 Leaderboard</span>
+                            <span class="gate-pill">🌲 Whispering Woods</span>
+                        </div>
+
+                        <div class="gate-actions">
+                            <button
+                                type="button"
+                                class="win98-btn gate-x-login-btn"
+                                onclick={handleWorldXLogin}
+                                disabled={isLoggingInWithX}
+                            >
+                                <span class="gate-x-logo">𝕏</span>
+                                <span>{isLoggingInWithX ? "Connecting to 𝕏..." : "Sign In with 𝕏 to Play"}</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                class="win98-btn gate-secondary-btn"
+                                onclick={openGlobalXAuthModal}
+                            >
+                                🔐 Auth Options / Dev Login
+                            </button>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        </div>
+    {/if}
 </div>
 
 <style>
     .mmo-container {
+        position: relative;
         display: flex;
         flex-direction: column;
         width: 100%;
@@ -5464,6 +5609,135 @@
         overflow: hidden;
         user-select: none;
         font-family: "MS Sans Serif", Tahoma, Arial, sans-serif;
+    }
+
+    .world-auth-gate-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 250;
+        background: radial-gradient(circle at 50% 35%, rgba(16, 10, 44, 0.84), rgba(5, 3, 18, 0.94));
+        backdrop-filter: blur(7px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+
+    .world-auth-gate-card {
+        width: 100%;
+        max-width: 410px;
+        box-shadow:
+            0 16px 48px rgba(0, 0, 0, 0.85),
+            0 0 24px rgba(0, 229, 255, 0.22);
+    }
+
+    .world-auth-gate-body {
+        background: linear-gradient(180deg, #100926 0%, #080417 100%);
+        color: #f0f4ff;
+        padding: 20px 18px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 10px;
+        border: 2px inset #2b1d52;
+    }
+
+    .gate-badge {
+        font-size: 10px;
+        font-weight: bold;
+        letter-spacing: 0.8px;
+        color: #00e5ff;
+        background: rgba(0, 229, 255, 0.12);
+        border: 1px solid rgba(0, 229, 255, 0.4);
+        padding: 3px 10px;
+        border-radius: 999px;
+    }
+
+    .gate-hero-icon {
+        font-size: 42px;
+        line-height: 1;
+        filter: drop-shadow(0 0 12px rgba(255, 0, 170, 0.55));
+    }
+
+    .gate-title {
+        margin: 0;
+        font-size: 18px;
+        font-weight: bold;
+        color: #ffffff;
+        text-shadow: 0 0 10px rgba(0, 229, 255, 0.45);
+    }
+
+    .gate-desc {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #b8c7e0;
+    }
+
+    .gate-desc strong {
+        color: #ffd700;
+    }
+
+    .gate-feature-pills {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+        margin: 4px 0;
+    }
+
+    .gate-pill {
+        font-size: 10px;
+        font-weight: bold;
+        color: #e2e8f0;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 3px 8px;
+        border-radius: 4px;
+    }
+
+    .gate-actions {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 8px;
+        margin-top: 6px;
+    }
+
+    .gate-x-login-btn {
+        width: 100%;
+        padding: 9px 14px;
+        background: #000000;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid #00e5ff;
+        box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+    }
+
+    .gate-x-login-btn:hover:not(:disabled) {
+        background: #111827;
+        box-shadow: 0 0 18px rgba(0, 229, 255, 0.6);
+    }
+
+    .gate-x-logo {
+        font-size: 16px;
+        line-height: 1;
+    }
+
+    .gate-secondary-btn {
+        width: 100%;
+        padding: 6px 10px;
+        font-size: 11px;
+        font-weight: bold;
+        background: rgba(255, 255, 255, 0.1);
+        color: #cbd5e1;
+        border: 1px solid rgba(255, 255, 255, 0.22);
     }
 
     .mmo-toolbar {

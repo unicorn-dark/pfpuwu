@@ -41,7 +41,24 @@ const LOCAL_TRANSFERS_KEY = 'pfpuwu_world_transfers_v2';
 const LOCAL_GRAFFITI_KEY = 'pfpuwu_world_graffiti_dataurl_v2';
 
 /**
- * Loads saved 48x32 Graffiti Wall PNG data URL from Supabase or localStorage so it never resets on join
+ * Validates that a player identity belongs to an authenticated X user (never an anon/random guest)
+ */
+export function isAuthenticatedWorldUser(userId?: string | null, username?: string | null): boolean {
+    if (!userId || !username) return false;
+    const cleanId = userId.trim();
+    const cleanUser = username.trim().replace(/^@/, '').toLowerCase();
+    if (!cleanId || !cleanUser) return false;
+    if (cleanId.startsWith('user_') || cleanId.startsWith('visitor-') || cleanId.startsWith('anon')) {
+        return false;
+    }
+    if (/^anon\d*$/i.test(cleanUser) || /^guest\d*$/i.test(cleanUser)) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Loads saved 48x32 Graffiti Wall PNG data URL from Supabase (source of truth) or localStorage fallback
  */
 export async function loadSavedGraffitiWall(): Promise<string | null> {
     let localUrl: string | null = null;
@@ -83,10 +100,14 @@ export async function loadSavedGraffitiWall(): Promise<string | null> {
 }
 
 /**
- * Saves 48x32 Graffiti Wall PNG data URL to localStorage and Supabase (`pixels` JSONB column)
+ * Saves 48x32 Graffiti Wall PNG data URL to localStorage and Supabase (`pixels` JSONB column).
+ * Strictly blocks unauthenticated/anon saves so anon sessions can never overwrite the global wall.
  */
-export async function saveGraffitiWallState(dataUrl: string, username = 'anon'): Promise<void> {
+export async function saveGraffitiWallState(dataUrl: string, username = ''): Promise<void> {
     if (!dataUrl || !dataUrl.startsWith('data:image/')) return;
+    const cleanUser = username.trim().replace(/^@/, '').toLowerCase();
+    if (!cleanUser || /^anon\d*$/i.test(cleanUser)) return;
+
     if (typeof window !== 'undefined') {
         try {
             localStorage.setItem(LOCAL_GRAFFITI_KEY, dataUrl);
@@ -98,7 +119,7 @@ export async function saveGraffitiWallState(dataUrl: string, username = 'anon'):
             {
                 id: 'main',
                 pixels: { data_url: dataUrl },
-                updated_by: username,
+                updated_by: cleanUser,
                 updated_at: new Date().toISOString()
             },
             { onConflict: 'id' }
@@ -165,12 +186,17 @@ export async function loadOrInitPlayerStats(
         updated_at: nowIso
     };
 
+    // Strictly block unauthenticated / anon identities from touching localStorage or Supabase DB
+    if (!isAuthenticatedWorldUser(userId, cleanUser)) {
+        return stats;
+    }
+
     if (typeof window !== 'undefined') {
         try {
             const raw = localStorage.getItem(LOCAL_STATS_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed.chips === 'number') {
+                if (parsed && parsed.user_id === userId && typeof parsed.chips === 'number') {
                     stats = {
                         ...stats,
                         chips: Math.max(0, parsed.chips),
@@ -229,6 +255,7 @@ export async function loadOrInitPlayerStats(
 
 export function saveLocalPlayerStats(stats: PlayerEconomyStats) {
     if (typeof window === 'undefined') return;
+    if (!isAuthenticatedWorldUser(stats.user_id, stats.x_username)) return;
     try {
         localStorage.setItem(LOCAL_STATS_KEY, JSON.stringify(stats));
         localStorage.setItem('pfpuwu_world_chips_v1', String(stats.chips));
@@ -237,6 +264,7 @@ export function saveLocalPlayerStats(stats: PlayerEconomyStats) {
 }
 
 export async function syncPlayerStatsToSupabase(stats: PlayerEconomyStats): Promise<void> {
+    if (!isAuthenticatedWorldUser(stats.user_id, stats.x_username)) return;
     saveLocalPlayerStats(stats);
     try {
         await supabase.from('uwu_world_players').upsert(
@@ -260,6 +288,7 @@ export async function syncPlayerStatsToSupabase(stats: PlayerEconomyStats): Prom
 
 export function upsertPlayerInLocalLeaderboardCache(entry: PlayerEconomyStats) {
     if (typeof window === 'undefined') return;
+    if (!isAuthenticatedWorldUser(entry.user_id, entry.x_username)) return;
     try {
         const raw = localStorage.getItem(LOCAL_LEADERBOARD_CACHE_KEY);
         const map: Record<string, PlayerEconomyStats> = raw ? JSON.parse(raw) : {};
@@ -286,7 +315,7 @@ export async function fetchLeaderboard(
             if (raw) {
                 const map: Record<string, PlayerEconomyStats> = JSON.parse(raw);
                 Object.values(map).forEach((p) => {
-                    if (p && p.x_username) {
+                    if (p && isAuthenticatedWorldUser(p.user_id, p.x_username)) {
                         merged.set(p.x_username.toLowerCase(), { ...p, isOnline: false });
                     }
                 });
@@ -299,12 +328,12 @@ export async function fetchLeaderboard(
             .from('uwu_world_players')
             .select('*')
             .order('chips', { ascending: false })
-            .limit(50);
+            .limit(80);
 
         if (!error && Array.isArray(data)) {
             for (const row of data) {
                 const key = (row.x_username || '').replace(/^@/, '').toLowerCase();
-                if (!key) continue;
+                if (!isAuthenticatedWorldUser(row.user_id, key)) continue;
                 merged.set(key, {
                     user_id: row.user_id,
                     x_username: key,
@@ -332,7 +361,7 @@ export async function fetchLeaderboard(
         if (Array.isArray(profiles)) {
             for (const prof of profiles) {
                 const key = (prof.x_username || '').replace(/^@/, '').toLowerCase();
-                if (!key) continue;
+                if (!isAuthenticatedWorldUser(prof.id, key)) continue;
                 const existing = merged.get(key);
                 if (!existing) {
                     merged.set(key, {
@@ -358,7 +387,7 @@ export async function fetchLeaderboard(
 
     for (const peer of onlinePeers) {
         const key = (peer.x_username || '').replace(/^@/, '').toLowerCase();
-        if (!key) continue;
+        if (!isAuthenticatedWorldUser(peer.user_id, key)) continue;
         const prev = merged.get(key);
         merged.set(key, {
             ...(prev || peer),
@@ -369,11 +398,13 @@ export async function fetchLeaderboard(
     }
 
     const myKey = localStats.x_username.replace(/^@/, '').toLowerCase();
-    merged.set(myKey, {
-        ...localStats,
-        x_username: myKey,
-        isOnline: true
-    });
+    if (isAuthenticatedWorldUser(localStats.user_id, myKey)) {
+        merged.set(myKey, {
+            ...localStats,
+            x_username: myKey,
+            isOnline: true
+        });
+    }
 
     return Array.from(merged.values());
 }
