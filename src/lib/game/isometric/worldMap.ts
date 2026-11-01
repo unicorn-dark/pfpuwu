@@ -69,7 +69,9 @@ export interface WorldObject {
         | 'rock'
         | 'camp_tent'
         | 'canoe_prop'
-        | 'club_speaker';
+        | 'club_speaker'
+        | 'arcade_cabinet'
+        | 'mines_table';
     x: number;
     y: number;
     z?: number;
@@ -264,11 +266,11 @@ export const WORLD_OBJECTS: WorldObject[] = [
         type: 'banner_sign',
         x: 26.5,
         y: 10.2,
-        width: 4.0,
+        width: 4.2,
         height: 0.6,
         depthOffset: -120,
-        title: 'GRAFFITI & WOODS GATE',
-        subtitle: 'LIVE GLOBAL MURAL • WALK EAST TO FOREST →',
+        title: '90s ARCADE & GRAFFITI',
+        subtitle: '5 ARCADE GAMES • CYBER MINES • MURAL • WOODS →',
         badgeColor: '#00ff88',
         solidTiles: []
     },
@@ -488,7 +490,34 @@ export const WORLD_OBJECTS: WorldObject[] = [
         solidTiles: [{ x: 5, y: 16 }]
     },
 
-    // --- GRAFFITI ALLEY & EAST FOREST PORTAL ---
+    // --- 90s ARCADE, CYBER MINES, GRAFFITI ALLEY & EAST FOREST PORTAL ---
+    {
+        id: 'arcade-cabinet-1',
+        type: 'arcade_cabinet',
+        x: 26.5,
+        y: 12.5,
+        width: 0.9,
+        height: 0.9,
+        solidTiles: [{ x: 26, y: 12 }]
+    },
+    {
+        id: 'arcade-cabinet-2',
+        type: 'arcade_cabinet',
+        x: 28.5,
+        y: 12.5,
+        width: 0.9,
+        height: 0.9,
+        solidTiles: [{ x: 28, y: 12 }]
+    },
+    {
+        id: 'cyber-mines-table',
+        type: 'mines_table',
+        x: 27.5,
+        y: 19.5,
+        width: 1.0,
+        height: 1.0,
+        solidTiles: [{ x: 27, y: 19 }]
+    },
     {
         id: 'graffiti-billboard',
         type: 'graffiti_wall',

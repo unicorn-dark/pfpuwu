@@ -164,6 +164,7 @@
     let showGuideModal = $state(false);
     let showGraffitiModal = $state(false);
     let showDJModal = $state(false);
+    let showArcadeModal = $state(false);
 
     // Persistent Offscreen Graffiti Canvas (48x32)
     let persistentGraffitiCanvas: HTMLCanvasElement | null = null;
@@ -183,6 +184,7 @@
         | "blackjack"
         | "slots"
         | "crash"
+        | "mines"
         | "campfire"
         | "picnic"
         | "fishing"
@@ -231,6 +233,96 @@
     let crashMessage = $state("Launch the UwU Rocket and CASH OUT before it crashes!");
     let crashTimerId: number | null = null;
     let crashHistory = $state<number[]>([1.42, 2.85, 1.0, 4.12, 1.18]);
+
+    // --- CYBER MINES 5x5 STATE (Strict 10% House Edge Hypergeometric Multiplier) ---
+    let minesBombCount = $state<5 | 8 | 12>(5);
+    let minesPhase = $state<"idle" | "playing" | "cashed_out" | "exploded">("idle");
+    let minesBetAmount = $state(100);
+    let minesBombLocations = $state<number[]>([]);
+    let minesRevealed = $state<Array<"hidden" | "gem" | "bomb">>(Array(25).fill("hidden"));
+    let minesSafeClicks = $state(0);
+    let minesMessage = $state("Choose 5, 8, or 12 Cyber Mines and uncover glowing gems! (10% House Edge)");
+
+    // --- 90s RETRO ARCADE CENTER STATE (5 Playable Games: Free Play + 100 $UWU Token Challenge) ---
+    type ArcadeGameId = "mines" | "brick" | "snake" | "coin" | "whack";
+    let activeArcadeTab = $state<ArcadeGameId>("brick");
+    let arcadePlayMode = $state<"free" | "token">("free");
+    const ARCADE_TOKEN_COST = 100;
+    const ARCADE_TOKEN_PAYOUT = 175; // 1.75x skill challenge reward
+    let arcadeBestScores = $state<Record<ArcadeGameId, number>>({
+        mines: 0,
+        brick: 0,
+        snake: 0,
+        coin: 0,
+        whack: 0
+    });
+
+    // Arcade Game 2: Neon Brick Breaker (Arkanoid)
+    interface ArcadeBrick {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        color: string;
+        pts: number;
+        alive: boolean;
+    }
+    let brickPhase = $state<"idle" | "playing" | "won" | "lost">("idle");
+    let brickScore = $state(0);
+    let brickLives = $state(3);
+    let brickPaddleX = $state(128);
+    let brickBall = $state({ x: 160, y: 190, vx: 3.1, vy: -3.3 });
+    let brickList = $state<ArcadeBrick[]>([]);
+    let brickTimerId: number | null = null;
+    const BRICK_TARGET_SCORE = 450;
+
+    // Arcade Game 3: Cyber Snake 1998
+    let snakePhase = $state<"idle" | "playing" | "won" | "lost">("idle");
+    let snakeScore = $state(0);
+    let snakeBody = $state<Array<{ x: number; y: number }>>([
+        { x: 8, y: 6 },
+        { x: 7, y: 6 },
+        { x: 6, y: 6 }
+    ]);
+    let snakeDir = $state<{ x: number; y: number }>({ x: 1, y: 0 });
+    let snakeNextDir = { x: 1, y: 0 };
+    let snakeFood = $state<{ x: number; y: number; kind: "orb" | "unicorn" }>({ x: 12, y: 6, kind: "orb" });
+    let snakeTimerId: number | null = null;
+    const SNAKE_TARGET_SCORE = 300;
+
+    // Arcade Game 4: Cyber Coin Rush (25s Basket Catcher)
+    interface FallingArcadeItem {
+        id: number;
+        x: number;
+        y: number;
+        vy: number;
+        icon: string;
+        pts: number;
+        isBomb: boolean;
+    }
+    let coinPhase = $state<"idle" | "playing" | "done">("idle");
+    let coinScore = $state(0);
+    let coinTimeLeft = $state(25);
+    let coinBasketX = $state(135);
+    let coinItems = $state<FallingArcadeItem[]>([]);
+    let coinTimerId: number | null = null;
+    let coinCountdownId: number | null = null;
+    const COIN_TARGET_SCORE = 320;
+
+    // Arcade Game 5: Whack-A-Glitch (20s 3x3 Cyber Terminal Reflex)
+    interface GlitchCell {
+        kind: "empty" | "bug" | "golden" | "bomb";
+        expiresAt: number;
+    }
+    let whackPhase = $state<"idle" | "playing" | "done">("idle");
+    let whackScore = $state(0);
+    let whackTimeLeft = $state(20);
+    let whackGrid = $state<GlitchCell[]>(
+        Array.from({ length: 9 }, () => ({ kind: "empty", expiresAt: 0 }))
+    );
+    let whackTimerId: number | null = null;
+    let whackCountdownId: number | null = null;
+    const WHACK_TARGET_SCORE = 350;
 
     // --- WHISPERING WOODS SOCIAL ACTIVITIES (NON-GAMBLING) ---
     // 1. Campfire Story & Trivia Circle
@@ -744,6 +836,7 @@
         if (crashTimerId) clearInterval(crashTimerId);
         if (graffitiSaveTimeout) clearTimeout(graffitiSaveTimeout);
         if (fishingHookTimer) clearTimeout(fishingHookTimer);
+        stopAllArcadeTimers();
         synth.stop();
         diceManager.destroy();
         rouletteManager.destroy();
@@ -772,8 +865,61 @@
         }
     }
 
+    function isTypingInTextInput(e?: KeyboardEvent): boolean {
+        if (isChatFocused || showTransferModal) return true;
+        const checkEl = (el: EventTarget | Element | null): boolean => {
+            if (!el || !(el instanceof HTMLElement)) return false;
+            const tag = el.tagName;
+            if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+            if (el.isContentEditable) return true;
+            return false;
+        };
+        return checkEl(e?.target || null) || checkEl(typeof document !== "undefined" ? document.activeElement : null);
+    }
+
     function handleKeyDown(e: KeyboardEvent) {
-        if (isChatFocused || showTransferModal || document.activeElement === chatInputEl) return;
+        if (isTypingInTextInput(e)) {
+            for (const k of Object.keys(keysPressed)) keysPressed[k] = false;
+            return;
+        }
+
+        // If 90s Retro Arcade Center Modal is open, route arrow/WASD keys to the active arcade mini-game!
+        if (showArcadeModal) {
+            const code = e.code;
+            const key = e.key.toLowerCase();
+            if (activeArcadeTab === "brick") {
+                if (code === "ArrowLeft" || code === "KeyA" || key === "a") {
+                    e.preventDefault();
+                    brickPaddleX = Math.max(8, brickPaddleX - 24);
+                } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
+                    e.preventDefault();
+                    brickPaddleX = Math.min(248, brickPaddleX + 24);
+                }
+            } else if (activeArcadeTab === "snake") {
+                if (code === "ArrowUp" || code === "KeyW" || key === "w") {
+                    e.preventDefault();
+                    setSnakeDirection(0, -1);
+                } else if (code === "ArrowDown" || code === "KeyS" || key === "s") {
+                    e.preventDefault();
+                    setSnakeDirection(0, 1);
+                } else if (code === "ArrowLeft" || code === "KeyA" || key === "a") {
+                    e.preventDefault();
+                    setSnakeDirection(-1, 0);
+                } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
+                    e.preventDefault();
+                    setSnakeDirection(1, 0);
+                }
+            } else if (activeArcadeTab === "coin") {
+                if (code === "ArrowLeft" || code === "KeyA" || key === "a") {
+                    e.preventDefault();
+                    coinBasketX = Math.max(8, coinBasketX - 24);
+                } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
+                    e.preventDefault();
+                    coinBasketX = Math.min(256, coinBasketX + 24);
+                }
+            }
+            return;
+        }
 
         voiceManager?.unlockAudio();
 
@@ -812,6 +958,10 @@
     }
 
     function handleKeyUp(e: KeyboardEvent) {
+        if (isTypingInTextInput(e)) {
+            for (const k of Object.keys(keysPressed)) keysPressed[k] = false;
+            return;
+        }
         if (e.code === "Space") {
             voiceManager?.stopTransmitting();
             return;
@@ -918,6 +1068,10 @@
                 showDJModal = true;
                 return;
             }
+            if (gridDistance(myX, myY, 27.5, 12.5) <= 3.5) {
+                openArcadeModal("brick");
+                return;
+            }
             if (gridDistance(myX, myY, 27.5, 15.5) <= 3.5) {
                 openGraffitiModal();
                 return;
@@ -941,6 +1095,11 @@
             if (activeStation === "crash") {
                 if (crashPhase === "flying") cashOutRocketCrash();
                 else startRocketCrash();
+                return;
+            }
+            if (activeStation === "mines") {
+                if (minesPhase === "playing" && minesSafeClicks > 0) cashOutCyberMines();
+                else if (minesPhase !== "playing") startCyberMines();
                 return;
             }
         } else {
@@ -1298,6 +1457,486 @@
         crashMessage = `💰 CASHED OUT at ${crashMultiplier.toFixed(2)}x! Won +${win} $UWU! (Crashed at ${crashTargetPoint.toFixed(2)}x)`;
     }
 
+    // --- 6. BALANCED CYBER MINES 5x5 (Strict 10% House Edge Hypergeometric Multiplier) ---
+    function computeMinesMultiplier(bombs: number, safePicks: number): number {
+        if (safePicks <= 0) return 1.0;
+        let survivalProb = 1.0;
+        for (let i = 0; i < safePicks; i++) {
+            survivalProb *= (25 - bombs - i) / (25 - i);
+        }
+        // Strict 10% House Edge (90% RTP) at every pick count
+        const rawMult = 0.9 / Math.max(0.0001, survivalProb);
+        return Math.min(250, Math.max(1.08, Math.floor(rawMult * 100) / 100));
+    }
+
+    const minesCurrentMultiplier = $derived(computeMinesMultiplier(minesBombCount, minesSafeClicks));
+    const minesNextMultiplier = $derived(
+        minesSafeClicks < 25 - minesBombCount
+            ? computeMinesMultiplier(minesBombCount, minesSafeClicks + 1)
+            : minesCurrentMultiplier
+    );
+
+    function startCyberMines() {
+        if (minesPhase === "playing") return;
+        if (!ensureEnoughChips(selectedWager)) return;
+
+        minesBetAmount = selectedWager;
+        recordGameOutcome(-minesBetAmount, "neutral", 0);
+        synth.playChipSfx();
+
+        // Generate unique random bomb positions on the 25-tile grid
+        const indices = Array.from({ length: 25 }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        minesBombLocations = indices.slice(0, minesBombCount);
+        minesRevealed = Array(25).fill("hidden");
+        minesSafeClicks = 0;
+        minesPhase = "playing";
+        minesMessage = `💎 Uncover gems! Next safe pick pays ${computeMinesMultiplier(minesBombCount, 1).toFixed(2)}x (${minesBombCount} Mines hidden).`;
+    }
+
+    function clickMinesTile(idx: number) {
+        if (minesPhase !== "playing") return;
+        if (minesRevealed[idx] !== "hidden") return;
+
+        const nextGrid = [...minesRevealed];
+        if (minesBombLocations.includes(idx)) {
+            // Hit a Cyber Mine — House wins the wager, reveal all bombs
+            for (let i = 0; i < 25; i++) {
+                if (minesBombLocations.includes(i)) nextGrid[i] = "bomb";
+            }
+            minesRevealed = nextGrid;
+            minesPhase = "exploded";
+            synth.playDiceRollSfx();
+            recordGameOutcome(0, "loss", 0);
+            minesMessage = `💥 BOOM! Hit a Cyber Mine on tile #${idx + 1}. House takes ${minesBetAmount} $UWU!`;
+        } else {
+            nextGrid[idx] = "gem";
+            minesRevealed = nextGrid;
+            minesSafeClicks++;
+            synth.playSlotTickSfx(460 + minesSafeClicks * 45);
+            const curMult = computeMinesMultiplier(minesBombCount, minesSafeClicks);
+            const maxSafe = 25 - minesBombCount;
+            if (minesSafeClicks >= maxSafe) {
+                cashOutCyberMines();
+            } else {
+                const nxtMult = computeMinesMultiplier(minesBombCount, minesSafeClicks + 1);
+                minesMessage = `💎 ${minesSafeClicks} Gem${minesSafeClicks > 1 ? "s" : ""} found (${curMult.toFixed(2)}x)! Cash out +${Math.round(minesBetAmount * curMult)} $UWU or risk for ${nxtMult.toFixed(2)}x!`;
+            }
+        }
+    }
+
+    function cashOutCyberMines() {
+        if (minesPhase !== "playing" || minesSafeClicks <= 0) return;
+        const mult = computeMinesMultiplier(minesBombCount, minesSafeClicks);
+        const payout = Math.round(minesBetAmount * mult);
+        const nextGrid = [...minesRevealed];
+        for (let i = 0; i < 25; i++) {
+            if (minesBombLocations.includes(i) && nextGrid[i] === "hidden") {
+                nextGrid[i] = "bomb";
+            }
+        }
+        minesRevealed = nextGrid;
+        minesPhase = "cashed_out";
+        recordGameOutcome(payout, "win", payout - minesBetAmount);
+        if ( payout - minesBetAmount > arcadeBestScores.mines ) {
+            arcadeBestScores = { ...arcadeBestScores, mines: payout - minesBetAmount };
+        }
+        synth.playWinFanfare();
+        if (mult >= 2.2) {
+            triggerConfettiCelebration();
+            hasHighRollerCrown = true;
+            networkManager?.broadcastCasinoJackpot(myUsername, "Cyber Mines", payout);
+        }
+        minesMessage = `💰 CASHED OUT at ${mult.toFixed(2)}x! Won +${payout} $UWU (${minesSafeClicks} Gems)!`;
+    }
+
+    // --- 7. MULTI-GAME 90s RETRO ARCADE CENTER ENGINE (5 PLAYABLE GAMES) ---
+    function stopAllArcadeTimers() {
+        if (brickTimerId) {
+            clearInterval(brickTimerId);
+            brickTimerId = null;
+        }
+        if (snakeTimerId) {
+            clearInterval(snakeTimerId);
+            snakeTimerId = null;
+        }
+        if (coinTimerId) {
+            clearInterval(coinTimerId);
+            coinTimerId = null;
+        }
+        if (coinCountdownId) {
+            clearInterval(coinCountdownId);
+            coinCountdownId = null;
+        }
+        if (whackTimerId) {
+            clearInterval(whackTimerId);
+            whackTimerId = null;
+        }
+        if (whackCountdownId) {
+            clearInterval(whackCountdownId);
+            whackCountdownId = null;
+        }
+    }
+
+    function openArcadeModal(defaultTab: ArcadeGameId = "brick") {
+        stopAllArcadeTimers();
+        activeArcadeTab = defaultTab;
+        showArcadeModal = true;
+    }
+
+    function closeArcadeModal() {
+        stopAllArcadeTimers();
+        showArcadeModal = false;
+    }
+
+    function selectArcadeTab(tab: ArcadeGameId) {
+        stopAllArcadeTimers();
+        activeArcadeTab = tab;
+        synth.playChipSfx();
+    }
+
+    function payArcadeEntryIfTokenMode(): boolean {
+        if (arcadePlayMode === "free") return true;
+        if (!ensureEnoughChips(ARCADE_TOKEN_COST)) return false;
+        recordGameOutcome(-ARCADE_TOKEN_COST, "neutral", 0);
+        return true;
+    }
+
+    function settleArcadeGameResult(gameId: ArcadeGameId, finalScore: number, targetScore: number, gameLabel: string) {
+        if (finalScore > arcadeBestScores[gameId]) {
+            arcadeBestScores = { ...arcadeBestScores, [gameId]: finalScore };
+        }
+        if (arcadePlayMode === "token") {
+            if (finalScore >= targetScore) {
+                recordGameOutcome(ARCADE_TOKEN_PAYOUT, "win", finalScore);
+                synth.playWinFanfare();
+                triggerConfettiCelebration();
+                showToast(
+                    `🕹️ ${gameLabel} TARGET BEAT (${finalScore} >= ${targetScore})! Won +${ARCADE_TOKEN_PAYOUT} $UWU (1.75x)!`,
+                    6000
+                );
+            } else {
+                recordGameOutcome(0, "loss", finalScore);
+                showToast(
+                    `🕹️ ${gameLabel} Score: ${finalScore}/${targetScore}. Needed ${targetScore} pts to win the 175 $UWU token prize!`,
+                    4500
+                );
+            }
+        } else {
+            if (finalScore >= targetScore) {
+                synth.playWinFanfare();
+                showToast(`🕹️ High Score on ${gameLabel}: ${finalScore} pts!`, 3500);
+            }
+        }
+    }
+
+    // Arcade Game 2: Neon Brick Breaker (Arkanoid)
+    function startBrickBreaker() {
+        stopAllArcadeTimers();
+        if (!payArcadeEntryIfTokenMode()) return;
+        synth.playChipSfx();
+
+        const rowColors = ["#ff0055", "#ff7700", "#ffd700", "#00ff88", "#00ffff"];
+        const rowPts = [30, 25, 20, 15, 10];
+        const bricks: ArcadeBrick[] = [];
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 7; c++) {
+                bricks.push({
+                    x: 12 + c * 43,
+                    y: 20 + r * 16,
+                    w: 39,
+                    h: 11,
+                    color: rowColors[r],
+                    pts: rowPts[r],
+                    alive: true
+                });
+            }
+        }
+        brickList = bricks;
+        brickScore = 0;
+        brickLives = 3;
+        brickPaddleX = 128;
+        brickBall = { x: 160, y: 185, vx: 2.9 * (Math.random() > 0.5 ? 1 : -1), vy: -3.2 };
+        brickPhase = "playing";
+
+        brickTimerId = window.setInterval(() => {
+            if (brickPhase !== "playing") return;
+            let bx = brickBall.x + brickBall.vx;
+            let by = brickBall.y + brickBall.vy;
+            let vx = brickBall.vx;
+            let vy = brickBall.vy;
+
+            if (bx <= 7 || bx >= 313) {
+                vx = -vx;
+                bx = Math.max(7, Math.min(313, bx));
+            }
+            if (by <= 8) {
+                vy = Math.abs(vy);
+                by = 8;
+            }
+
+            // Paddle collision (y = 204..214, width = 64)
+            if (vy > 0 && by >= 198 && by <= 212 && bx >= brickPaddleX - 4 && bx <= brickPaddleX + 68) {
+                const hitOffset = (bx - (brickPaddleX + 32)) / 32; // -1..1
+                vx = hitOffset * 4.1;
+                vy = -Math.max(2.9, Math.abs(vy));
+                by = 197;
+                synth.playSlotTickSfx(360);
+            }
+
+            // Brick collision
+            let hitBrick = false;
+            const updated = brickList.map((b) => {
+                if (!b.alive || hitBrick) return b;
+                if (bx >= b.x - 4 && bx <= b.x + b.w + 4 && by >= b.y - 4 && by <= b.y + b.h + 4) {
+                    hitBrick = true;
+                    vy = -vy;
+                    brickScore += b.pts;
+                    synth.playSlotTickSfx(520 + b.pts * 6);
+                    return { ...b, alive: false };
+                }
+                return b;
+            });
+            if (hitBrick) brickList = updated;
+
+            if (brickList.every((b) => !b.alive)) {
+                brickPhase = "won";
+                brickScore += brickLives * 50;
+                stopAllArcadeTimers();
+                settleArcadeGameResult("brick", brickScore, BRICK_TARGET_SCORE, "Neon Brick Breaker");
+                return;
+            }
+
+            if (by > 226) {
+                brickLives--;
+                synth.playDiceRollSfx();
+                if (brickLives <= 0) {
+                    brickPhase = "lost";
+                    stopAllArcadeTimers();
+                    settleArcadeGameResult("brick", brickScore, BRICK_TARGET_SCORE, "Neon Brick Breaker");
+                    return;
+                } else {
+                    bx = brickPaddleX + 32;
+                    by = 190;
+                    vx = 2.9 * (Math.random() > 0.5 ? 1 : -1);
+                    vy = -3.2;
+                }
+            }
+
+            brickBall = { x: bx, y: by, vx, vy };
+        }, 25);
+    }
+
+    function handleBrickPointerMove(e: MouseEvent | TouchEvent) {
+        const el = e.currentTarget as HTMLElement;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+        const relX = ((clientX - rect.left) / rect.width) * 320;
+        brickPaddleX = Math.max(8, Math.min(248, relX - 32));
+    }
+
+    // Arcade Game 3: Cyber Snake 1998
+    function spawnSnakeFood(currentBody: Array<{ x: number; y: number }>) {
+        for (let attempt = 0; attempt < 50; attempt++) {
+            const fx = Math.floor(Math.random() * 16);
+            const fy = Math.floor(Math.random() * 12);
+            if (!currentBody.some((seg) => seg.x === fx && seg.y === fy)) {
+                snakeFood = { x: fx, y: fy, kind: Math.random() < 0.25 ? "unicorn" : "orb" };
+                return;
+            }
+        }
+    }
+
+    function setSnakeDirection(dx: number, dy: number) {
+        if (snakeDir.x === -dx && snakeDir.y === -dy) return;
+        snakeNextDir = { x: dx, y: dy };
+    }
+
+    function startCyberSnake() {
+        stopAllArcadeTimers();
+        if (!payArcadeEntryIfTokenMode()) return;
+        synth.playChipSfx();
+
+        const initBody = [
+            { x: 7, y: 6 },
+            { x: 6, y: 6 },
+            { x: 5, y: 6 }
+        ];
+        snakeBody = initBody;
+        snakeDir = { x: 1, y: 0 };
+        snakeNextDir = { x: 1, y: 0 };
+        snakeScore = 0;
+        spawnSnakeFood(initBody);
+        snakePhase = "playing";
+
+        snakeTimerId = window.setInterval(() => {
+            if (snakePhase !== "playing") return;
+            snakeDir = snakeNextDir;
+            const head = snakeBody[0];
+            const nx = head.x + snakeDir.x;
+            const ny = head.y + snakeDir.y;
+
+            if (nx < 0 || nx >= 16 || ny < 0 || ny >= 12 || snakeBody.some((s) => s.x === nx && s.y === ny)) {
+                snakePhase = snakeScore >= SNAKE_TARGET_SCORE ? "won" : "lost";
+                synth.playDiceRollSfx();
+                stopAllArcadeTimers();
+                settleArcadeGameResult("snake", snakeScore, SNAKE_TARGET_SCORE, "Cyber Snake 1998");
+                return;
+            }
+
+            const nextBody = [{ x: nx, y: ny }, ...snakeBody];
+            if (nx === snakeFood.x && ny === snakeFood.y) {
+                const pts = snakeFood.kind === "unicorn" ? 75 : 30;
+                snakeScore += pts;
+                synth.playSlotTickSfx(snakeFood.kind === "unicorn" ? 760 : 520);
+                spawnSnakeFood(nextBody);
+            } else {
+                nextBody.pop();
+            }
+            snakeBody = nextBody;
+        }, 125);
+    }
+
+    // Arcade Game 4: Cyber Coin Rush (25s Falling Catcher)
+    function startCoinRush() {
+        stopAllArcadeTimers();
+        if (!payArcadeEntryIfTokenMode()) return;
+        synth.playChipSfx();
+
+        coinScore = 0;
+        coinTimeLeft = 25;
+        coinBasketX = 132;
+        coinItems = [];
+        coinPhase = "playing";
+        let nextItemId = 1;
+
+        coinTimerId = window.setInterval(() => {
+            if (coinPhase !== "playing") return;
+            if (Math.random() < 0.16) {
+                const roll = Math.random();
+                let icon = "🪙";
+                let pts = 20;
+                let isBomb = false;
+                if (roll < 0.25) {
+                    icon = "💣";
+                    pts = -50;
+                    isBomb = true;
+                } else if (roll < 0.42) {
+                    icon = "💎";
+                    pts = 45;
+                } else if (roll < 0.52) {
+                    icon = "🦄";
+                    pts = 75;
+                }
+                coinItems = [
+                    ...coinItems,
+                    {
+                        id: nextItemId++,
+                        x: 16 + Math.random() * 288,
+                        y: -10,
+                        vy: 2.3 + Math.random() * 1.8,
+                        icon,
+                        pts,
+                        isBomb
+                    }
+                ];
+            }
+
+            const remaining: FallingArcadeItem[] = [];
+            for (const item of coinItems) {
+                const ny = item.y + item.vy;
+                if (ny >= 186 && ny <= 214 && Math.abs(item.x - (coinBasketX + 28)) <= 32) {
+                    coinScore = Math.max(0, coinScore + item.pts);
+                    if (item.isBomb) synth.playDiceRollSfx();
+                    else synth.playSlotTickSfx(540);
+                } else if (ny < 224) {
+                    remaining.push({ ...item, y: ny });
+                }
+            }
+            coinItems = remaining;
+        }, 30);
+
+        coinCountdownId = window.setInterval(() => {
+            if (coinPhase !== "playing") return;
+            coinTimeLeft--;
+            if (coinTimeLeft <= 0) {
+                coinPhase = "done";
+                stopAllArcadeTimers();
+                settleArcadeGameResult("coin", coinScore, COIN_TARGET_SCORE, "Cyber Coin Rush");
+            }
+        }, 1000);
+    }
+
+    function handleCoinPointerMove(e: MouseEvent | TouchEvent) {
+        const el = e.currentTarget as HTMLElement;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+        const relX = ((clientX - rect.left) / rect.width) * 320;
+        coinBasketX = Math.max(8, Math.min(256, relX - 28));
+    }
+
+    // Arcade Game 5: Whack-A-Glitch (20s 3x3 Cyber Terminal Reflex)
+    function startWhackAGlitch() {
+        stopAllArcadeTimers();
+        if (!payArcadeEntryIfTokenMode()) return;
+        synth.playChipSfx();
+
+        whackScore = 0;
+        whackTimeLeft = 20;
+        whackGrid = Array.from({ length: 9 }, () => ({ kind: "empty", expiresAt: 0 }));
+        whackPhase = "playing";
+
+        whackTimerId = window.setInterval(() => {
+            if (whackPhase !== "playing") return;
+            const now = Date.now();
+            const next = whackGrid.map((cell) => (cell.expiresAt > 0 && now > cell.expiresAt ? { kind: "empty" as const, expiresAt: 0 } : cell));
+            const emptyIndices = next.map((c, idx) => (c.kind === "empty" ? idx : -1)).filter((idx) => idx !== -1);
+            if (emptyIndices.length > 0 && Math.random() < 0.68) {
+                const pickIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+                const r = Math.random();
+                const kind: GlitchCell["kind"] = r < 0.22 ? "bomb" : r < 0.42 ? "golden" : "bug";
+                next[pickIdx] = { kind, expiresAt: now + 950 };
+            }
+            whackGrid = next;
+        }, 280);
+
+        whackCountdownId = window.setInterval(() => {
+            if (whackPhase !== "playing") return;
+            whackTimeLeft--;
+            if (whackTimeLeft <= 0) {
+                whackPhase = "done";
+                stopAllArcadeTimers();
+                settleArcadeGameResult("whack", whackScore, WHACK_TARGET_SCORE, "Whack-A-Glitch");
+            }
+        }, 1000);
+    }
+
+    function whackCell(idx: number) {
+        if (whackPhase !== "playing") return;
+        const cell = whackGrid[idx];
+        if (!cell || cell.kind === "empty") return;
+
+        const next = [...whackGrid];
+        next[idx] = { kind: "empty", expiresAt: 0 };
+        whackGrid = next;
+
+        if (cell.kind === "bomb") {
+            whackScore = Math.max(0, whackScore - 45);
+            synth.playDiceRollSfx();
+        } else if (cell.kind === "golden") {
+            whackScore += 65;
+            synth.playSlotTickSfx(780);
+        } else {
+            whackScore += 30;
+            synth.playSlotTickSfx(520);
+        }
+    }
+
     // --- WHISPERING WOODS SOCIAL ACTIVITIES (NON-GAMBLING) ---
     function voteCampfireOption(optionIdx: number) {
         myCampfireVote = optionIdx;
@@ -1488,8 +2127,24 @@
             // 3. Direct click on interactive 3D world objects
             pendingInteractionTarget = null;
             if (gx >= 26 && gx <= 28 && gy === 15) {
+                if (gridDistance(myX, myY, 27.5, 15.5) <= 3.5) {
+                    openGraffitiModal();
+                    return;
+                }
                 pendingInteractionTarget = "graffiti";
+            } else if (gx >= 26 && gx <= 28 && gy === 12) {
+                if (gridDistance(myX, myY, 27.5, 12.5) <= 3.8) {
+                    openArcadeModal("brick");
+                    return;
+                }
+                pendingInteractionTarget = "arcade";
+            } else if ((gx === 27 || gx === 28) && gy === 19) {
+                pendingInteractionTarget = "mines";
             } else if ((gx === 15 || gx === 16) && gy === 2) {
+                if (gridDistance(myX, myY, 16.0, 2.5) <= 3.5) {
+                    showDJModal = true;
+                    return;
+                }
                 pendingInteractionTarget = "dj";
             }
         } else {
@@ -1704,7 +2359,7 @@
         let moveY = 0;
         const speed = 4.8;
 
-        if (!isChatFocused && !showTransferModal) {
+        if (!isTypingInTextInput() && !showArcadeModal && !showGraffitiModal && !showDJModal && !showGuideModal && !showLeaderboardModal) {
             if (keysPressed["KeyW"] || keysPressed["ArrowUp"] || keysPressed["w"]) {
                 moveX -= 1;
                 moveY -= 1;
@@ -1745,6 +2400,7 @@
                 waypointStuckFrames = 0;
                 if (activeWaypoints.length === 0 && pendingInteractionTarget) {
                     if (pendingInteractionTarget === "graffiti") openGraffitiModal();
+                    else if (pendingInteractionTarget === "arcade") openArcadeModal("brick");
                     else if (pendingInteractionTarget === "dj") showDJModal = true;
                     pendingInteractionTarget = null;
                 }
@@ -1839,7 +2495,8 @@
                 { id: "roulette", dist: gridDistance(myX, myY, 19.5, 14.0), maxRadius: 2.5 },
                 { id: "blackjack", dist: gridDistance(myX, myY, 11.5, 19.5), maxRadius: 2.35 },
                 { id: "slots", dist: gridDistance(myX, myY, 21.0, 19.5), maxRadius: 2.25 },
-                { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 }
+                { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 },
+                { id: "mines", dist: gridDistance(myX, myY, 27.5, 19.5), maxRadius: 2.35 }
             ];
 
             let closestStation: typeof activeStation = "none";
@@ -2741,6 +3398,57 @@
         } else if (obj.type === "canoe_prop") {
             const bob = Math.sin(timeMs / 360) * 1.5;
             drawIsoObjectSprite(ctx, "canoe", 0, bob, 48, 8);
+        } else if (obj.type === "arcade_cabinet") {
+            ctx.fillStyle = "rgba(0,0,0,0.45)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 24, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "arcade_machine", 0, 0, 48, 9)) {
+                drawIsoPrism(ctx, 20, 10, 44, "#240b4c", "#160732", "#0d0420", "#00ffff");
+            }
+
+            // Glowing CRT Arcade Screen & Marquee Badge
+            const pulse = Math.floor(timeMs / 240) % 2 === 0;
+            ctx.fillStyle = "#08061a";
+            ctx.fillRect(-12, -36, 24, 14);
+            ctx.strokeStyle = pulse ? "#00ffff" : "#ff00aa";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(-12, -36, 24, 14);
+
+            ctx.font = "9px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(obj.id.endsWith("1") ? "🧱🐍" : "🪙🔨", 0, -26);
+
+            ctx.font = "bold 8px monospace";
+            ctx.fillStyle = "#00ff88";
+            ctx.fillText("🕹️ ARCADE [CLICK/E]", 0, -52);
+        } else if (obj.type === "mines_table") {
+            ctx.fillStyle = "rgba(0,0,0,0.45)";
+            ctx.beginPath();
+            ctx.ellipse(0, 4, 30, 15, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (!drawIsoObjectSprite(ctx, "table_round", 0, 0, 62, 11)) {
+                drawIsoPrism(ctx, 28, 14, 20, "#142238", "#0c1524", "#080d18", "#00ff88");
+            }
+
+            // Holographic 5x5 Cyber Mines Grid on Table Top
+            ctx.fillStyle = "rgba(6, 24, 38, 0.9)";
+            ctx.beginPath();
+            ctx.ellipse(0, -21, 18, 9, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#00ff88";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.font = "14px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(minesPhase === "exploded" ? "💥" : "💣💎", 0, -25);
+
+            ctx.font = "bold 8px monospace";
+            ctx.fillStyle = "#00ff88";
+            ctx.fillText("CYBER MINES 5x5", 0, -40);
         }
 
         ctx.restore();
@@ -2759,6 +3467,10 @@
                 promptText = "🎰 Golden UwU Slots: Press [E] or click PULL LEVER in the HUD!";
             } else if (activeStation === "crash") {
                 promptText = "🚀 Rocket Crash: Launch & Cash Out before the explosion!";
+            } else if (activeStation === "mines") {
+                promptText = "💣 Cyber Mines 5x5: Uncover gems & Cash Out anytime (10% House Edge)!";
+            } else if (gridDistance(myX, myY, 27.5, 12.5) <= 3.5) {
+                promptText = "🕹️ 90s Retro Arcade Center: Press [E] or click cabinets to play 5 Arcade Games!";
             } else if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
                 promptText = "🪩 DJ Stage: Press [E] to pick Classical, House, Electronic, Techno, Rave, or Ambient!";
             } else if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
@@ -2815,6 +3527,8 @@
             else if (hx === 11 && hy === 19) hoverLabel = "🃏 Cyber Blackjack 21 (SW Pit)";
             else if ((hx === 20 || hx === 21) && hy === 19) hoverLabel = "🎰 Golden UwU Slot Machine (SE Pit)";
             else if (hx === 15 && hy === 12) hoverLabel = "🚀 Rocket Crash Terminal";
+            else if (hx >= 26 && hx <= 28 && hy === 12) hoverLabel = "🕹️ 90s Retro Arcade Center (5 Games — Click to Open)";
+            else if ((hx === 27 || hx === 28) && hy === 19) hoverLabel = "💣 Cyber Mines 5x5 Table (10% House Edge)";
             else if (hx >= 18 && hx <= 20 && (hy === 14 || hy === 15)) {
                 const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === hx && s.tile.y === hy);
                 if (sec) hoverLabel = `${sec.icon} Bet ${sec.name} (${sec.multiplier}x — ${sec.weight}% odds)`;
@@ -2884,12 +3598,18 @@
             <span class="qt-label">⚡ Travel:</span>
             <button class="win98-btn qt-btn" onclick={() => teleportTo(15.5, 16.5, "Casino Center", "casino")}>🎲 Casino</button>
             <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 6.5, "Cyber Nightclub", "casino")}>🪩 Club</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(27.5, 13.8, "90s Retro Arcade", "casino")}>🕹️ Arcade</button>
+            <button class="win98-btn qt-btn" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines 5x5", "casino")}>💣 Mines</button>
             <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza", "casino")}>⛲ Plaza</button>
             <button class="win98-btn qt-btn" onclick={() => teleportTo(25.5, 15.5, "Graffiti Wall", "casino")}>🎨 Wall</button>
             <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>🌲 Woods</button>
         </div>
 
         <div class="toolbar-right">
+            <button class="win98-btn arcade-open-btn" onclick={() => openArcadeModal("brick")} title="Open 90s Retro Arcade Center (5 Games)">
+                🕹️ Arcade
+            </button>
+
             <button class="win98-btn leaderboard-btn" onclick={openLeaderboard}>
                 🏆 Leaderboard
             </button>
@@ -3295,6 +4015,92 @@
                     {:else}
                         <button class="win98-btn primary-start-btn" onclick={startRocketCrash}>
                             🚀 LAUNCH ROCKET ({selectedWager} $UWU)
+                        </button>
+                    {/if}
+                </div>
+            </div>
+        {/if}
+
+        <!-- 5B. BALANCED CYBER MINES 5x5 HUD (East Arcade Pit: 27.5, 19.5 — 10% House Edge) -->
+        {#if activeStation === "mines"}
+            <div class="game-hud win98-window">
+                <div class="win98-title-bar">
+                    <span class="win98-title">💣 Cyber Mines 5x5 (10% House Edge • Instant Cashout)</span>
+                    <button class="win98-btn" style="padding:1px 6px; font-size:10px;" onclick={() => openArcadeModal("mines")}>
+                        🕹️ Full Arcade UI
+                    </button>
+                </div>
+                <div class="hud-body">
+                    <div class="hud-instructions">
+                        <strong>Balanced Odds:</strong> Uncover glowing `💎` gems on the 5×5 grid and <strong>CASH OUT</strong> anytime before hitting a `💣` Cyber Mine!
+                    </div>
+
+                    <div class="wager-selector">
+                        <span>Wager:</span>
+                        {#each WAGER_OPTIONS as w}
+                            <button
+                                class="win98-btn wager-btn"
+                                class:active-wager={selectedWager === w}
+                                disabled={minesPhase === "playing"}
+                                onclick={() => (selectedWager = w)}
+                            >
+                                {w}
+                            </button>
+                        {/each}
+                        <span style="margin-left:6px;">Mines:</span>
+                        {#each [5, 8, 12] as bCount}
+                            <button
+                                class="win98-btn wager-btn"
+                                class:active-wager={minesBombCount === bCount}
+                                disabled={minesPhase === "playing"}
+                                onclick={() => (minesBombCount = bCount as 5 | 8 | 12)}
+                            >
+                                💣 {bCount}
+                            </button>
+                        {/each}
+                    </div>
+
+                    <div class="roulette-status-bar">
+                        <span>Current: <strong>{minesCurrentMultiplier.toFixed(2)}x</strong></span>
+                        <span>Next Gem: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
+                        <span>Gems: <strong>{minesSafeClicks}/{25 - minesBombCount}</strong></span>
+                    </div>
+
+                    <div class="mines-grid-5x5">
+                        {#each minesRevealed as tileState, idx}
+                            <button
+                                class="win98-btn mines-cell-btn"
+                                class:revealed-gem={tileState === "gem"}
+                                class:revealed-bomb={tileState === "bomb"}
+                                disabled={minesPhase !== "playing" || tileState !== "hidden"}
+                                onclick={() => clickMinesTile(idx)}
+                            >
+                                {#if tileState === "gem"}
+                                    💎
+                                {:else if tileState === "bomb"}
+                                    💣
+                                {:else}
+                                    ?
+                                {/if}
+                            </button>
+                        {/each}
+                    </div>
+
+                    <div class="bj-status-msg">{minesMessage}</div>
+
+                    {#if minesPhase === "playing"}
+                        <button
+                            class="win98-btn cashout-btn"
+                            disabled={minesSafeClicks === 0}
+                            onclick={cashOutCyberMines}
+                        >
+                            {minesSafeClicks > 0
+                                ? `💰 CASH OUT +${Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU (${minesCurrentMultiplier.toFixed(2)}x)`
+                                : "💎 Pick at least 1 tile to Cash Out"}
+                        </button>
+                    {:else}
+                        <button class="win98-btn primary-start-btn" onclick={startCyberMines}>
+                            💣 START CYBER MINES ({selectedWager} $UWU • {minesBombCount} Mines)
                         </button>
                     {/if}
                 </div>
@@ -3867,11 +4673,405 @@
                             <button class="win98-btn" onclick={() => teleportTo(15.5, 13.8, "Rocket Crash", "casino")}>Teleport to Crash</button>
                         </div>
                         <div class="guide-card">
+                            <div class="guide-card-title">💣 Cyber Mines 5x5 (East Arcade Pit)</div>
+                            <p>Pick 5, 8, or 12 hidden Cyber Mines on the 5×5 grid! Uncover glowing gems and Cash Out anytime (10% House Edge).</p>
+                            <button class="win98-btn" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines 5x5", "casino")}>Teleport to Mines</button>
+                        </div>
+                        <div class="guide-card">
+                            <div class="guide-card-title">🕹️ 90s Retro Arcade Center (5 Games)</div>
+                            <p>Play <strong>Neon Brick Breaker</strong>, <strong>Cyber Snake 1998</strong>, <strong>Cyber Coin Rush</strong>, <strong>Whack-A-Glitch</strong> & <strong>Cyber Mines</strong> in Free Play or 100 $UWU Token Challenge!</p>
+                            <button class="win98-btn" onclick={() => { showGuideModal = false; openArcadeModal("brick"); }}>Open Arcade UI</button>
+                        </div>
+                        <div class="guide-card">
                             <div class="guide-card-title">🌲 Whispering Woods (East Social Zone)</div>
                             <p>Walk off the East edge (`x=31, y=14..17`) into a lush forest with Campfire Stories, Tea Picnic, Koi Fishing & Firefly Wishes!</p>
                             <button class="win98-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>Teleport to Woods</button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    {/if}
+
+    <!-- Modal 2: 🕹️ 90s RETRO ARCADE CENTER (5 Playable Games: Free Play + 100 $UWU Skill Token Mode) -->
+    {#if showArcadeModal}
+        <div class="modal-overlay" onclick={closeArcadeModal}>
+            <div class="win98-window arcade-window" onclick={(e) => e.stopPropagation()}>
+                <div class="win98-title-bar">
+                    <span class="win98-title">🕹️ UwU 90s Retro Arcade Center — 5 Playable Cabinet Games</span>
+                    <button class="win98-close" onclick={closeArcadeModal}>X</button>
+                </div>
+                <div class="win98-body arcade-body">
+                    <!-- Top Arcade Game Selector Tabs -->
+                    <div class="arcade-tabs-bar">
+                        <button
+                            class="win98-btn arcade-tab-btn"
+                            class:active-wager={activeArcadeTab === "brick"}
+                            onclick={() => selectArcadeTab("brick")}
+                        >
+                            🧱 Brick Breaker
+                        </button>
+                        <button
+                            class="win98-btn arcade-tab-btn"
+                            class:active-wager={activeArcadeTab === "snake"}
+                            onclick={() => selectArcadeTab("snake")}
+                        >
+                            🐍 Cyber Snake 98
+                        </button>
+                        <button
+                            class="win98-btn arcade-tab-btn"
+                            class:active-wager={activeArcadeTab === "coin"}
+                            onclick={() => selectArcadeTab("coin")}
+                        >
+                            🪙 Coin Rush
+                        </button>
+                        <button
+                            class="win98-btn arcade-tab-btn"
+                            class:active-wager={activeArcadeTab === "whack"}
+                            onclick={() => selectArcadeTab("whack")}
+                        >
+                            🔨 Whack-A-Glitch
+                        </button>
+                        <button
+                            class="win98-btn arcade-tab-btn"
+                            class:active-wager={activeArcadeTab === "mines"}
+                            onclick={() => selectArcadeTab("mines")}
+                        >
+                            💣 Cyber Mines 5x5
+                        </button>
+                    </div>
+
+                    {#if activeArcadeTab !== "mines"}
+                        <!-- Mode Bar for Skill Arcade Cabinets (Free Play vs 100 $UWU Token Challenge) -->
+                        <div class="arcade-mode-banner">
+                            <div class="arcade-mode-left">
+                                <span>Cabinet Mode:</span>
+                                <button
+                                    class="win98-btn wager-btn"
+                                    class:active-wager={arcadePlayMode === "free"}
+                                    onclick={() => (arcadePlayMode = "free")}
+                                >
+                                    🕹️ Free Play (0 $UWU • High Score)
+                                </button>
+                                <button
+                                    class="win98-btn wager-btn"
+                                    class:active-wager={arcadePlayMode === "token"}
+                                    onclick={() => (arcadePlayMode = "token")}
+                                >
+                                    🪙 100 $UWU Token Challenge (Win 175 $UWU!)
+                                </button>
+                            </div>
+                            <span class="arcade-balance-pill">🪙 {chips.toLocaleString()} $UWU</span>
+                        </div>
+                    {/if}
+
+                    <!-- TAB 1: NEON BRICK BREAKER (ARKANOID) -->
+                    {#if activeArcadeTab === "brick"}
+                        <div class="arcade-cabinet-panel">
+                            <div class="roulette-status-bar">
+                                <span>🧱 Score: <strong>{brickScore}</strong> / Target: <strong>{BRICK_TARGET_SCORE}</strong></span>
+                                <span>❤️ Lives: <strong>{"❤️".repeat(brickLives)}</strong></span>
+                                <span>🏆 Best: <strong>{arcadeBestScores.brick}</strong></span>
+                            </div>
+
+                            <div
+                                class="arcade-crt-stage"
+                                onmousemove={handleBrickPointerMove}
+                                ontouchmove={handleBrickPointerMove}
+                            >
+                                {#each brickList as b}
+                                    {#if b.alive}
+                                        <div
+                                            class="arcade-brick"
+                                            style="left:{b.x}px; top:{b.y}px; width:{b.w}px; height:{b.h}px; background:{b.color};"
+                                        ></div>
+                                    {/if}
+                                {/each}
+
+                                <!-- Bouncing Neon Energy Ball -->
+                                <div
+                                    class="arcade-ball"
+                                    style="left:{brickBall.x - 5}px; top:{brickBall.y - 5}px;"
+                                ></div>
+
+                                <!-- Player Neon Paddle -->
+                                <div
+                                    class="arcade-paddle"
+                                    style="left:{brickPaddleX}px; top:204px; width:64px;"
+                                ></div>
+
+                                {#if brickPhase !== "playing"}
+                                    <div class="arcade-crt-overlay">
+                                        <div class="crt-title">
+                                            {brickPhase === "won"
+                                                ? `🏆 BOARD CLEARED! (${brickScore} PTS)`
+                                                : brickPhase === "lost"
+                                                  ? `💥 GAME OVER (${brickScore} PTS)`
+                                                  : "🧱 NEON BRICK BREAKER"}
+                                        </div>
+                                        <p class="crt-sub">
+                                            Move mouse, drag finger, or press <strong>[A / D / ◀ / ▶]</strong> to bounce the orb & smash all 35 synthwave bricks! Beat <strong>{BRICK_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                        </p>
+                                    </div>
+                                {/if}
+                            </div>
+
+                            <div class="arcade-controls-row">
+                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.max(8, brickPaddleX - 28))}>◀ Left</button>
+                                <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startBrickBreaker}>
+                                    {brickPhase === "playing"
+                                        ? "🔄 Restart Brick Breaker"
+                                        : arcadePlayMode === "token"
+                                          ? "🪙 Insert 100 $UWU Token & Launch"
+                                          : "🕹️ Start Free Play"}
+                                </button>
+                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.min(248, brickPaddleX + 28))}>Right ▶</button>
+                            </div>
+                        </div>
+
+                    <!-- TAB 2: CYBER SNAKE 1998 -->
+                    {:else if activeArcadeTab === "snake"}
+                        <div class="arcade-cabinet-panel">
+                            <div class="roulette-status-bar">
+                                <span>🐍 Score: <strong>{snakeScore}</strong> / Target: <strong>{SNAKE_TARGET_SCORE}</strong></span>
+                                <span>Length: <strong>{snakeBody.length}</strong></span>
+                                <span>🏆 Best: <strong>{arcadeBestScores.snake}</strong></span>
+                            </div>
+
+                            <div class="arcade-crt-stage snake-stage">
+                                <!-- Food Orb / Golden Unicorn -->
+                                <div
+                                    class="snake-food-cell"
+                                    style="left:{snakeFood.x * 20}px; top:{snakeFood.y * 18.5}px;"
+                                >
+                                    {snakeFood.kind === "unicorn" ? "🦄" : "💎"}
+                                </div>
+
+                                <!-- Snake Segments -->
+                                {#each snakeBody as seg, idx}
+                                    <div
+                                        class="snake-segment"
+                                        class:snake-head={idx === 0}
+                                        style="left:{seg.x * 20}px; top:{seg.y * 18.5}px;"
+                                    ></div>
+                                {/each}
+
+                                {#if snakePhase !== "playing"}
+                                    <div class="arcade-crt-overlay">
+                                        <div class="crt-title">
+                                            {snakePhase === "won"
+                                                ? `🏆 TARGET BEAT! (${snakeScore} PTS)`
+                                                : snakePhase === "lost"
+                                                  ? `💥 CRASHED! (${snakeScore} PTS)`
+                                                  : "🐍 CYBER SNAKE 1998"}
+                                        </div>
+                                        <p class="crt-sub">
+                                            Use <strong>[WASD / Arrow Keys]</strong> or the D-Pad buttons below to collect `💎` (+30 pts) and rare `🦄` (+75 pts)! Beat <strong>{SNAKE_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                        </p>
+                                    </div>
+                                {/if}
+                            </div>
+
+                            <div class="arcade-controls-row">
+                                <div class="snake-dpad">
+                                    <button class="win98-btn" onclick={() => setSnakeDirection(-1, 0)}>◀</button>
+                                    <button class="win98-btn" onclick={() => setSnakeDirection(0, -1)}>▲</button>
+                                    <button class="win98-btn" onclick={() => setSnakeDirection(0, 1)}>▼</button>
+                                    <button class="win98-btn" onclick={() => setSnakeDirection(1, 0)}>▶</button>
+                                </div>
+                                <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startCyberSnake}>
+                                    {snakePhase === "playing"
+                                        ? "🔄 Restart Snake"
+                                        : arcadePlayMode === "token"
+                                          ? "🪙 Insert 100 $UWU Token & Start"
+                                          : "🕹️ Start Free Play"}
+                                </button>
+                            </div>
+                        </div>
+
+                    <!-- TAB 3: CYBER COIN RUSH -->
+                    {:else if activeArcadeTab === "coin"}
+                        <div class="arcade-cabinet-panel">
+                            <div class="roulette-status-bar">
+                                <span>🪙 Score: <strong>{coinScore}</strong> / Target: <strong>{COIN_TARGET_SCORE}</strong></span>
+                                <span>⏱️ Time: <strong>{coinTimeLeft}s</strong></span>
+                                <span>🏆 Best: <strong>{arcadeBestScores.coin}</strong></span>
+                            </div>
+
+                            <div
+                                class="arcade-crt-stage"
+                                onmousemove={handleCoinPointerMove}
+                                ontouchmove={handleCoinPointerMove}
+                            >
+                                {#each coinItems as item (item.id)}
+                                    <div
+                                        class="falling-coin-item"
+                                        style="left:{item.x - 10}px; top:{item.y}px;"
+                                    >
+                                        {item.icon}
+                                    </div>
+                                {/each}
+
+                                <!-- Catcher Basket -->
+                                <div
+                                    class="arcade-paddle coin-basket"
+                                    style="left:{coinBasketX}px; top:196px; width:56px;"
+                                >
+                                    🧺 CATCH
+                                </div>
+
+                                {#if coinPhase !== "playing"}
+                                    <div class="arcade-crt-overlay">
+                                        <div class="crt-title">
+                                            {coinPhase === "done"
+                                                ? `⏱️ TIME UP! SCORE: ${coinScore} PTS`
+                                                : "🪙 CYBER COIN RUSH (25s)"}
+                                        </div>
+                                        <p class="crt-sub">
+                                            Catch falling `🪙` (+20), `💎` (+45), and `🦄` (+75) while dodging `💣` (-50)! Beat <strong>{COIN_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                        </p>
+                                    </div>
+                                {/if}
+                            </div>
+
+                            <div class="arcade-controls-row">
+                                <button class="win98-btn" onclick={() => (coinBasketX = Math.max(8, coinBasketX - 28))}>◀ Left</button>
+                                <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startCoinRush}>
+                                    {coinPhase === "playing"
+                                        ? "🔄 Restart Coin Rush"
+                                        : arcadePlayMode === "token"
+                                          ? "🪙 Insert 100 $UWU Token & Start"
+                                          : "🕹️ Start Free Play"}
+                                </button>
+                                <button class="win98-btn" onclick={() => (coinBasketX = Math.min(256, coinBasketX + 28))}>Right ▶</button>
+                            </div>
+                        </div>
+
+                    <!-- TAB 4: WHACK-A-GLITCH -->
+                    {:else if activeArcadeTab === "whack"}
+                        <div class="arcade-cabinet-panel">
+                            <div class="roulette-status-bar">
+                                <span>🔨 Score: <strong>{whackScore}</strong> / Target: <strong>{WHACK_TARGET_SCORE}</strong></span>
+                                <span>⏱️ Time: <strong>{whackTimeLeft}s</strong></span>
+                                <span>🏆 Best: <strong>{arcadeBestScores.whack}</strong></span>
+                            </div>
+
+                            <div class="whack-grid-3x3">
+                                {#each whackGrid as cell, idx}
+                                    <button
+                                        class="win98-btn whack-hole-btn"
+                                        class:active-bug={cell.kind === "bug"}
+                                        class:active-golden={cell.kind === "golden"}
+                                        class:active-bomb={cell.kind === "bomb"}
+                                        disabled={whackPhase !== "playing"}
+                                        onclick={() => whackCell(idx)}
+                                    >
+                                        {#if cell.kind === "bug"}
+                                            <span class="whack-sprite">👾</span>
+                                            <small>+30</small>
+                                        {:else if cell.kind === "golden"}
+                                            <span class="whack-sprite">🦄</span>
+                                            <small>+65</small>
+                                        {:else if cell.kind === "bomb"}
+                                            <span class="whack-sprite">💣</span>
+                                            <small>-45</small>
+                                        {:else}
+                                            <span class="whack-empty">🕳️</span>
+                                        {/if}
+                                    </button>
+                                {/each}
+                            </div>
+
+                            <div class="bj-status-msg">
+                                Tap `👾 Glitch Bugs` (+30 pts) & `🦄 Golden Unicorns` (+65 pts) — DO NOT tap `💣 Firewall Bombs` (-45 pts)! Beat <strong>{WHACK_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                            </div>
+
+                            <button class="win98-btn primary-start-btn" onclick={startWhackAGlitch}>
+                                {whackPhase === "playing"
+                                    ? "🔄 Restart Whack-A-Glitch"
+                                    : arcadePlayMode === "token"
+                                      ? "🪙 Insert 100 $UWU Token & Start (20s)"
+                                      : "🕹️ Start Free Play (20s)"}
+                            </button>
+                        </div>
+
+                    <!-- TAB 5: BALANCED CYBER MINES 5x5 -->
+                    {:else if activeArcadeTab === "mines"}
+                        <div class="arcade-cabinet-panel">
+                            <div class="hud-instructions">
+                                <strong>💣 Cyber Mines 5×5 (Strict 10% House Edge):</strong> Choose your $UWU wager and bomb count (`5`, `8`, or `12`). Every gem uncovered increases your multiplier — <strong>CASH OUT</strong> anytime before hitting a mine!
+                            </div>
+
+                            <div class="wager-selector">
+                                <span>Wager:</span>
+                                {#each WAGER_OPTIONS as w}
+                                    <button
+                                        class="win98-btn wager-btn"
+                                        class:active-wager={selectedWager === w}
+                                        disabled={minesPhase === "playing"}
+                                        onclick={() => (selectedWager = w)}
+                                    >
+                                        {w}
+                                    </button>
+                                {/each}
+                                <span style="margin-left:auto;">Mines:</span>
+                                {#each [5, 8, 12] as bCount}
+                                    <button
+                                        class="win98-btn wager-btn"
+                                        class:active-wager={minesBombCount === bCount}
+                                        disabled={minesPhase === "playing"}
+                                        onclick={() => (minesBombCount = bCount as 5 | 8 | 12)}
+                                    >
+                                        💣 {bCount}
+                                    </button>
+                                {/each}
+                            </div>
+
+                            <div class="roulette-status-bar">
+                                <span>Multiplier: <strong>{minesCurrentMultiplier.toFixed(2)}x</strong></span>
+                                <span>Next Gem: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
+                                <span>Balance: <strong>🪙 {chips.toLocaleString()} $UWU</strong></span>
+                            </div>
+
+                            <div class="mines-grid-5x5 arcade-mines-grid">
+                                {#each minesRevealed as tileState, idx}
+                                    <button
+                                        class="win98-btn mines-cell-btn"
+                                        class:revealed-gem={tileState === "gem"}
+                                        class:revealed-bomb={tileState === "bomb"}
+                                        disabled={minesPhase !== "playing" || tileState !== "hidden"}
+                                        onclick={() => clickMinesTile(idx)}
+                                    >
+                                        {#if tileState === "gem"}
+                                            💎
+                                        {:else if tileState === "bomb"}
+                                            💣
+                                        {:else}
+                                            ?
+                                        {/if}
+                                    </button>
+                                {/each}
+                            </div>
+
+                            <div class="bj-status-msg">{minesMessage}</div>
+
+                            {#if minesPhase === "playing"}
+                                <button
+                                    class="win98-btn cashout-btn"
+                                    disabled={minesSafeClicks === 0}
+                                    onclick={cashOutCyberMines}
+                                >
+                                    {minesSafeClicks > 0
+                                        ? `💰 CASH OUT +${Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU (${minesCurrentMultiplier.toFixed(2)}x)`
+                                        : "💎 Pick at least 1 tile on the 5x5 grid to Cash Out"}
+                                </button>
+                            {:else}
+                                <button class="win98-btn primary-start-btn" onclick={startCyberMines}>
+                                    💣 START CYBER MINES ({selectedWager} $UWU • {minesBombCount} Mines)
+                                </button>
+                            {/if}
+                        </div>
+                    {/if}
                 </div>
             </div>
         </div>
@@ -5084,6 +6284,284 @@
     .track-select-btn.active-track {
         background: #004d40;
         color: #00ff88;
+    }
+
+    /* --- CYBER MINES 5x5 & 90s RETRO ARCADE CENTER STYLES --- */
+    .arcade-open-btn {
+        background: linear-gradient(90deg, #4a0e4e, #004d40);
+        color: #00ffff;
+        font-weight: bold;
+    }
+
+    .mines-grid-5x5 {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+        background: #0a0e1a;
+        padding: 6px;
+        border: 2px inset #808080;
+    }
+
+    .arcade-mines-grid {
+        max-width: 310px;
+        margin: 0 auto;
+        width: 100%;
+    }
+
+    .mines-cell-btn {
+        height: 36px;
+        font-size: 15px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        background: #1a2436;
+        color: #00ffff;
+    }
+
+    .mines-cell-btn.revealed-gem {
+        background: #004d40;
+        color: #00ff88;
+        border-color: #00ff88;
+    }
+
+    .mines-cell-btn.revealed-bomb {
+        background: #6a001d;
+        color: #ffeb3b;
+        border-color: #ff1744;
+    }
+
+    .arcade-window {
+        width: 520px;
+        max-width: 96vw;
+    }
+
+    .arcade-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .arcade-tabs-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #808080;
+    }
+
+    .arcade-tab-btn {
+        flex: 1 1 auto;
+        font-size: 11px;
+        padding: 5px 6px;
+    }
+
+    .arcade-mode-banner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        background: #111625;
+        color: #e0f7fa;
+        padding: 5px 8px;
+        border: 2px inset #808080;
+        font-size: 11px;
+    }
+
+    .arcade-mode-left {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .arcade-balance-pill {
+        background: #000000;
+        color: #ffd700;
+        padding: 2px 7px;
+        border: 1px solid #ffd700;
+        font-weight: bold;
+    }
+
+    .arcade-cabinet-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .arcade-crt-stage {
+        position: relative;
+        width: 320px;
+        height: 222px;
+        margin: 0 auto;
+        background: radial-gradient(circle at 50% 35%, #160a2c 0%, #070410 100%);
+        border: 3px inset #808080;
+        overflow: hidden;
+        touch-action: none;
+        box-shadow: inset 0 0 18px rgba(0, 255, 255, 0.22);
+    }
+
+    .snake-stage {
+        background-image:
+            linear-gradient(rgba(0, 255, 255, 0.07) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 255, 255, 0.07) 1px, transparent 1px);
+        background-size: 20px 18.5px;
+    }
+
+    .arcade-brick {
+        position: absolute;
+        border: 1px solid rgba(255, 255, 255, 0.75);
+        box-shadow: 0 0 5px rgba(255, 255, 255, 0.35);
+    }
+
+    .arcade-ball {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: 0 0 8px #00ffff;
+    }
+
+    .arcade-paddle {
+        position: absolute;
+        height: 10px;
+        background: linear-gradient(90deg, #00ffff, #ff00aa);
+        border: 1px solid #ffffff;
+        border-radius: 3px;
+        box-shadow: 0 0 8px rgba(0, 255, 255, 0.7);
+    }
+
+    .coin-basket {
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: bold;
+        color: #000000;
+        background: linear-gradient(90deg, #ffd700, #00ff88);
+    }
+
+    .falling-coin-item {
+        position: absolute;
+        font-size: 18px;
+        line-height: 1;
+        pointer-events: none;
+    }
+
+    .snake-segment {
+        position: absolute;
+        width: 18px;
+        height: 16.5px;
+        background: #00e676;
+        border: 1px solid #004d40;
+        border-radius: 2px;
+    }
+
+    .snake-segment.snake-head {
+        background: #00ffff;
+        box-shadow: 0 0 6px #00ffff;
+    }
+
+    .snake-food-cell {
+        position: absolute;
+        width: 20px;
+        height: 18.5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+    }
+
+    .arcade-crt-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(6, 4, 18, 0.84);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        text-align: center;
+        color: #ffffff;
+    }
+
+    .crt-title {
+        font-size: 15px;
+        font-weight: bold;
+        color: #00ffff;
+        text-shadow: 0 0 8px #ff00aa;
+        margin-bottom: 6px;
+    }
+
+    .crt-sub {
+        font-size: 11px;
+        line-height: 1.4;
+        color: #e0f7fa;
+        margin: 0;
+    }
+
+    .arcade-controls-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .snake-dpad {
+        display: flex;
+        gap: 3px;
+    }
+
+    .whack-grid-3x3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        max-width: 310px;
+        width: 100%;
+        margin: 0 auto;
+        background: #090616;
+        padding: 8px;
+        border: 3px inset #808080;
+    }
+
+    .whack-hole-btn {
+        height: 58px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        background: #1a162b;
+        color: #ffffff;
+        font-weight: bold;
+    }
+
+    .whack-hole-btn.active-bug {
+        background: #004d40;
+        color: #00ff88;
+    }
+
+    .whack-hole-btn.active-golden {
+        background: #4a148c;
+        color: #ffd700;
+    }
+
+    .whack-hole-btn.active-bomb {
+        background: #6a001d;
+        color: #ffeb3b;
+    }
+
+    .whack-sprite {
+        font-size: 20px;
+        line-height: 1;
+    }
+
+    .whack-empty {
+        font-size: 16px;
+        opacity: 0.45;
     }
 
     @media (max-width: 768px) {
