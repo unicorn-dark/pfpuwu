@@ -30,13 +30,13 @@ CREATE POLICY "Leaderboard stats are publicly readable"
 DROP POLICY IF EXISTS "Players can upsert world stats" ON public.uwu_world_players;
 CREATE POLICY "Players can upsert world stats"
     ON public.uwu_world_players FOR INSERT
-    WITH CHECK (true);
+    WITH CHECK (user_id NOT LIKE 'user_%' AND LOWER(x_username) !~ '^anon[0-9]*$');
 
 DROP POLICY IF EXISTS "Players can update world stats" ON public.uwu_world_players;
 CREATE POLICY "Players can update world stats"
     ON public.uwu_world_players FOR UPDATE
-    USING (true)
-    WITH CHECK (true);
+    USING (user_id NOT LIKE 'user_%' AND LOWER(x_username) !~ '^anon[0-9]*$')
+    WITH CHECK (user_id NOT LIKE 'user_%' AND LOWER(x_username) !~ '^anon[0-9]*$');
 
 -- 2. P2P $UWU CHIP TRANSFERS LOG TABLE
 CREATE TABLE IF NOT EXISTS public.uwu_transfers (
