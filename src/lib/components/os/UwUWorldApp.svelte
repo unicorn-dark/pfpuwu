@@ -220,12 +220,21 @@
     let myDiceSeatIndex = $state(-1);
     let amIReady = $state(false);
     let activeDiceWager = $state(100);
+    let hasPendingReadyEscrow = $state(false);
+    const settledDiceMatchIds = new Set<string>();
 
     // Reactive Svelte 5 Mirrors for Craps Dice Duel
     let dicePhaseState = $state<DiceGamePhase>("idle");
+    let diceModeState = $state<"solo_dealer" | "pvp">("solo_dealer");
     let diceRoundState = $state(0);
+    let diceTurnIndexState = $state(0);
+    let diceActiveRollerIdState = $state<string | null>(null);
+    let diceLastRollerIdState = $state<string | null>(null);
+    let diceLastSummaryState = $state<string>(diceManager.lastRollSummary);
+    let dicePotAmountState = $state(180);
     let diceScoresState = $state<PlayerScore[]>([]);
     let diceWinnerIdState = $state<string | null>(null);
+    let diceWinnerIdsState = $state<string[]>([]);
     let diceWinnerNameState = $state<string | null>(null);
     let diceSeatsState = $state<DiceSeat[]>([...diceManager.seats]);
     let isDiceShaking = $state(false);
@@ -445,19 +454,66 @@
 
     function syncDiceReactiveState() {
         dicePhaseState = diceManager.phase;
+        diceModeState = diceManager.mode;
         diceRoundState = diceManager.currentRound;
+        diceTurnIndexState = diceManager.currentTurnIndex;
+        diceActiveRollerIdState = diceManager.activeRollerId;
+        diceLastRollerIdState = diceManager.lastRollerId;
+        diceLastSummaryState = diceManager.lastRollSummary;
+        dicePotAmountState = diceManager.potAmount || Math.round(selectedWager * 1.8);
         diceScoresState = Array.from(diceManager.scores.values()).map((s) => ({
             ...s,
             currentDice: [...s.currentDice] as [number, number],
-            roundRolls: [...s.roundRolls]
+            roundRolls: [...s.roundRolls],
+            roundDicePairs: (s.roundDicePairs || []).map((pair) => [...pair] as [number, number])
         }));
         diceWinnerIdState = diceManager.winnerId;
+        diceWinnerIdsState = [...diceManager.winnerIds];
         diceWinnerNameState = diceManager.winnerName;
         diceSeatsState = diceManager.seats.map((s) => ({ ...s }));
         const idx = diceManager.getSeatedPlayerSeat(myId);
         myDiceSeatIndex = idx;
         isSeatedAtDiceTable = idx !== -1;
         amIReady = idx !== -1 ? diceManager.seats[idx].isReady : false;
+        if (diceManager.phase !== "idle" && diceManager.phase !== "finished") {
+            hasPendingReadyEscrow = false;
+        }
+    }
+
+    function settleFinishedDiceDuelIfNeeded() {
+        if (diceManager.phase !== "finished" || !diceManager.matchId) return;
+        if (settledDiceMatchIds.has(diceManager.matchId)) return;
+        settledDiceMatchIds.add(diceManager.matchId);
+        hasPendingReadyEscrow = false;
+
+        const amInMatch = diceManager.scores.has(myId);
+        if (!amInMatch) return;
+
+        const winnerIds = diceManager.winnerIds.length > 0
+            ? diceManager.winnerIds
+            : diceManager.winnerId
+            ? [diceManager.winnerId]
+            : [];
+
+        if (winnerIds.includes(myId)) {
+            triggerConfettiCelebration();
+            synth.playWinFanfare();
+            hasHighRollerCrown = true;
+            const pot = diceManager.potAmount || Math.round(activeDiceWager * 1.8);
+            const share = Math.round(pot / Math.max(1, winnerIds.length));
+            recordGameOutcome(share, "win", share - activeDiceWager);
+            if (winnerIds.length > 1) {
+                showToast(`🤝 TIE WINNER! You split the pot for +${share} $UWU!`, 7000);
+            } else {
+                showToast(`👑 YOU WON THE DICE DUEL! Payout: +${share} $UWU!`, 7500);
+            }
+        } else {
+            recordGameOutcome(0, "loss", 0);
+            showToast(
+                `🎲 ${diceManager.winnerName || "Opponent"} won the Dice Duel (${diceManager.scores.get(diceManager.winnerId || "")?.totalSum || 0} pts)!`,
+                5500
+            );
+        }
     }
 
     function triggerDiceShakeAnim() {
@@ -792,6 +848,18 @@
         networkManager.onGraffitiSnapshot = (dataUrl) => {
             applyGraffitiDataUrl(dataUrl);
         };
+        networkManager.onDiceStateSync = (snapshot) => {
+            const { isNewRoll, justFinished } = diceManager.applySnapshot(snapshot);
+            diceTick++;
+            syncDiceReactiveState();
+            if (isNewRoll) {
+                synth.playDiceRollSfx();
+                triggerDiceShakeAnim();
+            }
+            if (justFinished) {
+                settleFinishedDiceDuelIfNeeded();
+            }
+        };
         networkManager.onDiceSeatsUpdate = (seats) => {
             diceManager.seats = seats;
             diceTick++;
@@ -807,19 +875,13 @@
             triggerDiceShakeAnim();
         };
         networkManager.onDiceTournamentWon = (winner) => {
+            diceManager.phase = "finished";
+            diceManager.winnerId = winner.id;
+            diceManager.winnerName = winner.username;
+            diceManager.winnerIds = [winner.id];
             diceTick++;
             syncDiceReactiveState();
-            if (winner.id === myId) {
-                triggerConfettiCelebration();
-                synth.playWinFanfare();
-                hasHighRollerCrown = true;
-                const payout = Math.round(activeDiceWager * 1.8);
-                recordGameOutcome(payout, "win", payout - activeDiceWager);
-                showToast(`👑 YOU WON THE DICE DUEL! Payout: +${payout} $UWU (1.8x)!`, 7500);
-            } else if (diceManager.scores.has(myId)) {
-                recordGameOutcome(0, "loss", 0);
-                showToast(`🎲 ${winner.username} won the Dice Duel (${winner.totalSum} pts)!`, 5500);
-            }
+            settleFinishedDiceDuelIfNeeded();
         };
         networkManager.onRouletteSpinResult = (winner) => {
             if (!rouletteManager.isSpinning) {
@@ -922,25 +984,15 @@
             diceTick++;
             syncDiceReactiveState();
             triggerDiceShakeAnim();
+            networkManager?.broadcastDiceState(diceManager.getSnapshot());
             networkManager?.broadcastDiceRollRound(round, scores);
         };
         diceManager.onTournamentWon = (winner) => {
             diceTick++;
             syncDiceReactiveState();
+            networkManager?.broadcastDiceState(diceManager.getSnapshot());
             networkManager?.broadcastDiceTournamentWon(winner);
-            if (winner.id === myId) {
-                triggerConfettiCelebration();
-                synth.playWinFanfare();
-                hasHighRollerCrown = true;
-                const payout = Math.round(activeDiceWager * 1.8);
-                recordGameOutcome(payout, "win", payout - activeDiceWager);
-                showToast(`👑 YOU BEAT THE HOUSE! Won +${payout} $UWU (1.8x) with ${winner.totalSum} pts!`, 7500);
-            } else {
-                if (diceManager.scores.has(myId)) {
-                    recordGameOutcome(0, "loss", 0);
-                }
-                showToast(`🎲 ${winner.username} won the Dice Duel (${winner.totalSum} pts)!`, 5500);
-            }
+            settleFinishedDiceDuelIfNeeded();
         };
 
         rouletteManager.onSpinStarted = () => {
@@ -1289,7 +1341,7 @@
         return false;
     }
 
-    // --- 1. STREAMLINED DICE DUEL ACTIONS ---
+    // --- 1. TURN-BASED 3-ROUND DICE DUEL ACTIONS (2-4 Player Party PvP & Solo vs House) ---
     function syncLocalPlayerIntoDiceRoster() {
         const allPlayers = [
             {
@@ -1301,30 +1353,54 @@
             },
             ...(networkManager?.getRemotePlayers() || [])
         ];
-        diceManager.updateOccupants(allPlayers);
+        diceManager.updateOccupants(allPlayers, myId);
         diceTick++;
         syncDiceReactiveState();
     }
 
     function sitAtDiceSeat(seatIndex: number) {
+        if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
         const seat = diceManager.seats[seatIndex];
         if (!seat) return;
-        if (gridDistance(myX, myY, seat.coord.x, seat.coord.y) <= 4.5) {
-            myX = seat.coord.x;
-            myY = seat.coord.y;
-            activeWaypoints = [];
-            syncLocalPlayerIntoDiceRoster();
-            synth.playChipSfx();
-            showToast(`🎲 Seated at ${seat.label}!`, 2500);
-        } else {
-            activeWaypoints = findPath(myX, myY, seat.coord.x, seat.coord.y, COLLISION_MAP, MAP_SIZE);
-            waypointStuckFrames = 0;
+
+        // Clicking your own seat toggles Ready!
+        if (seat.occupant?.id === myId) {
+            toggleDicePvPReady();
+            return;
         }
+        if (seat.occupant && seat.occupant.id !== myId) {
+            showToast(`🎲 ${seat.label} is taken by @${seat.occupant.username}!`, 2200);
+            return;
+        }
+
+        myX = seat.coord.x;
+        myY = seat.coord.y;
+        activeWaypoints = [];
+        diceManager.assignPlayerToSeat(
+            {
+                id: myId,
+                username: myUsername,
+                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+            },
+            seatIndex,
+            selectedWager
+        );
+        synth.playChipSfx();
+        diceTick++;
+        syncDiceReactiveState();
+        networkManager?.broadcastDiceState(diceManager.getSnapshot());
+        networkManager?.broadcastDiceSeats(diceManager.seats);
+        showToast(`🎲 Seated at ${seat.label}! Click "Ready Up" when your party is set.`, 2500);
     }
 
     function startInstantSoloDiceDuel() {
         if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
-        if (!ensureEnoughChips(selectedWager)) return;
+        if (!hasPendingReadyEscrow) {
+            if (!ensureEnoughChips(selectedWager)) return;
+            activeDiceWager = selectedWager;
+            recordGameOutcome(-activeDiceWager, "neutral", 0);
+        }
+        hasPendingReadyEscrow = false;
 
         // Snap player onto the nearest open seat around the Craps table if not already seated
         if (!diceManager.isPlayerSeated(myId)) {
@@ -1336,34 +1412,94 @@
             }
         }
         syncLocalPlayerIntoDiceRoster();
+        synth.playChipSfx();
 
-        activeDiceWager = selectedWager;
-        recordGameOutcome(-activeDiceWager, "neutral", 0);
-        synth.playDiceRollSfx();
-
-        diceManager.startSoloDuelVsHouse({
-            id: myId,
-            username: myUsername,
-            avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
-        });
+        diceManager.startSoloDuelVsHouse(
+            {
+                id: myId,
+                username: myUsername,
+                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+            },
+            activeDiceWager
+        );
         diceTick++;
         syncDiceReactiveState();
-        triggerDiceShakeAnim();
+        // Roll Round 1 immediately on click so the first click throws Round 1 dice right away!
+        diceManager.rollForCurrentTurn(myId);
     }
 
     function toggleDicePvPReady() {
         if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
-        syncLocalPlayerIntoDiceRoster();
+
+        // Auto-seat player onto first available seat if not seated yet
+        if (!diceManager.isPlayerSeated(myId)) {
+            const firstOpenIdx = diceManager.seats.findIndex((s) => !s.occupant);
+            if (firstOpenIdx === -1) {
+                showToast("⚠️ All 4 Party Seats at the Craps Table are currently full!", 3000);
+                return;
+            }
+            const targetSeat = diceManager.seats[firstOpenIdx];
+            myX = targetSeat.coord.x;
+            myY = targetSeat.coord.y;
+            activeWaypoints = [];
+            diceManager.assignPlayerToSeat(
+                {
+                    id: myId,
+                    username: myUsername,
+                    avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+                },
+                firstOpenIdx,
+                selectedWager
+            );
+        }
+
         if (!amIReady) {
             if (!ensureEnoughChips(selectedWager)) return;
             activeDiceWager = selectedWager;
             recordGameOutcome(-activeDiceWager, "neutral", 0);
+            hasPendingReadyEscrow = true;
+            synth.playChipSfx();
+        } else if (hasPendingReadyEscrow) {
+            // Refund wager escrow if unreadying before the duel starts
+            recordGameOutcome(activeDiceWager, "neutral", 0);
+            hasPendingReadyEscrow = false;
             synth.playChipSfx();
         }
-        amIReady = diceManager.toggleReady(myId);
+
+        amIReady = diceManager.toggleReady(
+            myId,
+            {
+                username: myUsername,
+                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+            },
+            activeDiceWager
+        );
         diceTick++;
         syncDiceReactiveState();
+        networkManager?.broadcastDiceState(diceManager.getSnapshot());
         networkManager?.broadcastDiceSeats(diceManager.seats);
+    }
+
+    function startManualPvPDuel() {
+        if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
+        if (!diceManager.canManualStartPvP()) return;
+        const started = diceManager.startPvPDuel(activeDiceWager);
+        if (started) {
+            synth.playChipSfx();
+            diceTick++;
+            syncDiceReactiveState();
+            networkManager?.broadcastDiceState(diceManager.getSnapshot());
+        }
+    }
+
+    function rollMyDiceTurn(forceAfk = false) {
+        const targetRollerId = forceAfk ? diceManager.activeRollerId || myId : myId;
+        const ok = diceManager.rollForCurrentTurn(targetRollerId, forceAfk);
+        if (ok) {
+            diceTick++;
+            syncDiceReactiveState();
+            networkManager?.broadcastDiceState(diceManager.getSnapshot());
+        }
     }
 
     // --- 2. MEME ROULETTE ACTIONS ---
@@ -2692,7 +2828,7 @@
                 ...(networkManager?.getRemotePlayers("casino") || [])
             ];
 
-            diceManager.updateOccupants(allPlayers);
+            diceManager.updateOccupants(allPlayers, myId);
 
             // Well-Separated Casino Station Proximity Detection
             const stationCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
@@ -3899,19 +4035,57 @@
             </div>
         {/if}
 
-        <!-- 1. CRAPS / DICE DUEL HUD (Visual 3D Dice Arena) -->
+        <!-- 1. CRAPS / DICE DUEL HUD (Turn-by-Turn 2-4 Party Arena & Solo vs House) -->
         {#if activeStation === "dice"}
             {@const isDiceRolling = dicePhaseState !== "idle" && dicePhaseState !== "finished"}
-            {@const myScore = diceScoresState.find((s) => s.id === myId)}
-            {@const oppScore = diceScoresState.find((s) => s.id !== myId) || diceScoresState[1]}
-            {@const pDie1 = isDiceShaking ? rollingAnimDice[0] : myScore?.currentDice?.[0] || 6}
-            {@const pDie2 = isDiceShaking ? rollingAnimDice[1] : myScore?.currentDice?.[1] || 6}
-            {@const dDie1 = isDiceShaking ? rollingAnimDice[2] : oppScore?.currentDice?.[0] || 5}
-            {@const dDie2 = isDiceShaking ? rollingAnimDice[3] : oppScore?.currentDice?.[1] || 5}
+            {@const seatedCount = diceSeatsState.filter((s) => s.occupant !== null).length}
+            {@const readyCount = diceSeatsState.filter((s) => s.occupant !== null && s.isReady).length}
+            {@const activeRoller = diceScoresState.find((s) => s.id === diceActiveRollerIdState) || null}
+            {@const isMyTurnToRoll = isDiceRolling && diceActiveRollerIdState === myId}
+            {@const arenaParties =
+                diceScoresState.length > 0
+                    ? diceScoresState
+                    : seatedCount >= 2
+                    ? diceSeatsState
+                          .filter((s) => s.occupant !== null)
+                          .map((s) => ({
+                              id: s.occupant!.id,
+                              username: s.occupant!.username,
+                              avatarUrl: s.occupant!.avatarUrl,
+                              roundRolls: [] as number[],
+                              roundDicePairs: [] as Array<[number, number]>,
+                              currentDice: [6, 6] as [number, number],
+                              totalSum: 0,
+                              isDealer: false
+                          }))
+                    : [
+                          {
+                              id: myId,
+                              username: myUsername || "You",
+                              avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
+                              roundRolls: [] as number[],
+                              roundDicePairs: [] as Array<[number, number]>,
+                              currentDice: [6, 6] as [number, number],
+                              totalSum: 0,
+                              isDealer: false
+                          },
+                          {
+                              id: "house_dealer",
+                              username: "🦄 House Dealer",
+                              avatarUrl: "dealer_unicorn",
+                              roundRolls: [] as number[],
+                              roundDicePairs: [] as Array<[number, number]>,
+                              currentDice: [5, 5] as [number, number],
+                              totalSum: 0,
+                              isDealer: true
+                          }
+                      ]}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎲 Craps Dice Duel</span>
-                    <span class="hud-payout-tag">1.8x Payout</span>
+                    <span class="win98-title">🎲 Craps Dice Duel ({arenaParties.length} Parties)</span>
+                    <span class="hud-payout-tag">
+                        {isDiceRolling ? `Pot: ${dicePotAmountState} $UWU` : `${readyCount}/${Math.max(2, seatedCount)} Ready`}
+                    </span>
                 </div>
                 <div class="hud-body">
                     <div class="wager-selector">
@@ -3920,7 +4094,7 @@
                             <button
                                 class="win98-btn wager-btn"
                                 class:active-wager={selectedWager === w}
-                                disabled={isDiceRolling}
+                                disabled={isDiceRolling || amIReady}
                                 onclick={() => (selectedWager = w)}
                             >
                                 {w}
@@ -3930,132 +4104,202 @@
 
                     <!-- Round Progress Steps -->
                     <div class="round-steps-row">
-                        <span class="r-pill" class:active={diceRoundState >= 1}>Round 1</span>
-                        <span class="r-pill" class:active={diceRoundState >= 2}>Round 2</span>
-                        <span class="r-pill" class:active={diceRoundState >= 3}>Round 3</span>
+                        <span class="r-pill" class:active={diceRoundState === 1} class:done={diceRoundState > 1 || dicePhaseState === "finished"}>
+                            Round 1
+                        </span>
+                        <span class="r-pill" class:active={diceRoundState === 2} class:done={diceRoundState > 2 || dicePhaseState === "finished"}>
+                            Round 2
+                        </span>
+                        <span class="r-pill" class:active={diceRoundState === 3 && dicePhaseState !== "finished"} class:done={dicePhaseState === "finished"}>
+                            Round 3
+                        </span>
                         <span class="r-pill" class:active={dicePhaseState === "finished"}>👑 Winner</span>
                     </div>
 
-                    <!-- Large Visual 3D Dice Duel Arena -->
-                    <div class="dice-arena-box">
-                        <!-- Player Side -->
-                        <div
-                            class="dice-fighter-card"
-                            class:winner-glow={dicePhaseState === "finished" && diceWinnerIdState === myId}
-                        >
-                            <div class="fighter-header">
-                                <span class="fighter-name">🧑 YOU</span>
-                                <span class="fighter-sum">{myScore ? myScore.totalSum : 0}</span>
-                            </div>
-                            <div class="dice-pair-row">
-                                {#each [pDie1, pDie2] as dieVal}
-                                    <div class="visual-die-3d player-die" class:shaking={isDiceShaking}>
-                                        {#each Array(9) as _, cellIdx}
-                                            <span
-                                                class="die-pip"
-                                                class:pip-on={(DICE_DOT_PATTERNS[dieVal] || []).includes(cellIdx)}
-                                            ></span>
-                                        {/each}
-                                    </div>
-                                {/each}
-                            </div>
-                            <div class="fighter-rounds">
-                                {#if myScore && myScore.roundRolls.length > 0}
+                    <!-- Live Turn & Roll Commentary Banner -->
+                    <div
+                        class="dice-turn-banner"
+                        class:my-turn={isMyTurnToRoll}
+                        class:finished={dicePhaseState === "finished"}
+                    >
+                        {#if isMyTurnToRoll}
+                            🎯 <strong>YOUR TURN!</strong> Click <em>"ROLL YOUR DICE"</em> below for Round {diceRoundState} of 3!
+                        {:else if isDiceRolling && diceActiveRollerIdState === "house_dealer"}
+                            🦄 <strong>House Dealer</strong> is rolling for Round {diceRoundState} of 3...
+                        {:else if isDiceRolling && activeRoller}
+                            ⏳ <strong>Round {diceRoundState}/3:</strong> Waiting for <strong>@{activeRoller.username}</strong> to roll their dice...
+                        {:else}
+                            {diceLastSummaryState}
+                        {/if}
+                    </div>
+
+                    <!-- Multi-Party 3D Visual Dice Arena Grid (Supports 2, 3, or 4 Parties!) -->
+                    <div class="dice-arena-box" class:multi-party={arenaParties.length >= 3}>
+                        {#each arenaParties as party, pIdx}
+                            {@const isPartyShaking = isDiceShaking && (diceLastRollerIdState === party.id || (!diceLastRollerIdState && pIdx === 0))}
+                            {@const die1 = isPartyShaking ? rollingAnimDice[pIdx % 2 === 0 ? 0 : 2] : party.currentDice?.[0] || 6}
+                            {@const die2 = isPartyShaking ? rollingAnimDice[pIdx % 2 === 0 ? 1 : 3] : party.currentDice?.[1] || 6}
+                            {@const isPartyActiveTurn = isDiceRolling && diceActiveRollerIdState === party.id}
+                            {@const isPartyWinner =
+                                dicePhaseState === "finished" &&
+                                (diceWinnerIdsState.includes(party.id) || diceWinnerIdState === party.id)}
+                            {@const hasRolledThisRound =
+                                isDiceRolling && party.roundRolls.length >= diceRoundState}
+                            <div
+                                class="dice-fighter-card"
+                                class:dealer-card={party.isDealer}
+                                class:active-turn-glow={isPartyActiveTurn}
+                                class:winner-glow={isPartyWinner}
+                            >
+                                <div class="fighter-header">
+                                    <span class="fighter-name">
+                                        #{pIdx + 1} {party.id === myId ? `🧑 @${party.username} (YOU)` : party.isDealer ? party.username : `⚔️ @${party.username}`}
+                                    </span>
+                                    <span class="fighter-sum" title="3-Round Total Sum">
+                                        Σ {party.totalSum}
+                                    </span>
+                                </div>
+
+                                <div class="party-turn-pill-row">
+                                    {#if isPartyWinner}
+                                        <span class="party-state-tag win">👑 WINNER</span>
+                                    {:else if isPartyActiveTurn}
+                                        <span class="party-state-tag active">🎲 ROLLING NOW</span>
+                                    {:else if hasRolledThisRound}
+                                        <span class="party-state-tag done">✓ Rolled R{diceRoundState}: {party.roundRolls[diceRoundState - 1]}</span>
+                                    {:else if isDiceRolling}
+                                        <span class="party-state-tag wait">⏳ Waiting R{diceRoundState}</span>
+                                    {:else}
+                                        {@const seatInfo = diceSeatsState.find((s) => s.occupant?.id === party.id)}
+                                        <span class="party-state-tag" class:done={seatInfo?.isReady}>
+                                            {party.isDealer ? "House Dealer" : seatInfo?.isReady ? "✅ READY" : "Seated"}
+                                        </span>
+                                    {/if}
+                                </div>
+
+                                <div class="dice-pair-row">
+                                    {#each [die1, die2] as dieVal}
+                                        <div
+                                            class="visual-die-3d"
+                                            class:player-die={!party.isDealer}
+                                            class:dealer-die={party.isDealer}
+                                            class:shaking={isPartyShaking}
+                                        >
+                                            {#each Array(9) as _, cellIdx}
+                                                <span
+                                                    class="die-pip"
+                                                    class:pip-on={(DICE_DOT_PATTERNS[dieVal] || []).includes(cellIdx)}
+                                                ></span>
+                                            {/each}
+                                        </div>
+                                    {/each}
+                                </div>
+
+                                <div class="fighter-rounds">
                                     {#each [0, 1, 2] as rIdx}
-                                        <span class="mini-r-chip" class:filled={myScore.roundRolls[rIdx] !== undefined}>
-                                            R{rIdx + 1}: {myScore.roundRolls[rIdx] ?? "–"}
+                                        <span
+                                            class="mini-r-chip"
+                                            class:filled={party.roundRolls[rIdx] !== undefined}
+                                            class:current={isDiceRolling && diceRoundState === rIdx + 1 && party.roundRolls[rIdx] === undefined}
+                                        >
+                                            R{rIdx + 1}: {party.roundRolls[rIdx] ?? "–"}
                                         </span>
                                     {/each}
-                                {:else}
-                                    <span class="mini-r-chip">Ready to roll</span>
-                                {/if}
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="dice-vs-divider">VS</div>
-
-                        <!-- House Dealer / Opponent Side -->
-                        <div
-                            class="dice-fighter-card dealer-card"
-                            class:winner-glow={dicePhaseState === "finished" && diceWinnerIdState !== null && diceWinnerIdState !== myId}
-                        >
-                            <div class="fighter-header">
-                                <span class="fighter-name">{oppScore ? oppScore.username : "🦄 Dealer"}</span>
-                                <span class="fighter-sum">{oppScore ? oppScore.totalSum : 0}</span>
-                            </div>
-                            <div class="dice-pair-row">
-                                {#each [dDie1, dDie2] as dieVal}
-                                    <div class="visual-die-3d dealer-die" class:shaking={isDiceShaking}>
-                                        {#each Array(9) as _, cellIdx}
-                                            <span
-                                                class="die-pip"
-                                                class:pip-on={(DICE_DOT_PATTERNS[dieVal] || []).includes(cellIdx)}
-                                            ></span>
-                                        {/each}
-                                    </div>
-                                {/each}
-                            </div>
-                            <div class="fighter-rounds">
-                                {#if oppScore && oppScore.roundRolls.length > 0}
-                                    {#each [0, 1, 2] as rIdx}
-                                        <span class="mini-r-chip" class:filled={oppScore.roundRolls[rIdx] !== undefined}>
-                                            R{rIdx + 1}: {oppScore.roundRolls[rIdx] ?? "–"}
-                                        </span>
-                                    {/each}
-                                {:else}
-                                    <span class="mini-r-chip">House Dealer</span>
-                                {/if}
-                            </div>
-                        </div>
+                        {/each}
                     </div>
 
                     {#if dicePhaseState === "finished"}
-                        <div class="dice-result-banner" class:win={diceWinnerIdState === myId}>
-                            {#if diceWinnerIdState === myId}
-                                👑 YOU WIN +{Math.round(activeDiceWager * 1.8)} $UWU! ({myScore?.totalSum} vs {oppScore?.totalSum})
+                        <div
+                            class="dice-result-banner"
+                            class:win={diceWinnerIdsState.includes(myId) || diceWinnerIdState === myId}
+                        >
+                            {#if diceWinnerIdsState.includes(myId) || diceWinnerIdState === myId}
+                                👑 YOU WON +{Math.round(dicePotAmountState / Math.max(1, diceWinnerIdsState.length))} $UWU! ({diceScoresState.map((s) => `${s.id === myId ? "You" : s.username}: ${s.totalSum}`).join(" · ")})
                             {:else}
-                                🎲 {diceWinnerNameState} Wins ({oppScore?.totalSum} vs {myScore?.totalSum})
+                                🎲 {diceWinnerNameState} Wins! ({diceScoresState.map((s) => `${s.id === myId ? "You" : s.username}: ${s.totalSum}`).join(" · ")})
                             {/if}
                         </div>
                     {/if}
 
-                    <!-- 4 Player Seats for PvP Mode -->
+                    <!-- 4 Party Seats around the Table (2-4 Player Multiplayer PvP) -->
                     <div class="dice-seats-row">
                         {#each diceSeatsState as seat, sIdx}
                             <button
                                 class="seat-badge"
                                 class:occupied={seat.occupant !== null}
                                 class:ready={seat.isReady}
+                                disabled={isDiceRolling}
                                 onclick={() => sitAtDiceSeat(sIdx)}
                             >
                                 <span class="seat-title">{seat.label}</span>
                                 {#if seat.occupant}
                                     <span class="seat-user">@{seat.occupant.username}</span>
+                                    <span class="seat-status">{seat.isReady ? "✅ READY" : "⏳ Sit"}</span>
                                 {:else}
-                                    <span class="seat-empty">Sit</span>
+                                    <span class="seat-empty">+ Join Seat</span>
                                 {/if}
                             </button>
                         {/each}
                     </div>
 
+                    <!-- Turn-Based Action Controls -->
                     <div class="hud-actions-col">
-                        <button
-                            class="win98-btn primary-start-btn"
-                            disabled={isDiceRolling}
-                            onclick={startInstantSoloDiceDuel}
-                        >
-                            {#if isDiceRolling}
-                                🎲 Rolling Round {Math.max(1, diceRoundState)} / 3...
-                            {:else if dicePhaseState === "finished"}
-                                🎲 Roll Again ({selectedWager} $UWU)
+                        {#if isDiceRolling}
+                            {#if isMyTurnToRoll}
+                                <button
+                                    class="win98-btn primary-start-btn roll-my-turn-btn"
+                                    onclick={() => rollMyDiceTurn(false)}
+                                >
+                                    🎲 ROLL YOUR DICE! (Round {diceRoundState} of 3)
+                                </button>
+                            {:else if diceActiveRollerIdState === "house_dealer"}
+                                <button class="win98-btn primary-start-btn" disabled>
+                                    🦄 House Dealer Rolling Round {diceRoundState} / 3...
+                                </button>
                             {:else}
-                                🎲 Roll Dice Duel ({selectedWager} $UWU)
+                                <button class="win98-btn primary-start-btn" disabled>
+                                    ⏳ Waiting for @{activeRoller?.username || "Player"} to Roll (R{diceRoundState}/3)...
+                                </button>
+                                <button
+                                    class="win98-btn bot-test-btn"
+                                    onclick={() => rollMyDiceTurn(true)}
+                                    title="Use if the other player disconnected or is AFK"
+                                >
+                                    ⚡ Nudge / Auto-Roll for AFK @{activeRoller?.username || "Player"}
+                                </button>
                             {/if}
-                        </button>
-                        {#if isSeatedAtDiceTable && diceSeatsState.filter((s) => s.occupant !== null).length >= 2 && !isDiceRolling}
-                            <button class="win98-btn bot-test-btn" onclick={toggleDicePvPReady}>
-                                {amIReady ? "✕ Cancel PvP" : `⚔️ PvP Duel (${selectedWager} $UWU)`}
-                            </button>
+                        {:else}
+                            <div class="dice-lobby-btns">
+                                <button
+                                    class="win98-btn primary-start-btn pvp-ready-btn"
+                                    class:is-ready={amIReady}
+                                    onclick={toggleDicePvPReady}
+                                >
+                                    {#if amIReady}
+                                        ✅ READY ({readyCount}/{Math.max(2, seatedCount)} Parties) — Click to Cancel
+                                    {:else}
+                                        ⚔️ Ready Up for Party Duel ({selectedWager} $UWU)
+                                    {/if}
+                                </button>
+
+                                {#if readyCount >= 2 && readyCount < seatedCount}
+                                    <button
+                                        class="win98-btn primary-start-btn start-ready-now-btn"
+                                        onclick={startManualPvPDuel}
+                                    >
+                                        🚀 Start {readyCount}-Party Duel Now!
+                                    </button>
+                                {/if}
+
+                                <button
+                                    class="win98-btn bot-test-btn"
+                                    onclick={startInstantSoloDiceDuel}
+                                >
+                                    🦄 {dicePhaseState === "finished" && diceModeState === "solo_dealer" ? "Rematch" : "Solo Duel"} vs House Dealer ({selectedWager} $UWU)
+                                </button>
+                            </div>
                         {/if}
                     </div>
                 </div>
@@ -7143,11 +7387,34 @@
         border: 1px solid rgba(255, 215, 0, 0.5);
     }
 
-    /* 3D Visual Craps Dice Arena */
+    /* 3D Visual Craps Dice Arena (2-to-4 Party Turn-Based Grid) */
+    .dice-turn-banner {
+        background: #102027;
+        color: #e0f7fa;
+        border: 1px solid #4fc3f7;
+        padding: 5px 8px;
+        font-size: 11px;
+        text-align: center;
+        border-radius: 2px;
+        line-height: 1.3;
+    }
+
+    .dice-turn-banner.my-turn {
+        background: linear-gradient(90deg, #004d40, #1b5e20);
+        color: #ffff00;
+        border-color: #00ff88;
+        box-shadow: 0 0 8px rgba(0, 255, 136, 0.45);
+    }
+
+    .dice-turn-banner.finished {
+        background: #311b92;
+        color: #ffd700;
+        border-color: #ffd700;
+    }
+
     .dice-arena-box {
-        display: flex;
-        align-items: stretch;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
         background: radial-gradient(circle at 50% 50%, #0d4228 0%, #062315 100%);
         border: 2px inset #808080;
@@ -7156,21 +7423,27 @@
     }
 
     .dice-fighter-card {
-        flex: 1;
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 6px;
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        gap: 5px;
+        background: rgba(0, 0, 0, 0.38);
+        border: 1px solid rgba(255, 255, 255, 0.22);
         padding: 6px;
         border-radius: 3px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .dice-fighter-card.active-turn-glow {
+        border-color: #00ff88;
+        box-shadow: inset 0 0 10px rgba(0, 255, 136, 0.38), 0 0 6px rgba(0, 255, 136, 0.35);
+        background: rgba(0, 255, 136, 0.12);
     }
 
     .dice-fighter-card.winner-glow {
         border-color: #ffd700;
-        box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.45);
-        background: rgba(255, 215, 0, 0.14);
+        box-shadow: inset 0 0 12px rgba(255, 215, 0, 0.5);
+        background: rgba(255, 215, 0, 0.16);
     }
 
     .fighter-header {
@@ -7180,6 +7453,7 @@
         align-items: center;
         font-size: 10px;
         font-weight: bold;
+        gap: 4px;
     }
 
     .fighter-name {
@@ -7187,17 +7461,49 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        max-width: 85px;
+        max-width: 110px;
     }
 
     .fighter-sum {
         background: #000000;
         color: #ffd700;
-        font-size: 13px;
+        font-size: 12px;
         font-family: monospace;
-        padding: 1px 6px;
+        padding: 1px 5px;
         border: 1px solid #ffd700;
         border-radius: 2px;
+        flex-shrink: 0;
+    }
+
+    .party-turn-pill-row {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    .party-state-tag {
+        font-size: 9px;
+        font-weight: bold;
+        padding: 1px 6px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #cfd8dc;
+    }
+
+    .party-state-tag.active {
+        background: #00e676;
+        color: #002211;
+    }
+
+    .party-state-tag.done {
+        background: rgba(0, 229, 255, 0.22);
+        color: #84ffff;
+        border: 1px solid rgba(0, 229, 255, 0.45);
+    }
+
+    .party-state-tag.win {
+        background: #ffd700;
+        color: #000000;
     }
 
     .dice-pair-row {
@@ -7207,8 +7513,8 @@
     }
 
     .visual-die-3d {
-        width: 42px;
-        height: 42px;
+        width: 38px;
+        height: 38px;
         background: linear-gradient(135deg, #ffffff 0%, #e6e9f0 100%);
         border: 2px solid #111111;
         border-radius: 6px;
@@ -7219,7 +7525,7 @@
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         grid-template-rows: repeat(3, 1fr);
-        padding: 5px;
+        padding: 4px;
         place-items: center;
     }
 
@@ -7245,8 +7551,8 @@
     }
 
     .die-pip {
-        width: 7px;
-        height: 7px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         background: transparent;
     }
@@ -7273,6 +7579,12 @@
         background: rgba(255, 255, 255, 0.1);
         color: #b0bec5;
         border-radius: 2px;
+        border: 1px solid transparent;
+    }
+
+    .mini-r-chip.current {
+        border-color: #ffd700;
+        color: #ffff00;
     }
 
     .mini-r-chip.filled {
@@ -7281,14 +7593,29 @@
         font-weight: bold;
     }
 
-    .dice-vs-divider {
+    .dice-lobby-btns {
         display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        font-weight: bold;
-        color: #ffd700;
-        padding: 0 2px;
+        flex-direction: column;
+        gap: 4px;
+        width: 100%;
+    }
+
+    .roll-my-turn-btn {
+        background: linear-gradient(90deg, #00c853, #009624) !important;
+        color: #ffffff !important;
+        font-size: 12px !important;
+        padding: 7px 10px !important;
+        box-shadow: 0 0 8px rgba(0, 230, 118, 0.5);
+    }
+
+    .pvp-ready-btn.is-ready {
+        background: #1b5e20 !important;
+        color: #ffff00 !important;
+    }
+
+    .start-ready-now-btn {
+        background: #ff6f00 !important;
+        color: #ffffff !important;
     }
 
     .dice-result-banner {

@@ -15,7 +15,7 @@ import { supabase } from '$lib/supabaseClient';
 import type { PlayerAvatarState, DanceMoveType } from '../isometric/avatarSprite';
 import type { IsoDirection } from '../isometric/isoMath';
 import { lerp } from '../isometric/isoMath';
-import type { PlayerScore, DiceSeat } from '../activities/diceDuel';
+import type { PlayerScore, DiceSeat, DiceDuelSnapshot } from '../activities/diceDuel';
 import type { RouletteSector } from '../activities/rouletteGame';
 import type { PlayerEconomyStats, UwuTransferRecord } from '../economy/worldEconomy';
 
@@ -58,6 +58,7 @@ export class WorldNetworkManager {
     public onUwuTransferReceived: (record: UwuTransferRecord) => void = () => {};
 
     // Casino Callbacks
+    public onDiceStateSync: (snapshot: DiceDuelSnapshot) => void = () => {};
     public onDiceSeatsUpdate: (seats: DiceSeat[]) => void = () => {};
     public onDiceRollRound: (round: number, scores: PlayerScore[]) => void = () => {};
     public onDiceTournamentWon: (winner: PlayerScore) => void = () => {};
@@ -232,6 +233,10 @@ export class WorldNetworkManager {
             .on('broadcast', { event: 'forest_event' }, ({ payload }: any) => {
                 if (!payload) return;
                 this.onForestEventReceived(payload);
+            })
+            .on('broadcast', { event: 'dice_state_sync' }, ({ payload }: any) => {
+                if (!payload || !payload.snapshot) return;
+                this.onDiceStateSync(payload.snapshot);
             })
             .on('broadcast', { event: 'dice_seat_update' }, ({ payload }: any) => {
                 if (!payload) return;
@@ -460,6 +465,15 @@ export class WorldNetworkManager {
             type: 'broadcast',
             event: 'forest_event',
             payload
+        });
+    }
+
+    public broadcastDiceState(snapshot: DiceDuelSnapshot) {
+        if (!this.channel || !snapshot) return;
+        this.channel.send({
+            type: 'broadcast',
+            event: 'dice_state_sync',
+            payload: { snapshot }
         });
     }
 
