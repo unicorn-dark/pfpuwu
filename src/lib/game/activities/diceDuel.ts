@@ -99,7 +99,7 @@ export class DiceDuelManager {
      * Does NOT put a permanent bot into seats P1-P4.
      */
     public startSoloDuelVsHouse(player: { id: string; username: string; avatarUrl: string }) {
-        if (this.phase !== 'idle') return;
+        if (this.phase !== 'idle' && this.phase !== 'finished') return;
         this.clearTimers();
 
         this.mode = 'solo_dealer';
@@ -112,7 +112,7 @@ export class DiceDuelManager {
             username: player.username,
             avatarUrl: player.avatarUrl,
             roundRolls: [],
-            currentDice: [1, 1],
+            currentDice: [6, 6],
             totalSum: 0,
             isDealer: false
         });
@@ -122,7 +122,7 @@ export class DiceDuelManager {
             username: '\u{1F984} House Dealer',
             avatarUrl: 'dealer_unicorn',
             roundRolls: [],
-            currentDice: [1, 1],
+            currentDice: [6, 6],
             totalSum: 0,
             isDealer: true
         });
@@ -257,11 +257,11 @@ export class DiceDuelManager {
             this.onTournamentWon(winner);
         }
 
+        // Keep 'finished' state & final scores visible until the player clicks Roll Again!
+        this.seats.forEach((s) => {
+            s.isReady = false;
+        });
         this.onStateChanged();
-
-        this.roundTimeout = window.setTimeout(() => {
-            this.reset();
-        }, 4500);
     }
 
     private clearTimers() {

@@ -52,7 +52,11 @@
         CAMPFIRE_ICEBREAKER_BANK,
         KOI_POND_SPECIMENS,
         type KoiSpecimen,
-        type MusicGenre
+        type MusicGenre,
+        type DiceSeat,
+        type PlayerScore,
+        type DiceGamePhase,
+        type RouletteSector
     } from "$lib/game/activities/miniGames";
     import {
         DAILY_REWARD_AMOUNT,
@@ -145,14 +149,24 @@
 
     // UI & Status
     let onlineCount = $state(1);
-    let currentZoneName = $state("🎲 High Roller Casino Lounge");
+    let currentZoneName = $state("🎲 Casino Lounge");
     let chatInput = $state("");
     let chatInputEl: HTMLInputElement | null = $state(null);
     let isChatFocused = $state(false);
     let recentChatLog = $state<Array<{ user: string; text: string; ts: number }>>([]);
     let isMusicPlaying = $state(true);
-    let currentTrackId = $state(3); // Start on Ibiza Deep House Groove
-    const DJ_GENRE_FILTERS: Array<MusicGenre | "All"> = ["All", "Classical", "House", "Electronic", "Techno", "Rave", "Ambient"];
+    let currentTrackId = $state(5); // Start on Ibiza Terrace Deep Organ Groove
+    const DJ_GENRE_FILTERS: Array<MusicGenre | "All"> = [
+        "All",
+        "Lo-Fi",
+        "Synthwave",
+        "House",
+        "Techno",
+        "DnB",
+        "Chiptune",
+        "Classical",
+        "Ambient"
+    ];
     let selectedGenreFilter = $state<MusicGenre | "All">("All");
     let roomHype = $state(42);
     let isMuted = $state(false);
@@ -165,6 +179,7 @@
     let showGraffitiModal = $state(false);
     let showDJModal = $state(false);
     let showArcadeModal = $state(false);
+    let showTravelMenu = $state(false);
 
     // Persistent Offscreen Graffiti Canvas (48x32)
     let persistentGraffitiCanvas: HTMLCanvasElement | null = null;
@@ -195,10 +210,25 @@
     let amIReady = $state(false);
     let activeDiceWager = $state(100);
 
-    // Meme Roulette State (Strict Paid-Bet Validation)
+    // Reactive Svelte 5 Mirrors for Craps Dice Duel
+    let dicePhaseState = $state<DiceGamePhase>("idle");
+    let diceRoundState = $state(0);
+    let diceScoresState = $state<PlayerScore[]>([]);
+    let diceWinnerIdState = $state<string | null>(null);
+    let diceWinnerNameState = $state<string | null>(null);
+    let diceSeatsState = $state<DiceSeat[]>([...diceManager.seats]);
+    let isDiceShaking = $state(false);
+    let rollingAnimDice = $state<[number, number, number, number]>([6, 6, 5, 5]);
+
+    // Reactive Svelte 5 Mirrors for Meme Roulette
     let activeRouletteBet = $state<string>("pepe");
     let lockedRouletteBetId = $state<string | null>(null);
     let lockedRouletteWager = $state(0);
+    let rouletteSpinningState = $state(false);
+    let rouletteCountdownState = $state(12);
+    let rouletteHistoryState = $state<RouletteSector[]>([]);
+    let rouletteAngleState = $state(0);
+    let rouletteLastWinner = $state<RouletteSector | null>(null);
 
     // --- CYBER BLACKJACK 21 STATE ---
     interface PlayingCard {
@@ -209,39 +239,40 @@
     let bjPhase = $state<"betting" | "player" | "dealer" | "done">("betting");
     let bjPlayerHand = $state<PlayingCard[]>([]);
     let bjDealerHand = $state<PlayingCard[]>([]);
-    let bjMessage = $state("Place your $UWU bet and click DEAL HAND!");
+    let bjMessage = $state("Place your wager and deal!");
     let bjCurrentBet = $state(100);
 
-    // --- GOLDEN UWU SLOTS STATE (Weighted Virtual Reel with ~9% House Edge) ---
+    // --- GOLDEN UWU SLOTS STATE ---
     const SLOT_REEL_STRIP = [
-        "💀", "💀", "💀", "💀", "💀", "💀", "💀", // 35% Blank Skull
-        "🍒", "🍒", "🍒", "🍒", "🍒",             // 25% Cherry
-        "🐸", "🐸", "🐸", "🐸",                   // 20% Pepe
-        "🚀", "🚀", "🚀",                         // 15% Rocket
-        "💎",                                     // 5% Diamond
-        "🦄"                                      // Rare Jackpot
+        "💀", "💀", "💀", "💀", "💀", "💀", "💀",
+        "🍒", "🍒", "🍒", "🍒", "🍒",
+        "🐸", "🐸", "🐸", "🐸",
+        "🚀", "🚀", "🚀",
+        "💎",
+        "🦄"
     ];
     let slotReels = $state<[string, string, string]>(["🍒", "🐸", "🚀"]);
     let isSlotSpinning = $state(false);
-    let slotMessage = $state("Match 3 across or first 2 symbols to win! (House Edge: 9%)");
+    let slotMessage = $state("Pull the lever to spin!");
 
     // --- ROCKET CRASH MULTIPLIER STATE ---
     let crashPhase = $state<"idle" | "flying" | "crashed" | "cashed_out">("idle");
     let crashMultiplier = $state(1.0);
     let crashTargetPoint = 1.0;
     let crashBetAmount = $state(100);
-    let crashMessage = $state("Launch the UwU Rocket and CASH OUT before it crashes!");
+    let crashMessage = $state("Cash out before the rocket explodes!");
     let crashTimerId: number | null = null;
     let crashHistory = $state<number[]>([1.42, 2.85, 1.0, 4.12, 1.18]);
+    let crashLastAudioMs = 0;
 
-    // --- CYBER MINES 5x5 STATE (Strict 10% House Edge Hypergeometric Multiplier) ---
+    // --- CYBER MINES 5x5 STATE ---
     let minesBombCount = $state<5 | 8 | 12>(5);
     let minesPhase = $state<"idle" | "playing" | "cashed_out" | "exploded">("idle");
     let minesBetAmount = $state(100);
     let minesBombLocations = $state<number[]>([]);
     let minesRevealed = $state<Array<"hidden" | "gem" | "bomb">>(Array(25).fill("hidden"));
     let minesSafeClicks = $state(0);
-    let minesMessage = $state("Choose 5, 8, or 12 Cyber Mines and uncover glowing gems! (10% House Edge)");
+    let minesMessage = $state("Uncover glowing gems and cash out anytime!");
 
     // --- 90s RETRO ARCADE CENTER STATE (5 Playable Games: Free Play + 100 $UWU Token Challenge) ---
     type ArcadeGameId = "mines" | "brick" | "snake" | "coin" | "whack";
@@ -392,6 +423,60 @@
     ];
 
     const DICE_PIP_ICONS = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+    const DICE_DOT_PATTERNS: Record<number, number[]> = {
+        1: [4],
+        2: [0, 8],
+        3: [0, 4, 8],
+        4: [0, 2, 6, 8],
+        5: [0, 2, 4, 6, 8],
+        6: [0, 2, 3, 5, 6, 8]
+    };
+
+    function syncDiceReactiveState() {
+        dicePhaseState = diceManager.phase;
+        diceRoundState = diceManager.currentRound;
+        diceScoresState = Array.from(diceManager.scores.values()).map((s) => ({
+            ...s,
+            currentDice: [...s.currentDice] as [number, number],
+            roundRolls: [...s.roundRolls]
+        }));
+        diceWinnerIdState = diceManager.winnerId;
+        diceWinnerNameState = diceManager.winnerName;
+        diceSeatsState = diceManager.seats.map((s) => ({ ...s }));
+        const idx = diceManager.getSeatedPlayerSeat(myId);
+        myDiceSeatIndex = idx;
+        isSeatedAtDiceTable = idx !== -1;
+        amIReady = idx !== -1 ? diceManager.seats[idx].isReady : false;
+    }
+
+    function triggerDiceShakeAnim() {
+        isDiceShaking = true;
+        let ticks = 0;
+        const animTimer = window.setInterval(() => {
+            ticks++;
+            rollingAnimDice = [
+                Math.floor(Math.random() * 6) + 1,
+                Math.floor(Math.random() * 6) + 1,
+                Math.floor(Math.random() * 6) + 1,
+                Math.floor(Math.random() * 6) + 1
+            ];
+            if (ticks >= 7) {
+                clearInterval(animTimer);
+                isDiceShaking = false;
+                syncDiceReactiveState();
+            }
+        }, 70);
+    }
+
+    function syncRouletteReactiveState() {
+        rouletteSpinningState = rouletteManager.isSpinning;
+        rouletteCountdownState = rouletteManager.countdownSeconds;
+        rouletteHistoryState = [...rouletteManager.history];
+        rouletteAngleState = rouletteManager.currentAngle;
+        if (rouletteManager.winningSector) {
+            rouletteLastWinner = rouletteManager.winningSector;
+        }
+    }
 
     const filteredDJTracks = $derived(
         selectedGenreFilter === "All"
@@ -545,13 +630,11 @@
 
         diceManager.onStateChanged = () => {
             diceTick++;
-            const idx = diceManager.getSeatedPlayerSeat(myId);
-            myDiceSeatIndex = idx;
-            isSeatedAtDiceTable = idx !== -1;
-            amIReady = idx !== -1 ? diceManager.seats[idx].isReady : false;
+            syncDiceReactiveState();
         };
         rouletteManager.onStateChanged = () => {
             rouletteTick++;
+            syncRouletteReactiveState();
         };
 
         const profile = $userProfile;
@@ -703,6 +786,7 @@
         networkManager.onDiceSeatsUpdate = (seats) => {
             diceManager.seats = seats;
             diceTick++;
+            syncDiceReactiveState();
         };
         networkManager.onDiceRollRound = (round, scores) => {
             synth.playDiceRollSfx();
@@ -710,25 +794,29 @@
             diceManager.currentRound = round;
             diceManager.lastRollTimestamp = performance.now();
             diceTick++;
+            syncDiceReactiveState();
+            triggerDiceShakeAnim();
         };
         networkManager.onDiceTournamentWon = (winner) => {
             diceTick++;
+            syncDiceReactiveState();
             if (winner.id === myId) {
                 triggerConfettiCelebration();
                 synth.playWinFanfare();
                 hasHighRollerCrown = true;
-                const payout = Math.round(activeDiceWager * 1.8); // 10% House Rake!
+                const payout = Math.round(activeDiceWager * 1.8);
                 recordGameOutcome(payout, "win", payout - activeDiceWager);
                 showToast(`👑 YOU WON THE DICE DUEL! Payout: +${payout} $UWU (1.8x)!`, 7500);
             } else if (diceManager.scores.has(myId)) {
                 recordGameOutcome(0, "loss", 0);
-                showToast(`🎲 ${winner.username} won the Dice Duel (${winner.totalSum} pts). House takes the pot!`, 5500);
+                showToast(`🎲 ${winner.username} won the Dice Duel (${winner.totalSum} pts)!`, 5500);
             }
         };
         networkManager.onRouletteSpinResult = (winner) => {
             if (!rouletteManager.isSpinning) {
                 const targetIdx = ROULETTE_SECTORS.findIndex((s) => s.id === winner.id);
                 rouletteManager.spin(targetIdx !== -1 ? targetIdx : undefined);
+                syncRouletteReactiveState();
             }
         };
         networkManager.onCasinoJackpot = (user, game, amount) => {
@@ -744,16 +832,19 @@
         diceManager.onRoundRoll = (round, scores) => {
             synth.playDiceRollSfx();
             diceTick++;
+            syncDiceReactiveState();
+            triggerDiceShakeAnim();
             networkManager?.broadcastDiceRollRound(round, scores);
         };
         diceManager.onTournamentWon = (winner) => {
             diceTick++;
+            syncDiceReactiveState();
             networkManager?.broadcastDiceTournamentWon(winner);
             if (winner.id === myId) {
                 triggerConfettiCelebration();
                 synth.playWinFanfare();
                 hasHighRollerCrown = true;
-                const payout = Math.round(activeDiceWager * 1.8); // 10% House Rake
+                const payout = Math.round(activeDiceWager * 1.8);
                 recordGameOutcome(payout, "win", payout - activeDiceWager);
                 showToast(`👑 YOU BEAT THE HOUSE! Won +${payout} $UWU (1.8x) with ${winner.totalSum} pts!`, 7500);
             } else {
@@ -767,13 +858,15 @@
         rouletteManager.onSpinStarted = () => {
             synth.playChipSfx();
             rouletteTick++;
+            syncRouletteReactiveState();
         };
 
         rouletteManager.onSpinFinished = (winner) => {
             rouletteTick++;
+            rouletteLastWinner = winner;
+            syncRouletteReactiveState();
             networkManager?.broadcastRouletteSpin(winner);
 
-            // STRICT PAID-BET VALIDATION: Only pay out if the player actually locked and paid a bet for this spin!
             if (lockedRouletteBetId && lockedRouletteWager > 0) {
                 const betId = lockedRouletteBetId;
                 const wagerAmt = lockedRouletteWager;
@@ -794,7 +887,7 @@
                 } else {
                     recordGameOutcome(0, "loss", 0);
                     showToast(
-                        `🎡 Landed on ${winner.icon} ${winner.name} (${winner.multiplier}x). House wins your ${wagerAmt} $UWU bet!`,
+                        `🎡 Landed on ${winner.icon} ${winner.name} (${winner.multiplier}x).`,
                         5000
                     );
                 }
@@ -1039,6 +1132,7 @@
 
     function teleportTo(gx: number, gy: number, zoneTitle: string, targetZone: WorldZone = "casino") {
         showGuideModal = false;
+        showTravelMenu = false;
         if (currentZone !== targetZone) {
             switchWorldZone(targetZone, gx, gy, `⚡ Teleported to ${zoneTitle}!`);
             return;
@@ -1139,6 +1233,7 @@
         ];
         diceManager.updateOccupants(allPlayers);
         diceTick++;
+        syncDiceReactiveState();
     }
 
     function sitAtDiceSeat(seatIndex: number) {
@@ -1150,7 +1245,7 @@
             activeWaypoints = [];
             syncLocalPlayerIntoDiceRoster();
             synth.playChipSfx();
-            showToast(`🎲 Seated at ${seat.label}! Click "Roll 3-Round Duel vs House Dealer" to play!`, 3000);
+            showToast(`🎲 Seated at ${seat.label}!`, 2500);
         } else {
             activeWaypoints = findPath(myX, myY, seat.coord.x, seat.coord.y, COLLISION_MAP, MAP_SIZE);
             waypointStuckFrames = 0;
@@ -1158,7 +1253,7 @@
     }
 
     function startInstantSoloDiceDuel() {
-        if (diceManager.phase !== "idle") return;
+        if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
         if (!ensureEnoughChips(selectedWager)) return;
 
         // Snap player onto the nearest open seat around the Craps table if not already seated
@@ -1182,10 +1277,12 @@
             avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
         });
         diceTick++;
+        syncDiceReactiveState();
+        triggerDiceShakeAnim();
     }
 
     function toggleDicePvPReady() {
-        if (diceManager.phase !== "idle") return;
+        if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
         syncLocalPlayerIntoDiceRoster();
         if (!amIReady) {
             if (!ensureEnoughChips(selectedWager)) return;
@@ -1195,17 +1292,22 @@
         }
         amIReady = diceManager.toggleReady(myId);
         diceTick++;
+        syncDiceReactiveState();
         networkManager?.broadcastDiceSeats(diceManager.seats);
     }
 
-    // --- 2. WEIGHTED MEME ROULETTE ACTIONS ---
-    function selectRouletteSector(betId: string) {
+    // --- 2. MEME ROULETTE ACTIONS ---
+    function selectRouletteSector(betId: string, fromCanvasTile = false) {
         activeRouletteBet = betId;
         synth.playChipSfx();
-        const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.id === betId);
-        if (sec && gridDistance(myX, myY, sec.tile.x + 0.5, sec.tile.y + 0.5) > 1.2) {
-            activeWaypoints = findPath(myX, myY, sec.tile.x + 0.5, sec.tile.y + 0.5, COLLISION_MAP, MAP_SIZE);
-            waypointStuckFrames = 0;
+        if (fromCanvasTile) {
+            // Only walk toward the Roulette pit if the player is currently outside the Roulette station radius
+            if (gridDistance(myX, myY, 19.5, 14.0) > 2.3) {
+                activeWaypoints = findPath(myX, myY, 19.5, 14.2, COLLISION_MAP, MAP_SIZE);
+                waypointStuckFrames = 0;
+            } else {
+                activeWaypoints = [];
+            }
         }
     }
 
@@ -1220,6 +1322,7 @@
 
         rouletteManager.spin();
         rouletteTick++;
+        syncRouletteReactiveState();
     }
 
     // --- 3. CYBER BLACKJACK 21 ENGINE (House Edge: 6:5 Blackjack = 2.2x, Dealer wins ties on 17) ---
@@ -1417,14 +1520,16 @@
         crashTargetPoint = generateCrashPoint();
         crashMultiplier = 1.0;
         crashPhase = "flying";
-        crashMessage = "🚀 ROCKET CLIMBING! Click CASH OUT before it explodes!";
-        synth.playChipSfx();
+        crashMessage = "🚀 ROCKET CLIMBING! Cash out before it explodes!";
+        crashLastAudioMs = performance.now();
+        synth.playCrashClimbSfx(1.0);
 
         if (crashTimerId) clearInterval(crashTimerId);
         const startTs = performance.now();
 
         crashTimerId = window.setInterval(() => {
-            const elapsedSec = (performance.now() - startTs) / 1000;
+            const nowMs = performance.now();
+            const elapsedSec = (nowMs - startTs) / 1000;
             const nextMult = Math.floor(Math.pow(1.085, elapsedSec * 10) * 100) / 100;
 
             if (nextMult >= crashTargetPoint) {
@@ -1433,13 +1538,19 @@
                 crashMultiplier = crashTargetPoint;
                 crashPhase = "crashed";
                 crashHistory = [crashTargetPoint, ...crashHistory.slice(0, 5)];
-                synth.playDiceRollSfx();
+                synth.playCrashExplosionSfx();
                 recordGameOutcome(0, "loss", 0);
-                crashMessage = `💥 CRASHED at ${crashTargetPoint.toFixed(2)}x! House takes ${crashBetAmount} $UWU.`;
+                crashMessage = `💥 EXPLODED at ${crashTargetPoint.toFixed(2)}x!`;
             } else {
                 crashMultiplier = nextMult;
+                // Dramatic accelerating Shepard-tone synth riser as multiplier climbs
+                const pulseIntervalMs = Math.max(85, 310 - Math.min(220, (nextMult - 1) * 42));
+                if (nowMs - crashLastAudioMs >= pulseIntervalMs) {
+                    crashLastAudioMs = nowMs;
+                    synth.playCrashClimbSfx(nextMult);
+                }
             }
-        }, 60);
+        }, 50);
     }
 
     function cashOutRocketCrash() {
@@ -2091,6 +2202,7 @@
     function handleCanvasPointerDown(e: MouseEvent | TouchEvent) {
         if (!canvasElement || e.target !== canvasElement) return;
 
+        showTravelMenu = false;
         voiceManager?.unlockAudio();
 
         if (isChatFocused || document.activeElement === chatInputEl) {
@@ -2113,7 +2225,7 @@
             // 1. Direct click on Roulette Betting Mats
             const clickedSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === gx && s.tile.y === gy);
             if (clickedSector) {
-                selectRouletteSector(clickedSector.id);
+                selectRouletteSector(clickedSector.id, true);
                 return;
             }
 
@@ -2514,15 +2626,9 @@
             if (isSeatedAtDiceTable) {
                 amIReady = diceManager.seats[myDiceSeatIndex].isReady;
             }
-
-            // Auto-select Roulette sector when stepping onto a Roulette floor mat (x: 18..20, y: 14..15)
-            const curTx = Math.floor(myX);
-            const curTy = Math.floor(myY);
-            const matSector = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === curTx && s.tile.y === curTy);
-            if (matSector && activeRouletteBet !== matSector.id) {
-                activeRouletteBet = matSector.id;
-                synth.playChipSfx();
-                showToast(`🎰 Selected ${matSector.icon} ${matSector.name} (${matSector.multiplier}x)! Click LOCK BET & SPIN!`, 2800);
+            if (rouletteManager.isSpinning) {
+                rouletteAngleState = rouletteManager.currentAngle;
+                rouletteSpinningState = true;
             }
         } else {
             // Whispering Woods Social Station Proximity Detection
@@ -3458,37 +3564,37 @@
         let promptText = "";
         if (currentZone === "casino") {
             if (activeStation === "dice") {
-                promptText = "🎲 Craps Table: Click [🎲 Roll 3-Round Duel vs House Dealer] in the HUD!";
+                promptText = "🎲 Craps Table [Press E to Roll]";
             } else if (activeStation === "roulette") {
-                promptText = "🎡 Meme Roulette: Pick a sector & click [🎰 LOCK BET & SPIN] in the HUD!";
+                promptText = "🎡 Meme Roulette [Press E to Spin]";
             } else if (activeStation === "blackjack") {
-                promptText = "🃏 Cyber Blackjack 21: Play against the Unicorn House Dealer in the HUD!";
+                promptText = "🃏 Blackjack 21 [Press E to Deal]";
             } else if (activeStation === "slots") {
-                promptText = "🎰 Golden UwU Slots: Press [E] or click PULL LEVER in the HUD!";
+                promptText = "🎰 Golden Slots [Press E to Spin]";
             } else if (activeStation === "crash") {
-                promptText = "🚀 Rocket Crash: Launch & Cash Out before the explosion!";
+                promptText = "🚀 Rocket Crash [Press E]";
             } else if (activeStation === "mines") {
-                promptText = "💣 Cyber Mines 5x5: Uncover gems & Cash Out anytime (10% House Edge)!";
+                promptText = "💣 Cyber Mines [Press E]";
             } else if (gridDistance(myX, myY, 27.5, 12.5) <= 3.5) {
-                promptText = "🕹️ 90s Retro Arcade Center: Press [E] or click cabinets to play 5 Arcade Games!";
+                promptText = "🕹️ Retro Arcade [Press E / Click]";
             } else if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
-                promptText = "🪩 DJ Stage: Press [E] to pick Classical, House, Electronic, Techno, Rave, or Ambient!";
+                promptText = "🪩 DJ Booth [Press E / Click]";
             } else if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
-                promptText = "🎨 Live Graffiti Wall: Press [E] or click wall to paint (Saved permanently)!";
+                promptText = "🎨 Graffiti Wall [Press E / Click]";
             } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🌲 East Portal: Walk off the East edge to enter the Whispering Woods Social Zone!";
+                promptText = "🌲 Walk East → Whispering Woods";
             }
         } else {
             if (activeStation === "campfire") {
-                promptText = "🔥 Campfire Circle: Answer Trivia, Icebreakers & share stories in the HUD!";
+                promptText = "🔥 Campfire Circle";
             } else if (activeStation === "picnic") {
-                promptText = "🧺 Woodland Picnic: Share Matcha Tea & treats with friends in the HUD!";
+                promptText = "🧺 Woodland Picnic";
             } else if (activeStation === "fishing") {
-                promptText = "🎣 Peaceful Koi Pond: Press [E] or click Cast Line in the HUD!";
+                promptText = "🎣 Koi Pond [Press E to Cast]";
             } else if (activeStation === "fireflies") {
-                promptText = "✨ Firefly Wishing Shrine: Catch fireflies & release a lantern wish in the HUD!";
+                promptText = "✨ Firefly Shrine [Press E]";
             } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🎲 West Portal: Walk off the West edge to return to the Casino Lounge!";
+                promptText = "🎲 Walk West → Casino Lounge";
             }
         }
 
@@ -3518,33 +3624,33 @@
     function renderHoverTooltip(ctx: CanvasRenderingContext2D, hx: number, hy: number) {
         let hoverLabel = "";
         if (currentZone === "casino") {
-            if (hx === 10 && hy === 13) hoverLabel = "🎲 Dice Seat P1 (Click to Sit)";
-            else if (hx === 12 && hy === 13) hoverLabel = "🎲 Dice Seat P2 (Click to Sit)";
-            else if (hx === 11 && hy === 12) hoverLabel = "🎲 Dice Seat P3 (Click to Sit)";
-            else if (hx === 11 && hy === 14) hoverLabel = "🎲 Dice Seat P4 (Click to Sit)";
-            else if (hx === 11 && hy === 13) hoverLabel = "🎲 3-Round Craps Table (NW Pit)";
-            else if (hx === 19 && hy === 12) hoverLabel = "🎡 Meme Roulette Wheel (NE Pit)";
-            else if (hx === 11 && hy === 19) hoverLabel = "🃏 Cyber Blackjack 21 (SW Pit)";
-            else if ((hx === 20 || hx === 21) && hy === 19) hoverLabel = "🎰 Golden UwU Slot Machine (SE Pit)";
-            else if (hx === 15 && hy === 12) hoverLabel = "🚀 Rocket Crash Terminal";
-            else if (hx >= 26 && hx <= 28 && hy === 12) hoverLabel = "🕹️ 90s Retro Arcade Center (5 Games — Click to Open)";
-            else if ((hx === 27 || hx === 28) && hy === 19) hoverLabel = "💣 Cyber Mines 5x5 Table (10% House Edge)";
+            if (hx === 10 && hy === 13) hoverLabel = "🎲 Seat P1";
+            else if (hx === 12 && hy === 13) hoverLabel = "🎲 Seat P2";
+            else if (hx === 11 && hy === 12) hoverLabel = "🎲 Seat P3";
+            else if (hx === 11 && hy === 14) hoverLabel = "🎲 Seat P4";
+            else if (hx === 11 && hy === 13) hoverLabel = "🎲 Craps Table";
+            else if (hx === 19 && hy === 12) hoverLabel = "🎡 Meme Roulette";
+            else if (hx === 11 && hy === 19) hoverLabel = "🃏 Blackjack 21";
+            else if ((hx === 20 || hx === 21) && hy === 19) hoverLabel = "🎰 Golden Slots";
+            else if (hx === 15 && hy === 12) hoverLabel = "🚀 Rocket Crash";
+            else if (hx >= 26 && hx <= 28 && hy === 12) hoverLabel = "🕹️ Retro Arcade";
+            else if ((hx === 27 || hx === 28) && hy === 19) hoverLabel = "💣 Cyber Mines";
             else if (hx >= 18 && hx <= 20 && (hy === 14 || hy === 15)) {
                 const sec = BETTABLE_ROULETTE_SECTORS.find((s) => s.tile.x === hx && s.tile.y === hy);
-                if (sec) hoverLabel = `${sec.icon} Bet ${sec.name} (${sec.multiplier}x — ${sec.weight}% odds)`;
-            } else if ((hx === 15 || hx === 16) && hy === 2) hoverLabel = "🪩 Multi-Genre DJ Booth";
-            else if ((hx === 27 || hx === 28) && hy === 15) hoverLabel = "🎨 Persistent Live Graffiti Mural";
-            else if (hx >= 30 && hy >= 14 && hy <= 17) hoverLabel = "🌲 Walk East to Whispering Woods Social Zone";
+                if (sec) hoverLabel = `${sec.icon} ${sec.name} (${sec.multiplier}x)`;
+            } else if ((hx === 15 || hx === 16) && hy === 2) hoverLabel = "🪩 DJ Booth";
+            else if ((hx === 27 || hx === 28) && hy === 15) hoverLabel = "🎨 Graffiti Wall";
+            else if (hx >= 30 && hy >= 14 && hy <= 17) hoverLabel = "🌲 Whispering Woods";
         } else {
-            if (hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17) hoverLabel = "🔥 Campfire Story & Trivia Circle";
+            if (hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17) hoverLabel = "🔥 Campfire Circle";
             else if (
                 (hx >= 9 && hx <= 11 && hy >= 8 && hy <= 10) ||
                 (hx >= 22 && hx <= 24 && hy >= 9 && hy <= 11)
             )
-                hoverLabel = "🧺 Woodland Tea & Berry Picnic";
-            else if (hx >= 9 && hx <= 13 && hy >= 20 && hy <= 25) hoverLabel = "🎣 Peaceful Koi Pond Dock";
-            else if (hx >= 21 && hx <= 23 && hy >= 21 && hy <= 24) hoverLabel = "✨ Firefly Wishing Shrine";
-            else if (hx <= 1 && hy >= 14 && hy <= 17) hoverLabel = "🎲 Walk West to Return to Casino Lounge";
+                hoverLabel = "🧺 Woodland Picnic";
+            else if (hx >= 9 && hx <= 13 && hy >= 20 && hy <= 25) hoverLabel = "🎣 Koi Pond";
+            else if (hx >= 21 && hx <= 23 && hy >= 21 && hy <= 24) hoverLabel = "✨ Firefly Shrine";
+            else if (hx <= 1 && hy >= 14 && hy <= 17) hoverLabel = "🎲 Casino Lounge";
         }
 
         if (hoverLabel) {
@@ -3571,63 +3677,95 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="mmo-container" bind:this={containerElement}>
-    <!-- Top Windows 98 Toolbar -->
+    <!-- Sleek Single-Row Top HUD Bar -->
     <div class="mmo-toolbar">
         <div class="toolbar-left">
-            <span class="room-pill">{currentZoneName}</span>
-            <span class="online-pill">🟢 {onlineCount}</span>
-            <span class="chips-pill" title="Your $UWU Casino Balance & Win/Loss Record">
+            <span class="room-pill">
+                {currentZoneName}
+                <span class="online-inline">🟢 {onlineCount}</span>
+            </span>
+
+            <span class="chips-pill" title="Record: {myWins}W - {myLosses}L">
                 🪙 {chips.toLocaleString()} $UWU
-                <span class="wl-badge">({myWins}W-{myLosses}L)</span>
             </span>
 
             <button
                 class="win98-btn daily-reward-btn"
                 class:daily-ready={dailyStatus.canClaim}
                 onclick={claimDailyReward}
-                title="Claim 1,000 $UWU once every 24 hours"
+                title="Claim 1,000 $UWU Daily Reward"
             >
-                {dailyStatus.canClaim
-                    ? "🎁 Daily +1,000 $UWU"
-                    : `⏳ Daily (${dailyStatus.formattedRemaining})`}
+                {dailyStatus.canClaim ? "🎁 +1,000" : `⏳ ${dailyStatus.formattedRemaining}`}
             </button>
-        </div>
-
-        <!-- Quick Travel District Navigator -->
-        <div class="quick-travel-bar">
-            <span class="qt-label">⚡ Travel:</span>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(15.5, 16.5, "Casino Center", "casino")}>🎲 Casino</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 6.5, "Cyber Nightclub", "casino")}>🪩 Club</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(27.5, 13.8, "90s Retro Arcade", "casino")}>🕹️ Arcade</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines 5x5", "casino")}>💣 Mines</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza", "casino")}>⛲ Plaza</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(25.5, 15.5, "Graffiti Wall", "casino")}>🎨 Wall</button>
-            <button class="win98-btn qt-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>🌲 Woods</button>
         </div>
 
         <div class="toolbar-right">
-            <button class="win98-btn arcade-open-btn" onclick={() => openArcadeModal("brick")} title="Open 90s Retro Arcade Center (5 Games)">
+            <!-- Compact Map Teleport Dropdown -->
+            <div class="travel-dropdown-wrap">
+                <button
+                    class="win98-btn map-menu-btn"
+                    class:active-wager={showTravelMenu}
+                    onclick={(e) => {
+                        e.stopPropagation();
+                        showTravelMenu = !showTravelMenu;
+                    }}
+                >
+                    🗺️ Map ▾
+                </button>
+                {#if showTravelMenu}
+                    <div class="travel-popover win98-window" onclick={(e) => e.stopPropagation()}>
+                        <button class="travel-item" onclick={() => teleportTo(15.5, 16.5, "Casino Floor", "casino")}>
+                            🎲 Casino Floor
+                        </button>
+                        <button class="travel-item" onclick={() => teleportTo(16.0, 6.5, "Club DJ Stage", "casino")}>
+                            🪩 Club DJ Stage
+                        </button>
+                        <button class="travel-item" onclick={() => teleportTo(27.5, 13.8, "Retro Arcade", "casino")}>
+                            🕹️ Retro Arcade
+                        </button>
+                        <button class="travel-item" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines", "casino")}>
+                            💣 Cyber Mines
+                        </button>
+                        <button class="travel-item" onclick={() => teleportTo(25.5, 15.5, "Graffiti Wall", "casino")}>
+                            🎨 Graffiti Wall
+                        </button>
+                        <button class="travel-item" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza", "casino")}>
+                            ⛲ Grand Plaza
+                        </button>
+                        <button class="travel-item woods-item" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>
+                            🌲 Whispering Woods
+                        </button>
+                    </div>
+                {/if}
+            </div>
+
+            <button class="win98-btn arcade-open-btn" onclick={() => openArcadeModal("brick")}>
                 🕹️ Arcade
             </button>
 
+            <button class="win98-btn dj-open-btn" onclick={() => (showDJModal = true)} title="Open DJ Turntable Deck">
+                🪩 DJ
+            </button>
+
             <button class="win98-btn leaderboard-btn" onclick={openLeaderboard}>
-                🏆 Leaderboard
+                🏆 Ranks
             </button>
 
             <button class="win98-btn send-uwu-btn" onclick={() => openSendUwuModal("")}>
-                💸 Send $UWU
+                💸 Tip
             </button>
 
-            <button class="win98-btn guide-btn" onclick={() => openChatDrawer()} title="Open Global Chat">
+            <button class="win98-btn guide-btn" onclick={() => openChatDrawer()} title="Global Chat">
                 💬 Chat
             </button>
 
-            <button class="win98-btn guide-btn" onclick={() => (showGuideModal = true)}>
-                📖 Guide
+            <button class="win98-btn icon-only-btn" onclick={() => (showGuideModal = true)} title="World Guide">
+                📖
             </button>
 
             <button
-                class="win98-btn sound-btn"
+                class="win98-btn icon-only-btn"
+                title={isMusicPlaying ? "Mute Music" : "Play Music"}
                 onclick={() => {
                     isMusicPlaying = !isMusicPlaying;
                     synth.setMute(!isMusicPlaying);
@@ -3638,7 +3776,8 @@
             </button>
 
             <button
-                class="win98-btn voice-btn"
+                class="win98-btn icon-only-btn"
+                title="Toggle Microphone"
                 onclick={async () => {
                     await ensureVoiceInitialized();
                     if (voiceManager) {
@@ -3646,7 +3785,7 @@
                     }
                 }}
             >
-                {isMuted ? "🔇 Mic" : "🎙️"}
+                {isMuted ? "🔇" : "🎙️"}
             </button>
         </div>
     </div>
@@ -3667,28 +3806,28 @@
             </div>
         {/if}
 
-        <!-- 1. OVERHAULED CRAPS / DICE DUEL HUD (NW Pit: 11.5, 13.5) -->
+        <!-- 1. CRAPS / DICE DUEL HUD (Visual 3D Dice Arena) -->
         {#if activeStation === "dice"}
-            <div class="game-hud win98-window" data-tick={diceTick}>
+            {@const isDiceRolling = dicePhaseState !== "idle" && dicePhaseState !== "finished"}
+            {@const myScore = diceScoresState.find((s) => s.id === myId)}
+            {@const oppScore = diceScoresState.find((s) => s.id !== myId) || diceScoresState[1]}
+            {@const pDie1 = isDiceShaking ? rollingAnimDice[0] : myScore?.currentDice?.[0] || 6}
+            {@const pDie2 = isDiceShaking ? rollingAnimDice[1] : myScore?.currentDice?.[1] || 6}
+            {@const dDie1 = isDiceShaking ? rollingAnimDice[2] : oppScore?.currentDice?.[0] || 5}
+            {@const dDie2 = isDiceShaking ? rollingAnimDice[3] : oppScore?.currentDice?.[1] || 5}
+            <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎲 3-Round Craps Duel (1.8x Payout • 10% House Edge)</span>
+                    <span class="win98-title">🎲 Craps Dice Duel</span>
+                    <span class="hud-payout-tag">1.8x Payout</span>
                 </div>
                 <div class="hud-body">
-                    <div class="bj-dealer-banner">
-                        <img src={dealerAvatarSrc} alt="Craps House Dealer" class="bj-dealer-sprite" />
-                        <div class="bj-dealer-info">
-                            <strong>🦄 Standing Craps House Dealer</strong>
-                            <span>Roll 2 dice for 3 rounds! Highest 3-round total wins <strong>1.8x</strong>. Dealer wins ties.</span>
-                        </div>
-                    </div>
-
                     <div class="wager-selector">
                         <span>Wager:</span>
                         {#each WAGER_OPTIONS as w}
                             <button
                                 class="win98-btn wager-btn"
                                 class:active-wager={selectedWager === w}
-                                disabled={diceManager.phase !== "idle"}
+                                disabled={isDiceRolling}
                                 onclick={() => (selectedWager = w)}
                             >
                                 {w}
@@ -3696,42 +3835,100 @@
                         {/each}
                     </div>
 
-                    <!-- Round Progress Bar & Live Scoreboard -->
-                    {#if diceManager.phase !== "idle"}
-                        <div class="dice-tournament-banner">
-                            <div class="round-steps-row">
-                                <span class="r-pill" class:active={diceManager.currentRound >= 1}>R1</span>
-                                <span class="r-pill" class:active={diceManager.currentRound >= 2}>R2</span>
-                                <span class="r-pill" class:active={diceManager.currentRound >= 3}>R3</span>
-                                <span class="r-pill" class:active={diceManager.phase === "finished"}>🏆 Result</span>
-                            </div>
+                    <!-- Round Progress Steps -->
+                    <div class="round-steps-row">
+                        <span class="r-pill" class:active={diceRoundState >= 1}>Round 1</span>
+                        <span class="r-pill" class:active={diceRoundState >= 2}>Round 2</span>
+                        <span class="r-pill" class:active={diceRoundState >= 3}>Round 3</span>
+                        <span class="r-pill" class:active={dicePhaseState === "finished"}>👑 Winner</span>
+                    </div>
 
-                            <div class="scores-table">
-                                {#each Array.from(diceManager.scores.values()) as score}
-                                    <div class="player-score-row" class:is-winner={score.id === diceManager.winnerId}>
-                                        <span class="score-name">{score.username}</span>
-                                        <span class="score-dice">
-                                            {DICE_PIP_ICONS[score.currentDice[0]] || "🎲"}{DICE_PIP_ICONS[score.currentDice[1]] || "🎲"} ({score.currentDice[0] + score.currentDice[1]})
-                                        </span>
-                                        <span class="score-rounds">[{score.roundRolls.join(" + ")}]</span>
-                                        <span class="score-total">= {score.totalSum}</span>
+                    <!-- Large Visual 3D Dice Duel Arena -->
+                    <div class="dice-arena-box">
+                        <!-- Player Side -->
+                        <div
+                            class="dice-fighter-card"
+                            class:winner-glow={dicePhaseState === "finished" && diceWinnerIdState === myId}
+                        >
+                            <div class="fighter-header">
+                                <span class="fighter-name">🧑 YOU</span>
+                                <span class="fighter-sum">{myScore ? myScore.totalSum : 0}</span>
+                            </div>
+                            <div class="dice-pair-row">
+                                {#each [pDie1, pDie2] as dieVal}
+                                    <div class="visual-die-3d player-die" class:shaking={isDiceShaking}>
+                                        {#each Array(9) as _, cellIdx}
+                                            <span
+                                                class="die-pip"
+                                                class:pip-on={(DICE_DOT_PATTERNS[dieVal] || []).includes(cellIdx)}
+                                            ></span>
+                                        {/each}
                                     </div>
                                 {/each}
                             </div>
+                            <div class="fighter-rounds">
+                                {#if myScore && myScore.roundRolls.length > 0}
+                                    {#each [0, 1, 2] as rIdx}
+                                        <span class="mini-r-chip" class:filled={myScore.roundRolls[rIdx] !== undefined}>
+                                            R{rIdx + 1}: {myScore.roundRolls[rIdx] ?? "–"}
+                                        </span>
+                                    {/each}
+                                {:else}
+                                    <span class="mini-r-chip">Ready to roll</span>
+                                {/if}
+                            </div>
+                        </div>
 
-                            {#if diceManager.phase === "finished"}
-                                <div class="tournament-winner">
-                                    {diceManager.winnerId === myId
-                                        ? `👑 YOU WON +${Math.round(activeDiceWager * 1.8)} $UWU!`
-                                        : `🏠 ${diceManager.winnerName} Wins!`}
-                                </div>
+                        <div class="dice-vs-divider">VS</div>
+
+                        <!-- House Dealer / Opponent Side -->
+                        <div
+                            class="dice-fighter-card dealer-card"
+                            class:winner-glow={dicePhaseState === "finished" && diceWinnerIdState !== null && diceWinnerIdState !== myId}
+                        >
+                            <div class="fighter-header">
+                                <span class="fighter-name">{oppScore ? oppScore.username : "🦄 Dealer"}</span>
+                                <span class="fighter-sum">{oppScore ? oppScore.totalSum : 0}</span>
+                            </div>
+                            <div class="dice-pair-row">
+                                {#each [dDie1, dDie2] as dieVal}
+                                    <div class="visual-die-3d dealer-die" class:shaking={isDiceShaking}>
+                                        {#each Array(9) as _, cellIdx}
+                                            <span
+                                                class="die-pip"
+                                                class:pip-on={(DICE_DOT_PATTERNS[dieVal] || []).includes(cellIdx)}
+                                            ></span>
+                                        {/each}
+                                    </div>
+                                {/each}
+                            </div>
+                            <div class="fighter-rounds">
+                                {#if oppScore && oppScore.roundRolls.length > 0}
+                                    {#each [0, 1, 2] as rIdx}
+                                        <span class="mini-r-chip" class:filled={oppScore.roundRolls[rIdx] !== undefined}>
+                                            R{rIdx + 1}: {oppScore.roundRolls[rIdx] ?? "–"}
+                                        </span>
+                                    {/each}
+                                {:else}
+                                    <span class="mini-r-chip">House Dealer</span>
+                                {/if}
+                            </div>
+                        </div>
+                    </div>
+
+                    {#if dicePhaseState === "finished"}
+                        <div class="dice-result-banner" class:win={diceWinnerIdState === myId}>
+                            {#if diceWinnerIdState === myId}
+                                👑 YOU WIN +{Math.round(activeDiceWager * 1.8)} $UWU! ({myScore?.totalSum} vs {oppScore?.totalSum})
+                            {:else}
+                                🎲 {diceWinnerNameState} Wins ({oppScore?.totalSum} vs {myScore?.totalSum})
                             {/if}
                         </div>
                     {/if}
 
                     <!-- 4 Player Seats for PvP Mode -->
                     <div class="dice-seats-row">
-                        {#each diceManager.seats as seat, sIdx}
+                        {#each diceSeatsState as seat, sIdx}
                             <button
                                 class="seat-badge"
                                 class:occupied={seat.occupant !== null}
@@ -3741,27 +3938,30 @@
                                 <span class="seat-title">{seat.label}</span>
                                 {#if seat.occupant}
                                     <span class="seat-user">@{seat.occupant.username}</span>
-                                    <span class="seat-status">{seat.isReady ? "✅ READY" : "🪑 Seated"}</span>
                                 {:else}
-                                    <span class="seat-empty">[Sit Here]</span>
+                                    <span class="seat-empty">Sit</span>
                                 {/if}
                             </button>
                         {/each}
                     </div>
 
                     <div class="hud-actions-col">
-                        {#if diceManager.phase === "idle"}
-                            <button class="win98-btn primary-start-btn" onclick={startInstantSoloDiceDuel}>
-                                🎲 Roll 3-Round Duel vs House Dealer ({selectedWager} $UWU)
-                            </button>
-                            {#if isSeatedAtDiceTable && diceManager.seats.filter((s) => s.occupant !== null).length >= 2}
-                                <button class="win98-btn bot-test-btn" onclick={toggleDicePvPReady}>
-                                    {amIReady ? "✕ Cancel PvP Ready" : `⚔️ Ready for Multiplayer PvP (${selectedWager} $UWU)`}
-                                </button>
+                        <button
+                            class="win98-btn primary-start-btn"
+                            disabled={isDiceRolling}
+                            onclick={startInstantSoloDiceDuel}
+                        >
+                            {#if isDiceRolling}
+                                🎲 Rolling Round {Math.max(1, diceRoundState)} / 3...
+                            {:else if dicePhaseState === "finished"}
+                                🎲 Roll Again ({selectedWager} $UWU)
+                            {:else}
+                                🎲 Roll Dice Duel ({selectedWager} $UWU)
                             {/if}
-                        {:else if diceManager.phase === "finished"}
-                            <button class="win98-btn primary-start-btn" onclick={() => diceManager.reset()}>
-                                🔄 Roll Again
+                        </button>
+                        {#if isSeatedAtDiceTable && diceSeatsState.filter((s) => s.occupant !== null).length >= 2 && !isDiceRolling}
+                            <button class="win98-btn bot-test-btn" onclick={toggleDicePvPReady}>
+                                {amIReady ? "✕ Cancel PvP" : `⚔️ PvP Duel (${selectedWager} $UWU)`}
                             </button>
                         {/if}
                     </div>
@@ -3769,15 +3969,49 @@
             </div>
         {/if}
 
-        <!-- 2. WEIGHTED MEME ROULETTE HUD (NE Pit: 19.5, 12.5) -->
+        <!-- 2. MEME ROULETTE HUD -->
         {#if activeStation === "roulette"}
-            <div class="game-hud win98-window" data-tick={rouletteTick}>
+            {@const selectedSectorObj = BETTABLE_ROULETTE_SECTORS.find((s) => s.id === activeRouletteBet)}
+            <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎡 Meme Roulette (Weighted Wheel + 💀 12% House Zero)</span>
+                    <span class="win98-title">🎡 Meme Roulette</span>
+                    <span class="hud-payout-tag">
+                        {rouletteSpinningState ? "🌀 Spinning..." : `⏱️ ${rouletteCountdownState}s`}
+                    </span>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>Casino Odds:</strong> 100-pocket weighted wheel including <strong>💀 House Zero (0x — 12% chance)</strong>. Pick a sector and click <strong>LOCK BET & SPIN</strong>!
+                    <!-- Visual Spinning Wheel Header -->
+                    <div class="roulette-wheel-banner">
+                        <div class="wheel-disc-wrap">
+                            <div
+                                class="wheel-disc"
+                                style="transform: rotate({(rouletteAngleState * 180) / Math.PI}deg)"
+                            >
+                                🎡
+                            </div>
+                        </div>
+                        <div class="wheel-info-col">
+                            <div class="wheel-result-line">
+                                {#if rouletteSpinningState}
+                                    <span class="spinning-badge">🌀 Wheel in motion...</span>
+                                {:else if rouletteLastWinner}
+                                    <span>
+                                        Landed: <strong>{rouletteLastWinner.icon} {rouletteLastWinner.name}</strong>
+                                        ({rouletteLastWinner.multiplier}x)
+                                    </span>
+                                {:else}
+                                    <span>Pick an emoji below & spin!</span>
+                                {/if}
+                            </div>
+                            {#if rouletteHistoryState.length > 0}
+                                <div class="wheel-history-row">
+                                    <span>History:</span>
+                                    {#each rouletteHistoryState.slice(0, 6) as h}
+                                        <span class="hist-pip" title="{h.name} ({h.multiplier}x)">{h.icon}</span>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
                     </div>
 
                     <div class="wager-selector">
@@ -3786,7 +4020,7 @@
                             <button
                                 class="win98-btn wager-btn"
                                 class:active-wager={selectedWager === w}
-                                disabled={rouletteManager.isSpinning}
+                                disabled={rouletteSpinningState}
                                 onclick={() => (selectedWager = w)}
                             >
                                 {w}
@@ -3794,35 +4028,18 @@
                         {/each}
                     </div>
 
-                    <div class="roulette-status-bar">
-                        <span>
-                            {#if rouletteManager.isSpinning}
-                                🌀 <strong>SPINNING WHEEL...</strong>
-                            {:else}
-                                ⏱️ Next Auto-Spin: <strong>{rouletteManager.countdownSeconds}s</strong>
-                            {/if}
-                        </span>
-                        {#if rouletteManager.history.length > 0}
-                            <span class="roulette-history">
-                                Last:
-                                {#each rouletteManager.history.slice(0, 5) as h}
-                                    <span title="{h.name} ({h.multiplier}x)">{h.icon}</span>
-                                {/each}
-                            </span>
-                        {/if}
-                    </div>
-
                     <div class="roulette-grid">
                         {#each BETTABLE_ROULETTE_SECTORS as sector}
                             <button
+                                type="button"
                                 class="win98-btn meme-tile-btn"
                                 class:active-bet={activeRouletteBet === sector.id}
-                                onclick={() => selectRouletteSector(sector.id)}
+                                onclick={() => selectRouletteSector(sector.id, false)}
                             >
                                 <span class="meme-icon">{sector.icon}</span>
                                 <span class="meme-title">{sector.name}</span>
                                 <span class="meme-multiplier" style="color: {sector.color}">
-                                    {sector.multiplier}x <small>({sector.weight}%)</small>
+                                    {sector.multiplier}x
                                 </span>
                             </button>
                         {/each}
@@ -3830,32 +4047,25 @@
 
                     <button
                         class="win98-btn primary-start-btn"
-                        disabled={rouletteManager.isSpinning}
+                        disabled={rouletteSpinningState}
                         onclick={spinRouletteWithBet}
                     >
-                        {rouletteManager.isSpinning
-                            ? "🎡 WHEEL SPINNING..."
-                            : `🎰 LOCK BET & SPIN NOW (${selectedWager} $UWU)`}
+                        {rouletteSpinningState
+                            ? "🎡 SPINNING..."
+                            : `🎰 SPIN ON ${selectedSectorObj?.icon || "🐸"} ${selectedSectorObj?.name || "Pepe"} (${selectedWager} $UWU)`}
                     </button>
                 </div>
             </div>
         {/if}
 
-        <!-- 3. CYBER BLACKJACK 21 HUD (SW Pit: 11.5, 19.5) -->
+        <!-- 3. CYBER BLACKJACK 21 HUD -->
         {#if activeStation === "blackjack"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🃏 Cyber Blackjack 21 (6:5 Vegas Rules)</span>
+                    <span class="win98-title">🃏 Blackjack 21</span>
+                    <span class="hud-payout-tag">2.2x Natural</span>
                 </div>
                 <div class="hud-body">
-                    <div class="bj-dealer-banner">
-                        <img src={dealerAvatarSrc} alt="Unicorn House Dealer" class="bj-dealer-sprite" />
-                        <div class="bj-dealer-info">
-                            <strong>🦄 Unicorn House Dealer</strong>
-                            <span>Beat the Dealer without busting over 21! Blackjack pays <strong>2.2x</strong>, wins pay <strong>1.9x</strong>.</span>
-                        </div>
-                    </div>
-
                     <div class="wager-selector">
                         <span>Wager:</span>
                         {#each WAGER_OPTIONS as w}
@@ -3917,17 +4127,14 @@
             </div>
         {/if}
 
-        <!-- 4. GOLDEN UWU SLOTS HUD (SE Pit: 20.5, 19.5 — Separated from Roulette!) -->
+        <!-- 4. GOLDEN UWU SLOTS HUD -->
         {#if activeStation === "slots"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎰 Golden UwU Jackpot Slots (SE Casino Pit)</span>
+                    <span class="win98-title">🎰 Golden UwU Slots</span>
+                    <span class="hud-payout-tag">Up to 60x</span>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>Paytable:</strong> 3-of-a-kind pays <strong>🍒 4x • 🐸 8x • 🚀 15x • 💎 30x • 🦄 60x</strong>! First 2 reels matching non-skull (`r1 = r2`) pays <strong>1.6x</strong>. `💀` is a blank dud!
-                    </div>
-
                     <div class="wager-selector">
                         <span>Bet:</span>
                         {#each WAGER_OPTIONS as w}
@@ -3948,6 +4155,14 @@
                         {/each}
                     </div>
 
+                    <div class="slot-paytable-strip">
+                        <span>🍒 4x</span>
+                        <span>🐸 8x</span>
+                        <span>🚀 15x</span>
+                        <span>💎 30x</span>
+                        <span>🦄 60x</span>
+                    </div>
+
                     <div class="bj-status-msg">{slotMessage}</div>
 
                     <button
@@ -3955,23 +4170,29 @@
                         disabled={isSlotSpinning}
                         onclick={spinSlotMachine}
                     >
-                        {isSlotSpinning ? "🎰 SPINNING REELS..." : `🎰 PULL LEVER (${selectedWager} $UWU)`}
+                        {isSlotSpinning ? "🎰 SPINNING..." : `🎰 PULL LEVER (${selectedWager} $UWU)`}
                     </button>
                 </div>
             </div>
         {/if}
 
-        <!-- 5. NEW GAME: ROCKET CRASH MULTIPLIER HUD (Center North Pit: 15.5, 12.5) -->
+        <!-- 5. ROCKET CRASH HUD (Animated LSD Trip Space Trajectory & Explosion) -->
         {#if activeStation === "crash"}
+            {@const crashProgress = Math.min(1, Math.log10(Math.max(1, crashMultiplier)) / Math.log10(12))}
+            {@const lsdIntensity = crashPhase === "flying" ? Math.min(1, (crashMultiplier - 1) / 3.5) : 0}
+            {@const lsdHue = crashPhase === "flying" ? Math.round((crashMultiplier - 1) * 185) % 360 : 0}
+            {@const rocketX = 12 + crashProgress * 74}
+            {@const rocketY = 82 - Math.pow(crashProgress, 0.85) * 66}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🚀 UwU Rocket Crash (Multiplier Cashout)</span>
+                    <span class="win98-title">🚀 Rocket Crash</span>
+                    <div class="crash-history-pills">
+                        {#each crashHistory.slice(0, 4) as ch}
+                            <span class="ch-tag" class:high={ch >= 2.0}>{ch.toFixed(2)}x</span>
+                        {/each}
+                    </div>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>How to Play:</strong> Launch the rocket and click <strong>💰 CASH OUT</strong> before it explodes! (8% instant pad explosion house edge).
-                    </div>
-
                     <div class="wager-selector">
                         <span>Wager:</span>
                         {#each WAGER_OPTIONS as w}
@@ -3986,31 +4207,77 @@
                         {/each}
                     </div>
 
-                    <div class="crash-display" class:crashed={crashPhase === "crashed"}>
-                        <span class="crash-mult">{crashMultiplier.toFixed(2)}x</span>
-                        <span class="crash-sub">
-                            {crashPhase === "flying"
-                                ? `Cashout Value: +${Math.round(crashBetAmount * crashMultiplier)} $UWU`
-                                : crashPhase === "crashed"
-                                  ? "💥 EXPLODED!"
-                                  : "Ready on Launchpad"}
-                        </span>
-                    </div>
+                    <!-- Animated LSD Trip Rocket Trajectory Stage -->
+                    <div
+                        class="crash-lsd-stage"
+                        class:flying={crashPhase === "flying"}
+                        class:tripping={crashPhase === "flying" && crashMultiplier >= 1.35}
+                        class:crashed={crashPhase === "crashed"}
+                        style="
+                            --lsd-hue: {lsdHue}deg;
+                            --lsd-sat: {(1 + lsdIntensity * 2.6).toFixed(2)};
+                            --shake-px: {crashPhase === 'flying' ? Math.min(5, Math.max(0, (crashMultiplier - 1.5) * 1.4)).toFixed(1) : 0}px;
+                        "
+                    >
+                        <div class="lsd-kaleidoscope-bg"></div>
 
-                    <div class="roulette-status-bar">
-                        <span>Recent Crashes:</span>
-                        <span>
-                            {#each crashHistory as ch}
-                                <strong style="color: {ch >= 2.0 ? '#007a3d' : '#b71c1c'}; margin-left: 4px;">{ch.toFixed(2)}x</strong>
-                            {/each}
-                        </span>
-                    </div>
+                        <!-- Glowing Trajectory Curve SVG -->
+                        <svg class="crash-trajectory-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                            {#if crashPhase !== "idle"}
+                                <path
+                                    d="M 12 82 Q {12 + (rocketX - 12) * 0.55} 82, {rocketX} {rocketY}"
+                                    fill="none"
+                                    stroke={crashPhase === "crashed" ? "#ff1744" : "#00ffcc"}
+                                    stroke-width="2.8"
+                                    stroke-linecap="round"
+                                />
+                            {/if}
+                        </svg>
 
-                    <div class="bj-status-msg">{crashMessage}</div>
+                        <!-- Flying Rocket or Explosion Shockwave -->
+                        {#if crashPhase === "crashed"}
+                            <div class="crash-explosion-node" style="left: {rocketX}%; top: {rocketY}%;">
+                                <span class="explosion-ring"></span>
+                                <span class="explosion-emoji">💥</span>
+                            </div>
+                        {:else}
+                            <div
+                                class="crash-rocket-node"
+                                class:boosting={crashPhase === "flying"}
+                                style="left: {rocketX}%; top: {rocketY}%;"
+                            >
+                                {#if crashPhase === "flying"}
+                                    <span class="rocket-flame">🔥</span>
+                                {/if}
+                                <span class="rocket-emoji">🚀</span>
+                            </div>
+                        {/if}
+
+                        <!-- Center Multiplier Overlay -->
+                        <div class="crash-hud-readout">
+                            <span
+                                class="crash-mult"
+                                style="transform: scale({(1 + lsdIntensity * 0.28).toFixed(2)})"
+                            >
+                                {crashMultiplier.toFixed(2)}x
+                            </span>
+                            <span class="crash-sub">
+                                {#if crashPhase === "flying"}
+                                    +{Math.round(crashBetAmount * crashMultiplier)} $UWU
+                                {:else if crashPhase === "crashed"}
+                                    💥 EXPLODED!
+                                {:else if crashPhase === "cashed_out"}
+                                    💰 CASHED OUT!
+                                {:else}
+                                    READY FOR LAUNCH
+                                {/if}
+                            </span>
+                        </div>
+                    </div>
 
                     {#if crashPhase === "flying"}
                         <button class="win98-btn cashout-btn" onclick={cashOutRocketCrash}>
-                            💰 CASH OUT NOW (+{Math.round(crashBetAmount * crashMultiplier)} $UWU)
+                            💰 CASH OUT (+{Math.round(crashBetAmount * crashMultiplier)} $UWU)
                         </button>
                     {:else}
                         <button class="win98-btn primary-start-btn" onclick={startRocketCrash}>
@@ -4021,22 +4288,18 @@
             </div>
         {/if}
 
-        <!-- 5B. BALANCED CYBER MINES 5x5 HUD (East Arcade Pit: 27.5, 19.5 — 10% House Edge) -->
+        <!-- 5B. CYBER MINES 5x5 HUD -->
         {#if activeStation === "mines"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">💣 Cyber Mines 5x5 (10% House Edge • Instant Cashout)</span>
+                    <span class="win98-title">💣 Cyber Mines</span>
                     <button class="win98-btn" style="padding:1px 6px; font-size:10px;" onclick={() => openArcadeModal("mines")}>
-                        🕹️ Full Arcade UI
+                        🕹️ Arcade View
                     </button>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>Balanced Odds:</strong> Uncover glowing `💎` gems on the 5×5 grid and <strong>CASH OUT</strong> anytime before hitting a `💣` Cyber Mine!
-                    </div>
-
                     <div class="wager-selector">
-                        <span>Wager:</span>
+                        <span>Bet:</span>
                         {#each WAGER_OPTIONS as w}
                             <button
                                 class="win98-btn wager-btn"
@@ -4047,7 +4310,7 @@
                                 {w}
                             </button>
                         {/each}
-                        <span style="margin-left:6px;">Mines:</span>
+                        <span style="margin-left:auto;">💣</span>
                         {#each [5, 8, 12] as bCount}
                             <button
                                 class="win98-btn wager-btn"
@@ -4055,15 +4318,15 @@
                                 disabled={minesPhase === "playing"}
                                 onclick={() => (minesBombCount = bCount as 5 | 8 | 12)}
                             >
-                                💣 {bCount}
+                                {bCount}
                             </button>
                         {/each}
                     </div>
 
                     <div class="roulette-status-bar">
-                        <span>Current: <strong>{minesCurrentMultiplier.toFixed(2)}x</strong></span>
-                        <span>Next Gem: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
-                        <span>Gems: <strong>{minesSafeClicks}/{25 - minesBombCount}</strong></span>
+                        <span>Now: <strong>{minesCurrentMultiplier.toFixed(2)}x</strong></span>
+                        <span>Next: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
+                        <span>💎 <strong>{minesSafeClicks}/{25 - minesBombCount}</strong></span>
                     </div>
 
                     <div class="mines-grid-5x5">
@@ -4080,13 +4343,11 @@
                                 {:else if tileState === "bomb"}
                                     💣
                                 {:else}
-                                    ?
+                                    ·
                                 {/if}
                             </button>
                         {/each}
                     </div>
-
-                    <div class="bj-status-msg">{minesMessage}</div>
 
                     {#if minesPhase === "playing"}
                         <button
@@ -4096,28 +4357,27 @@
                         >
                             {minesSafeClicks > 0
                                 ? `💰 CASH OUT +${Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU (${minesCurrentMultiplier.toFixed(2)}x)`
-                                : "💎 Pick at least 1 tile to Cash Out"}
+                                : "💎 Pick a tile to Cash Out"}
                         </button>
                     {:else}
                         <button class="win98-btn primary-start-btn" onclick={startCyberMines}>
-                            💣 START CYBER MINES ({selectedWager} $UWU • {minesBombCount} Mines)
+                            💣 START MINES ({selectedWager} $UWU)
                         </button>
                     {/if}
                 </div>
             </div>
         {/if}
 
-        <!-- 6. WHISPERING WOODS: CAMPFIRE STORY & TRIVIA CIRCLE HUD (Center Clearing: 16.0, 16.0) -->
+        <!-- 6. WHISPERING WOODS: CAMPFIRE STORY & TRIVIA CIRCLE HUD -->
         {#if activeStation === "campfire"}
             {@const currentTrivia = CAMPFIRE_TRIVIA_BANK[campfireQuestionIndex % CAMPFIRE_TRIVIA_BANK.length]}
             {@const currentIcebreaker = CAMPFIRE_ICEBREAKER_BANK[campfireQuestionIndex % CAMPFIRE_ICEBREAKER_BANK.length]}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🔥 Campfire Story & Trivia Circle (Social Hangout)</span>
+                    <span class="win98-title">🔥 Campfire Circle</span>
                 </div>
                 <div class="hud-body">
                     <div class="wager-selector">
-                        <span>Mode:</span>
                         <button
                             class="win98-btn wager-btn"
                             class:active-wager={campfireMode === "trivia"}
@@ -4126,7 +4386,7 @@
                                 campfireRevealed = false;
                             }}
                         >
-                            🧠 Cozy Trivia
+                            🧠 Trivia
                         </button>
                         <button
                             class="win98-btn wager-btn"
@@ -4139,7 +4399,7 @@
                             💬 Icebreakers
                         </button>
                         <button class="win98-btn wager-btn" style="margin-left:auto" onclick={nextCampfirePrompt}>
-                            ⏭️ Next Prompt
+                            ⏭️ Next
                         </button>
                     </div>
 
@@ -4196,27 +4456,24 @@
                             type="text"
                             class="win98-input"
                             style="flex:1; padding:4px 6px; font-size:11px;"
-                            placeholder="Share a cozy story or thought..."
+                            placeholder="Share a campfire story..."
                             bind:value={campfireCustomStory}
                             maxlength="90"
                         />
-                        <button class="win98-btn primary-start-btn" onclick={postCampfireStory}>Share</button>
+                        <button class="win98-btn primary-start-btn" onclick={postCampfireStory}>Post</button>
                     </div>
                 </div>
             </div>
         {/if}
 
-        <!-- 7. WHISPERING WOODS: WOODLAND TEA & BERRY PICNIC HUD (NW Grove: 10.5, 9.5) -->
+        <!-- 7. WHISPERING WOODS: WOODLAND PICNIC HUD -->
         {#if activeStation === "picnic"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🧺 Woodland Tea & Berry Picnic (Co-Op Social)</span>
+                    <span class="win98-title">🧺 Woodland Picnic</span>
+                    <span class="hud-payout-tag">Shared: {picnicComboCount}</span>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>Cozy Picnic Blanket:</strong> Share freshly brewed Matcha Tea, Sweet Dango, and Berry Tarts with everyone in the grove! Shared Treats: <strong>{picnicComboCount}</strong>
-                    </div>
-
                     <div class="roulette-grid" style="grid-template-columns: repeat(2, 1fr);">
                         {#each PICNIC_TREATS as treat}
                             <button class="win98-btn meme-tile-btn" onclick={() => sharePicnicTreat(treat)}>
@@ -4228,7 +4485,7 @@
                     </div>
 
                     <div class="scores-table" style="background:#1b2e22; padding:5px; border:1px solid #66bb6a;">
-                        {#each picnicRecentFeed as item}
+                        {#each picnicRecentFeed.slice(0, 3) as item}
                             <div class="player-score-row" style="color:#ffffff;">
                                 <span>{item}</span>
                             </div>
@@ -4238,30 +4495,14 @@
             </div>
         {/if}
 
-        <!-- 8. WHISPERING WOODS: PEACEFUL KOI POND CATCH & RELEASE HUD (NE Pond: 21.5, 9.5) -->
+        <!-- 8. WHISPERING WOODS: KOI POND HUD -->
         {#if activeStation === "fishing"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎣 Peaceful Koi Pond (Catch, Admire & Release)</span>
+                    <span class="win98-title">🎣 Koi Pond</span>
+                    <span class="hud-payout-tag">{koiCollection.length}/{KOI_POND_SPECIMENS.length} Discovered</span>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>How to Play:</strong> Cast your bamboo line into the tranquil Koi Pond, wait for a gentle ripple, and reel in rare Koi specimens to admire with friends!
-                    </div>
-
-                    <div class="roulette-status-bar">
-                        <span>Pond Discovered: <strong>{koiCollection.length} / {KOI_POND_SPECIMENS.length}</strong></span>
-                        <span>
-                            {#if fishingState === "waiting"}
-                                🌊 Waiting for ripples...
-                            {:else if fishingState === "bite"}
-                                ❗ <strong>SPLASH! REEL IN NOW!</strong>
-                            {:else}
-                                🌿 Calm Waters
-                            {/if}
-                        </span>
-                    </div>
-
                     {#if caughtKoi}
                         <div class="bj-dealer-banner" style="background: linear-gradient(90deg, #0a2e36, #144952);">
                             <span style="font-size:28px;">{caughtKoi.icon}</span>
@@ -4282,31 +4523,23 @@
                         {#if fishingState === "waiting"}
                             🌊 Watching the float...
                         {:else if fishingState === "bite"}
-                            🐟 REEL IN KOI NOW! [Click / E]
+                            🐟 SPLASH! REEL IN NOW!
                         {:else}
-                            🎣 Cast Bamboo Fishing Line [Click / E]
+                            🎣 Cast Bamboo Line
                         {/if}
                     </button>
                 </div>
             </div>
         {/if}
 
-        <!-- 9. WHISPERING WOODS: FIREFLY MEADOW & WISHING SHRINE HUD (SE Meadow: 22.0, 21.5) -->
+        <!-- 9. WHISPERING WOODS: FIREFLY SHRINE HUD -->
         {#if activeStation === "fireflies"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">✨ Firefly Meadow & Wishing Shrine</span>
+                    <span class="win98-title">✨ Firefly Shrine</span>
+                    <span class="hud-payout-tag">✨ {fireflyJarCount}/{fireflyCommunityGoal}</span>
                 </div>
                 <div class="hud-body">
-                    <div class="hud-instructions">
-                        <strong>Twilight Lantern Shrine:</strong> Catch glowing meadow fireflies and release a sky lantern wish that floats across the Whispering Woods!
-                    </div>
-
-                    <div class="roulette-status-bar">
-                        <span>✨ Meadow Fireflies Gathered: <strong>{fireflyJarCount} / {fireflyCommunityGoal}</strong></span>
-                        <button class="win98-btn wager-btn" onclick={catchFirefly}>✨ Catch Firefly</button>
-                    </div>
-
                     <div class="scores-table" style="background:#14241b; padding:5px; border:1px solid #ccff66;">
                         {#each fireflyWishes.slice(0, 3) as w}
                             <div class="player-score-row" style="color:#f0fff0;">
@@ -4320,12 +4553,12 @@
                             type="text"
                             class="win98-input"
                             style="flex:1; padding:4px 6px; font-size:11px;"
-                            placeholder="Write a lantern wish for the forest..."
+                            placeholder="Write a lantern wish..."
                             bind:value={fireflyWishInput}
                             maxlength="90"
                         />
                         <button class="win98-btn primary-start-btn" onclick={releaseFireflyWish}>
-                            🏮 Release Wish
+                            🏮 Release
                         </button>
                     </div>
                 </div>
@@ -4634,58 +4867,55 @@
         </div>
     {/if}
 
-    <!-- Modal 1: Interactive Game Guide & Teleport Directory -->
+    <!-- Modal 1: World Directory -->
     {#if showGuideModal}
         <div class="modal-overlay" onclick={() => (showGuideModal = false)}>
             <div class="win98-window guide-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">📖 UwU World MMO — Casino & Whispering Woods Guide</span>
+                    <span class="win98-title">📖 World Map & Directory</span>
                     <button class="win98-close" onclick={() => (showGuideModal = false)}>X</button>
                 </div>
                 <div class="win98-body guide-body">
-                    <p class="guide-intro">
-                        Explore the High Roller Casino Lounge or walk East through the portal (or click <strong>🌲 Woods</strong>) to hang out in the lush Whispering Woods social sanctuary:
-                    </p>
                     <div class="guide-grid">
                         <div class="guide-card">
-                            <div class="guide-card-title">🎲 3-Round Craps Duel (NW Pit)</div>
-                            <p>Roll 3 rounds of 2 dice against the standing <strong>Unicorn House Dealer</strong> or PvP players. Pays 1.8x (10% House Edge).</p>
-                            <button class="win98-btn" onclick={() => teleportTo(11.5, 14.5, "Craps Table", "casino")}>Teleport to Craps</button>
+                            <div class="guide-card-title">🎲 Craps Dice Duel</div>
+                            <p>3-round dice showdown vs the Unicorn Dealer or PvP players.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(11.5, 14.5, "Craps Table", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🎡 Meme Roulette (NE Pit)</div>
-                            <p>100-pocket weighted wheel with 3x–25x sectors and a 12% <strong>💀 House Zero</strong> pocket. Lock your bet & spin!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(19.5, 14.5, "Meme Roulette", "casino")}>Teleport to Roulette</button>
+                            <div class="guide-card-title">🎡 Meme Roulette</div>
+                            <p>Pick your favorite meme sector and spin the wheel.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(19.5, 14.5, "Meme Roulette", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🃏 Cyber Blackjack 21 (SW Pit)</div>
-                            <p>Beat the standing Unicorn House Dealer without busting over 21. Natural 21 pays 2.2x!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(11.5, 20.5, "Cyber Blackjack", "casino")}>Teleport to Blackjack</button>
+                            <div class="guide-card-title">🃏 Blackjack 21</div>
+                            <p>Hit, Stand, or Double Down against the House Dealer.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(11.5, 20.5, "Blackjack 21", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🎰 Golden UwU Slots (SE Pit)</div>
-                            <p>Separated in the SE Pit! Weighted reels with `💀` blanks, front-pair 1.6x, and 3-of-a-kind jackpots up to 60x!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(20.5, 20.5, "Golden Slots", "casino")}>Teleport to Slots</button>
+                            <div class="guide-card-title">🎰 Golden UwU Slots</div>
+                            <p>Pull the lever for 3-of-a-kind jackpots up to 60x.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(20.5, 20.5, "Golden Slots", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🚀 Rocket Crash (North Center Pit)</div>
-                            <p>Watch the rocket multiplier climb from 1.00x upward and Cash Out before it explodes!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(15.5, 13.8, "Rocket Crash", "casino")}>Teleport to Crash</button>
+                            <div class="guide-card-title">🚀 Rocket Crash</div>
+                            <p>Ride the rocket trajectory and cash out before it explodes.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(15.5, 13.8, "Rocket Crash", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">💣 Cyber Mines 5x5 (East Arcade Pit)</div>
-                            <p>Pick 5, 8, or 12 hidden Cyber Mines on the 5×5 grid! Uncover glowing gems and Cash Out anytime (10% House Edge).</p>
-                            <button class="win98-btn" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines 5x5", "casino")}>Teleport to Mines</button>
+                            <div class="guide-card-title">💣 Cyber Mines</div>
+                            <p>Uncover glowing gems across the 5×5 grid and cash out anytime.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines", "casino")}>Teleport</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🕹️ 90s Retro Arcade Center (5 Games)</div>
-                            <p>Play <strong>Neon Brick Breaker</strong>, <strong>Cyber Snake 1998</strong>, <strong>Cyber Coin Rush</strong>, <strong>Whack-A-Glitch</strong> & <strong>Cyber Mines</strong> in Free Play or 100 $UWU Token Challenge!</p>
-                            <button class="win98-btn" onclick={() => { showGuideModal = false; openArcadeModal("brick"); }}>Open Arcade UI</button>
+                            <div class="guide-card-title">🕹️ Retro Arcade</div>
+                            <p>Brick Breaker, Cyber Snake, Coin Rush, Whack-A-Glitch & Mines.</p>
+                            <button class="win98-btn" onclick={() => { showGuideModal = false; openArcadeModal("brick"); }}>Open Arcade</button>
                         </div>
                         <div class="guide-card">
-                            <div class="guide-card-title">🌲 Whispering Woods (East Social Zone)</div>
-                            <p>Walk off the East edge (`x=31, y=14..17`) into a lush forest with Campfire Stories, Tea Picnic, Koi Fishing & Firefly Wishes!</p>
-                            <button class="win98-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>Teleport to Woods</button>
+                            <div class="guide-card-title">🌲 Whispering Woods</div>
+                            <p>Lush forest hangout with Campfire Trivia, Picnic, Koi Pond & Fireflies.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>Teleport</button>
                         </div>
                     </div>
                 </div>
@@ -4693,12 +4923,12 @@
         </div>
     {/if}
 
-    <!-- Modal 2: 🕹️ 90s RETRO ARCADE CENTER (5 Playable Games: Free Play + 100 $UWU Skill Token Mode) -->
+    <!-- Modal 2: 🕹️ RETRO ARCADE CENTER -->
     {#if showArcadeModal}
         <div class="modal-overlay" onclick={closeArcadeModal}>
             <div class="win98-window arcade-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">🕹️ UwU 90s Retro Arcade Center — 5 Playable Cabinet Games</span>
+                    <span class="win98-title">🕹️ Retro Arcade</span>
                     <button class="win98-close" onclick={closeArcadeModal}>X</button>
                 </div>
                 <div class="win98-body arcade-body">
@@ -4716,7 +4946,7 @@
                             class:active-wager={activeArcadeTab === "snake"}
                             onclick={() => selectArcadeTab("snake")}
                         >
-                            🐍 Cyber Snake 98
+                            🐍 Snake 98
                         </button>
                         <button
                             class="win98-btn arcade-tab-btn"
@@ -4737,40 +4967,38 @@
                             class:active-wager={activeArcadeTab === "mines"}
                             onclick={() => selectArcadeTab("mines")}
                         >
-                            💣 Cyber Mines 5x5
+                            💣 Cyber Mines
                         </button>
                     </div>
 
                     {#if activeArcadeTab !== "mines"}
-                        <!-- Mode Bar for Skill Arcade Cabinets (Free Play vs 100 $UWU Token Challenge) -->
                         <div class="arcade-mode-banner">
                             <div class="arcade-mode-left">
-                                <span>Cabinet Mode:</span>
                                 <button
                                     class="win98-btn wager-btn"
                                     class:active-wager={arcadePlayMode === "free"}
                                     onclick={() => (arcadePlayMode = "free")}
                                 >
-                                    🕹️ Free Play (0 $UWU • High Score)
+                                    🕹️ Free Play
                                 </button>
                                 <button
                                     class="win98-btn wager-btn"
                                     class:active-wager={arcadePlayMode === "token"}
                                     onclick={() => (arcadePlayMode = "token")}
                                 >
-                                    🪙 100 $UWU Token Challenge (Win 175 $UWU!)
+                                    🪙 100 $UWU Token (Win 175 $UWU)
                                 </button>
                             </div>
                             <span class="arcade-balance-pill">🪙 {chips.toLocaleString()} $UWU</span>
                         </div>
                     {/if}
 
-                    <!-- TAB 1: NEON BRICK BREAKER (ARKANOID) -->
+                    <!-- TAB 1: NEON BRICK BREAKER -->
                     {#if activeArcadeTab === "brick"}
                         <div class="arcade-cabinet-panel">
                             <div class="roulette-status-bar">
-                                <span>🧱 Score: <strong>{brickScore}</strong> / Target: <strong>{BRICK_TARGET_SCORE}</strong></span>
-                                <span>❤️ Lives: <strong>{"❤️".repeat(brickLives)}</strong></span>
+                                <span>🧱 Score: <strong>{brickScore}</strong> / {BRICK_TARGET_SCORE}</span>
+                                <span>{"❤️".repeat(brickLives)}</span>
                                 <span>🏆 Best: <strong>{arcadeBestScores.brick}</strong></span>
                             </div>
 
@@ -4788,13 +5016,11 @@
                                     {/if}
                                 {/each}
 
-                                <!-- Bouncing Neon Energy Ball -->
                                 <div
                                     class="arcade-ball"
                                     style="left:{brickBall.x - 5}px; top:{brickBall.y - 5}px;"
                                 ></div>
 
-                                <!-- Player Neon Paddle -->
                                 <div
                                     class="arcade-paddle"
                                     style="left:{brickPaddleX}px; top:204px; width:64px;"
@@ -4804,28 +5030,28 @@
                                     <div class="arcade-crt-overlay">
                                         <div class="crt-title">
                                             {brickPhase === "won"
-                                                ? `🏆 BOARD CLEARED! (${brickScore} PTS)`
+                                                ? `🏆 CLEARED! (${brickScore} PTS)`
                                                 : brickPhase === "lost"
                                                   ? `💥 GAME OVER (${brickScore} PTS)`
                                                   : "🧱 NEON BRICK BREAKER"}
                                         </div>
                                         <p class="crt-sub">
-                                            Move mouse, drag finger, or press <strong>[A / D / ◀ / ▶]</strong> to bounce the orb & smash all 35 synthwave bricks! Beat <strong>{BRICK_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                            Move mouse or press <strong>[A / D / ◀ / ▶]</strong>
                                         </p>
                                     </div>
                                 {/if}
                             </div>
 
                             <div class="arcade-controls-row">
-                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.max(8, brickPaddleX - 28))}>◀ Left</button>
+                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.max(8, brickPaddleX - 28))}>◀</button>
                                 <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startBrickBreaker}>
                                     {brickPhase === "playing"
-                                        ? "🔄 Restart Brick Breaker"
+                                        ? "🔄 Restart"
                                         : arcadePlayMode === "token"
-                                          ? "🪙 Insert 100 $UWU Token & Launch"
-                                          : "🕹️ Start Free Play"}
+                                          ? "🪙 Launch (100 $UWU)"
+                                          : "🕹️ Start Game"}
                                 </button>
-                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.min(248, brickPaddleX + 28))}>Right ▶</button>
+                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.min(248, brickPaddleX + 28))}>▶</button>
                             </div>
                         </div>
 
@@ -4833,13 +5059,12 @@
                     {:else if activeArcadeTab === "snake"}
                         <div class="arcade-cabinet-panel">
                             <div class="roulette-status-bar">
-                                <span>🐍 Score: <strong>{snakeScore}</strong> / Target: <strong>{SNAKE_TARGET_SCORE}</strong></span>
+                                <span>🐍 Score: <strong>{snakeScore}</strong> / {SNAKE_TARGET_SCORE}</span>
                                 <span>Length: <strong>{snakeBody.length}</strong></span>
                                 <span>🏆 Best: <strong>{arcadeBestScores.snake}</strong></span>
                             </div>
 
                             <div class="arcade-crt-stage snake-stage">
-                                <!-- Food Orb / Golden Unicorn -->
                                 <div
                                     class="snake-food-cell"
                                     style="left:{snakeFood.x * 20}px; top:{snakeFood.y * 18.5}px;"
@@ -4847,7 +5072,6 @@
                                     {snakeFood.kind === "unicorn" ? "🦄" : "💎"}
                                 </div>
 
-                                <!-- Snake Segments -->
                                 {#each snakeBody as seg, idx}
                                     <div
                                         class="snake-segment"
@@ -4860,13 +5084,13 @@
                                     <div class="arcade-crt-overlay">
                                         <div class="crt-title">
                                             {snakePhase === "won"
-                                                ? `🏆 TARGET BEAT! (${snakeScore} PTS)`
+                                                ? `🏆 YOU WIN! (${snakeScore} PTS)`
                                                 : snakePhase === "lost"
                                                   ? `💥 CRASHED! (${snakeScore} PTS)`
-                                                  : "🐍 CYBER SNAKE 1998"}
+                                                  : "🐍 CYBER SNAKE 98"}
                                         </div>
                                         <p class="crt-sub">
-                                            Use <strong>[WASD / Arrow Keys]</strong> or the D-Pad buttons below to collect `💎` (+30 pts) and rare `🦄` (+75 pts)! Beat <strong>{SNAKE_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                            Use <strong>[WASD / Arrows]</strong> to collect 💎 & 🦄
                                         </p>
                                     </div>
                                 {/if}
@@ -4881,10 +5105,10 @@
                                 </div>
                                 <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startCyberSnake}>
                                     {snakePhase === "playing"
-                                        ? "🔄 Restart Snake"
+                                        ? "🔄 Restart"
                                         : arcadePlayMode === "token"
-                                          ? "🪙 Insert 100 $UWU Token & Start"
-                                          : "🕹️ Start Free Play"}
+                                          ? "🪙 Start (100 $UWU)"
+                                          : "🕹️ Start Game"}
                                 </button>
                             </div>
                         </div>
@@ -4893,8 +5117,8 @@
                     {:else if activeArcadeTab === "coin"}
                         <div class="arcade-cabinet-panel">
                             <div class="roulette-status-bar">
-                                <span>🪙 Score: <strong>{coinScore}</strong> / Target: <strong>{COIN_TARGET_SCORE}</strong></span>
-                                <span>⏱️ Time: <strong>{coinTimeLeft}s</strong></span>
+                                <span>🪙 Score: <strong>{coinScore}</strong> / {COIN_TARGET_SCORE}</span>
+                                <span>⏱️ <strong>{coinTimeLeft}s</strong></span>
                                 <span>🏆 Best: <strong>{arcadeBestScores.coin}</strong></span>
                             </div>
 
@@ -4912,7 +5136,6 @@
                                     </div>
                                 {/each}
 
-                                <!-- Catcher Basket -->
                                 <div
                                     class="arcade-paddle coin-basket"
                                     style="left:{coinBasketX}px; top:196px; width:56px;"
@@ -4924,26 +5147,26 @@
                                     <div class="arcade-crt-overlay">
                                         <div class="crt-title">
                                             {coinPhase === "done"
-                                                ? `⏱️ TIME UP! SCORE: ${coinScore} PTS`
-                                                : "🪙 CYBER COIN RUSH (25s)"}
+                                                ? `⏱️ SCORE: ${coinScore} PTS`
+                                                : "🪙 CYBER COIN RUSH"}
                                         </div>
                                         <p class="crt-sub">
-                                            Catch falling `🪙` (+20), `💎` (+45), and `🦄` (+75) while dodging `💣` (-50)! Beat <strong>{COIN_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
+                                            Catch 🪙 💎 🦄 — Dodge 💣!
                                         </p>
                                     </div>
                                 {/if}
                             </div>
 
                             <div class="arcade-controls-row">
-                                <button class="win98-btn" onclick={() => (coinBasketX = Math.max(8, coinBasketX - 28))}>◀ Left</button>
+                                <button class="win98-btn" onclick={() => (coinBasketX = Math.max(8, coinBasketX - 28))}>◀</button>
                                 <button class="win98-btn primary-start-btn" style="flex:1;" onclick={startCoinRush}>
                                     {coinPhase === "playing"
-                                        ? "🔄 Restart Coin Rush"
+                                        ? "🔄 Restart"
                                         : arcadePlayMode === "token"
-                                          ? "🪙 Insert 100 $UWU Token & Start"
-                                          : "🕹️ Start Free Play"}
+                                          ? "🪙 Start (100 $UWU)"
+                                          : "🕹️ Start Game"}
                                 </button>
-                                <button class="win98-btn" onclick={() => (coinBasketX = Math.min(256, coinBasketX + 28))}>Right ▶</button>
+                                <button class="win98-btn" onclick={() => (coinBasketX = Math.min(256, coinBasketX + 28))}>▶</button>
                             </div>
                         </div>
 
@@ -4951,8 +5174,8 @@
                     {:else if activeArcadeTab === "whack"}
                         <div class="arcade-cabinet-panel">
                             <div class="roulette-status-bar">
-                                <span>🔨 Score: <strong>{whackScore}</strong> / Target: <strong>{WHACK_TARGET_SCORE}</strong></span>
-                                <span>⏱️ Time: <strong>{whackTimeLeft}s</strong></span>
+                                <span>🔨 Score: <strong>{whackScore}</strong> / {WHACK_TARGET_SCORE}</span>
+                                <span>⏱️ <strong>{whackTimeLeft}s</strong></span>
                                 <span>🏆 Best: <strong>{arcadeBestScores.whack}</strong></span>
                             </div>
 
@@ -4982,26 +5205,18 @@
                                 {/each}
                             </div>
 
-                            <div class="bj-status-msg">
-                                Tap `👾 Glitch Bugs` (+30 pts) & `🦄 Golden Unicorns` (+65 pts) — DO NOT tap `💣 Firewall Bombs` (-45 pts)! Beat <strong>{WHACK_TARGET_SCORE} pts</strong> in Token Mode to win <strong>175 $UWU</strong>!
-                            </div>
-
                             <button class="win98-btn primary-start-btn" onclick={startWhackAGlitch}>
                                 {whackPhase === "playing"
-                                    ? "🔄 Restart Whack-A-Glitch"
+                                    ? "🔄 Restart"
                                     : arcadePlayMode === "token"
-                                      ? "🪙 Insert 100 $UWU Token & Start (20s)"
-                                      : "🕹️ Start Free Play (20s)"}
+                                      ? "🪙 Start (100 $UWU)"
+                                      : "🕹️ Start Game"}
                             </button>
                         </div>
 
-                    <!-- TAB 5: BALANCED CYBER MINES 5x5 -->
+                    <!-- TAB 5: CYBER MINES -->
                     {:else if activeArcadeTab === "mines"}
                         <div class="arcade-cabinet-panel">
-                            <div class="hud-instructions">
-                                <strong>💣 Cyber Mines 5×5 (Strict 10% House Edge):</strong> Choose your $UWU wager and bomb count (`5`, `8`, or `12`). Every gem uncovered increases your multiplier — <strong>CASH OUT</strong> anytime before hitting a mine!
-                            </div>
-
                             <div class="wager-selector">
                                 <span>Wager:</span>
                                 {#each WAGER_OPTIONS as w}
@@ -5014,7 +5229,7 @@
                                         {w}
                                     </button>
                                 {/each}
-                                <span style="margin-left:auto;">Mines:</span>
+                                <span style="margin-left:auto;">💣</span>
                                 {#each [5, 8, 12] as bCount}
                                     <button
                                         class="win98-btn wager-btn"
@@ -5022,15 +5237,15 @@
                                         disabled={minesPhase === "playing"}
                                         onclick={() => (minesBombCount = bCount as 5 | 8 | 12)}
                                     >
-                                        💣 {bCount}
+                                        {bCount}
                                     </button>
                                 {/each}
                             </div>
 
                             <div class="roulette-status-bar">
                                 <span>Multiplier: <strong>{minesCurrentMultiplier.toFixed(2)}x</strong></span>
-                                <span>Next Gem: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
-                                <span>Balance: <strong>🪙 {chips.toLocaleString()} $UWU</strong></span>
+                                <span>Next: <strong style="color:#007a3d;">{minesNextMultiplier.toFixed(2)}x</strong></span>
+                                <span>🪙 <strong>{chips.toLocaleString()}</strong></span>
                             </div>
 
                             <div class="mines-grid-5x5 arcade-mines-grid">
@@ -5047,13 +5262,11 @@
                                         {:else if tileState === "bomb"}
                                             💣
                                         {:else}
-                                            ?
+                                            ·
                                         {/if}
                                     </button>
                                 {/each}
                             </div>
-
-                            <div class="bj-status-msg">{minesMessage}</div>
 
                             {#if minesPhase === "playing"}
                                 <button
@@ -5063,11 +5276,11 @@
                                 >
                                     {minesSafeClicks > 0
                                         ? `💰 CASH OUT +${Math.round(minesBetAmount * minesCurrentMultiplier)} $UWU (${minesCurrentMultiplier.toFixed(2)}x)`
-                                        : "💎 Pick at least 1 tile on the 5x5 grid to Cash Out"}
+                                        : "💎 Pick a tile to Cash Out"}
                                 </button>
                             {:else}
                                 <button class="win98-btn primary-start-btn" onclick={startCyberMines}>
-                                    💣 START CYBER MINES ({selectedWager} $UWU • {minesBombCount} Mines)
+                                    💣 START MINES ({selectedWager} $UWU)
                                 </button>
                             {/if}
                         </div>
@@ -5077,12 +5290,12 @@
         </div>
     {/if}
 
-    <!-- Modal 3: Persistent Live Isometric Pixel Graffiti Billboard -->
+    <!-- Modal 3: Live Pixel Graffiti Billboard -->
     {#if showGraffitiModal}
         <div class="modal-overlay" onclick={() => (showGraffitiModal = false)}>
             <div class="win98-window graffiti-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">🎨 Persistent 3D Billboard Graffiti Painter (48x32)</span>
+                    <span class="win98-title">🎨 Graffiti Wall</span>
                     <button class="win98-close" onclick={() => (showGraffitiModal = false)}>X</button>
                 </div>
                 <div class="win98-body">
@@ -5128,24 +5341,71 @@
                             ontouchend={handleGraffitiPointerUp}
                         ></canvas>
                     </div>
-
-                    <div class="graffiti-footer">
-                        <span>💾 Automatically saved to Supabase & local storage so artwork persists across sessions!</span>
-                    </div>
                 </div>
             </div>
         </div>
     {/if}
 
-    <!-- Modal 4: Multi-Genre DJ Booth (Classical, House, Electronic, Techno, Rave, Ambient) -->
+    <!-- Modal 4: 🪩 CYBERPUNK DUAL-TURNTABLE & SPECTRUM EQ DJ BOOTH -->
     {#if showDJModal}
+        {@const activeDJTrack = DJ_TRACKS.find((t) => t.id === currentTrackId) || DJ_TRACKS[0]}
         <div class="modal-overlay" onclick={() => (showDJModal = false)}>
             <div class="win98-window dj-window" onclick={(e) => e.stopPropagation()}>
                 <div class="win98-title-bar">
-                    <span class="win98-title">🪩 Multi-Genre Nightclub & Forest DJ Booth</span>
+                    <span class="win98-title">🪩 Club Neon DJ Deck</span>
                     <button class="win98-close" onclick={() => (showDJModal = false)}>X</button>
                 </div>
-                <div class="win98-body">
+                <div class="win98-body dj-body">
+                    <!-- Top Dual-Turntable & Live EQ Visualizer Deck -->
+                    <div class="dj-turntable-deck">
+                        <div class="vinyl-platter" class:spinning={isMusicPlaying}>
+                            <div class="vinyl-grooves">
+                                <span class="vinyl-center">💿</span>
+                            </div>
+                        </div>
+
+                        <div class="dj-center-mixer">
+                            <div class="dj-now-playing-tag">
+                                {isMusicPlaying ? "🟢 ON AIR — NOW SPINNING" : "⏸️ DECK PAUSED"}
+                            </div>
+                            <div class="dj-active-title">{activeDJTrack.title}</div>
+                            <div class="dj-active-meta">
+                                <span class="dj-artist-name">{activeDJTrack.artist}</span>
+                                <span>•</span>
+                                <span class="dj-vibe-tag">{activeDJTrack.vibe}</span>
+                                <span>•</span>
+                                <span class="dj-bpm-badge">{activeDJTrack.bpm} BPM</span>
+                            </div>
+
+                            <!-- Animated 12-Bar Spectrum Visualizer -->
+                            <div class="dj-eq-bars" class:paused={!isMusicPlaying}>
+                                {#each Array(12) as _, bIdx}
+                                    <span class="eq-bar" style="animation-delay: {(bIdx * 0.08).toFixed(2)}s"></span>
+                                {/each}
+                            </div>
+
+                            <div class="dj-transport-row">
+                                <button
+                                    class="win98-btn dj-play-toggle"
+                                    onclick={() => {
+                                        isMusicPlaying = !isMusicPlaying;
+                                        synth.setMute(!isMusicPlaying);
+                                        if (isMusicPlaying) synth.playTrack(currentTrackId);
+                                    }}
+                                >
+                                    {isMusicPlaying ? "⏸️ Pause Deck" : "▶️ Play Deck"}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="vinyl-platter" class:spinning={isMusicPlaying}>
+                            <div class="vinyl-grooves">
+                                <span class="vinyl-center">🎛️</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Genre Filter Pills -->
                     <div class="genre-tabs">
                         {#each DJ_GENRE_FILTERS as g}
                             <button
@@ -5158,6 +5418,7 @@
                         {/each}
                     </div>
 
+                    <!-- Crate Tracklist -->
                     <div class="dj-track-list">
                         {#each filteredDJTracks as track}
                             <button
@@ -5168,15 +5429,22 @@
                                     isMusicPlaying = true;
                                     synth.setMute(false);
                                     synth.playTrack(track.id);
-                                    showDJModal = false;
                                     networkManager?.broadcastDJTrack(track.id, myUsername);
                                 }}
                             >
                                 <div class="track-left">
-                                    <span class="genre-pill">{track.genre}</span>
-                                    <span>{track.title}</span>
+                                    <span class="genre-pill genre-{track.genre.toLowerCase().replace(/[^a-z]/g, '')}">
+                                        {track.genre}
+                                    </span>
+                                    <div class="track-text-col">
+                                        <span class="track-title-str">{track.title}</span>
+                                        <span class="track-sub-str">{track.artist} — {track.vibe}</span>
+                                    </div>
                                 </div>
-                                <span class="track-bpm">{track.bpm} BPM</span>
+                                <div class="track-right">
+                                    <span class="track-bpm">{track.bpm} BPM</span>
+                                    <span class="track-play-ico">{currentTrackId === track.id && isMusicPlaying ? "🔊" : "▶️"}</span>
+                                </div>
                             </button>
                         {/each}
                     </div>
@@ -6239,23 +6507,179 @@
     }
 
     .dj-window {
-        width: 440px;
-        max-width: 94vw;
+        width: 500px;
+        max-width: 96vw;
+    }
+
+    .dj-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .dj-turntable-deck {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        background: linear-gradient(135deg, #0b0719 0%, #170b32 50%, #091d2b 100%);
+        border: 2px inset #808080;
+        padding: 10px 12px;
+        color: #ffffff;
+    }
+
+    .vinyl-platter {
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #222 0%, #090909 55%, #2b2b2b 58%, #070707 100%);
+        border: 2px solid #00ffff;
+        box-shadow: 0 0 10px rgba(0, 255, 255, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .vinyl-platter.spinning {
+        animation: spinVinyl 2.8s linear infinite;
+    }
+
+    @keyframes spinVinyl {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .vinyl-grooves {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 1px dashed rgba(255, 0, 170, 0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .vinyl-center {
+        font-size: 20px;
+    }
+
+    .dj-center-mixer {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .dj-now-playing-tag {
+        font-size: 9px;
+        font-weight: bold;
+        color: #00ff88;
+        letter-spacing: 0.6px;
+    }
+
+    .dj-active-title {
+        font-size: 13px;
+        font-weight: bold;
+        color: #ffffff;
+        text-shadow: 0 0 6px #ff00aa;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+    }
+
+    .dj-active-meta {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        font-size: 10px;
+        color: #b0e0e6;
+    }
+
+    .dj-artist-name {
+        color: #ffd700;
+        font-weight: bold;
+    }
+
+    .dj-bpm-badge {
+        background: rgba(0, 255, 255, 0.16);
+        border: 1px solid rgba(0, 255, 255, 0.45);
+        padding: 0 4px;
+        border-radius: 2px;
+        color: #00ffff;
+        font-family: monospace;
+    }
+
+    .dj-eq-bars {
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 3px;
+        height: 22px;
+        margin: 2px 0;
+    }
+
+    .eq-bar {
+        width: 6px;
+        height: 18px;
+        background: linear-gradient(180deg, #ff00aa 0%, #00ffff 55%, #00ff88 100%);
+        transform-origin: bottom;
+        animation: eqBounce 0.55s ease-in-out infinite alternate;
+    }
+
+    .dj-eq-bars.paused .eq-bar {
+        animation: none;
+        transform: scaleY(0.2);
+        opacity: 0.45;
+    }
+
+    @keyframes eqBounce {
+        0% {
+            transform: scaleY(0.22);
+        }
+        50% {
+            transform: scaleY(0.95);
+        }
+        100% {
+            transform: scaleY(0.45);
+        }
+    }
+
+    .dj-transport-row {
+        margin-top: 2px;
+    }
+
+    .dj-play-toggle {
+        font-size: 10px;
+        font-weight: bold;
+        padding: 2px 10px;
     }
 
     .genre-tabs {
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
-        margin-bottom: 8px;
     }
 
     .dj-track-list {
         display: flex;
         flex-direction: column;
-        gap: 5px;
-        max-height: 280px;
+        gap: 4px;
+        max-height: 250px;
         overflow-y: auto;
+        background: #10121e;
+        padding: 5px;
+        border: 2px inset #808080;
     }
 
     .track-select-btn {
@@ -6264,26 +6688,597 @@
         align-items: center;
         padding: 6px 8px;
         font-weight: bold;
+        background: #1c2033;
+        color: #e8eaf6;
     }
 
     .track-left {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         text-align: left;
+        min-width: 0;
+    }
+
+    .track-text-col {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .track-title-str {
+        font-size: 11px;
+        font-weight: bold;
+        color: #ffffff;
+    }
+
+    .track-sub-str {
+        font-size: 9px;
+        font-weight: normal;
+        color: #9fa8da;
+    }
+
+    .track-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .track-bpm {
+        font-size: 10px;
+        font-family: monospace;
+        color: #ffd700;
     }
 
     .genre-pill {
         background: #000080;
         color: #ffff00;
         font-size: 9px;
-        padding: 1px 5px;
+        padding: 2px 6px;
         border-radius: 2px;
+        min-width: 58px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+
+    .genre-pill.genre-lofi {
+        background: #4a148c;
+        color: #ffb74d;
+    }
+    .genre-pill.genre-synthwave {
+        background: #880e4f;
+        color: #00ffff;
+    }
+    .genre-pill.genre-house {
+        background: #0d47a1;
+        color: #ffff00;
+    }
+    .genre-pill.genre-techno {
+        background: #1b5e20;
+        color: #76ff03;
+    }
+    .genre-pill.genre-dnb {
+        background: #b71c1c;
+        color: #ffffff;
+    }
+    .genre-pill.genre-chiptune {
+        background: #e65100;
+        color: #fff59d;
+    }
+    .genre-pill.genre-classical {
+        background: #3e2723;
+        color: #ffd700;
+    }
+    .genre-pill.genre-ambient {
+        background: #004d40;
+        color: #a7ffeb;
     }
 
     .track-select-btn.active-track {
-        background: #004d40;
+        background: linear-gradient(90deg, #004d40, #1a237e);
         color: #00ff88;
+        outline: 1px solid #00ffff;
+    }
+
+    /* --- SLEEK TOP BAR DROPDOWN, 3D DICE, ROULETTE WHEEL & LSD CRASH STAGE --- */
+    .online-inline {
+        margin-left: 4px;
+        padding-left: 5px;
+        border-left: 1px solid rgba(255, 255, 255, 0.25);
+        font-size: 10px;
+        color: #80ffaa;
+    }
+
+    .travel-dropdown-wrap {
+        position: relative;
+    }
+
+    .map-menu-btn {
+        font-weight: bold;
+        padding: 2px 7px;
+        background: #d4d0c8;
+    }
+
+    .travel-popover {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        width: 165px;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        z-index: 60;
+    }
+
+    .travel-item {
+        background: #dfdfdf;
+        border: 1px solid transparent;
+        padding: 5px 8px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: bold;
+        font-family: inherit;
+        cursor: pointer;
+        color: #000000;
+    }
+
+    .travel-item:hover {
+        background: #000080;
+        color: #ffff00;
+    }
+
+    .travel-item.woods-item {
+        border-top: 1px solid #808080;
+        color: #1b5e20;
+    }
+
+    .travel-item.woods-item:hover {
+        background: #1b5e20;
+        color: #ffffff;
+    }
+
+    .dj-open-btn {
+        background: #311b92;
+        color: #00ffff;
+        font-weight: bold;
+        padding: 2px 7px;
+    }
+
+    .icon-only-btn {
+        padding: 2px 6px;
+        font-size: 11px;
+    }
+
+    .hud-payout-tag {
+        background: rgba(0, 0, 0, 0.45);
+        color: #ffd700;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 2px;
+        border: 1px solid rgba(255, 215, 0, 0.5);
+    }
+
+    /* 3D Visual Craps Dice Arena */
+    .dice-arena-box {
+        display: flex;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: 6px;
+        background: radial-gradient(circle at 50% 50%, #0d4228 0%, #062315 100%);
+        border: 2px inset #808080;
+        padding: 8px;
+        color: #ffffff;
+    }
+
+    .dice-fighter-card {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        padding: 6px;
+        border-radius: 3px;
+    }
+
+    .dice-fighter-card.winner-glow {
+        border-color: #ffd700;
+        box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.45);
+        background: rgba(255, 215, 0, 0.14);
+    }
+
+    .fighter-header {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        font-weight: bold;
+    }
+
+    .fighter-name {
+        color: #e0f7fa;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 85px;
+    }
+
+    .fighter-sum {
+        background: #000000;
+        color: #ffd700;
+        font-size: 13px;
+        font-family: monospace;
+        padding: 1px 6px;
+        border: 1px solid #ffd700;
+        border-radius: 2px;
+    }
+
+    .dice-pair-row {
+        display: flex;
+        gap: 8px;
+        margin: 2px 0;
+    }
+
+    .visual-die-3d {
+        width: 42px;
+        height: 42px;
+        background: linear-gradient(135deg, #ffffff 0%, #e6e9f0 100%);
+        border: 2px solid #111111;
+        border-radius: 6px;
+        box-shadow:
+            inset -2px -2px 0px #b0b8c8,
+            inset 2px 2px 0px #ffffff,
+            2px 3px 5px rgba(0, 0, 0, 0.65);
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        padding: 5px;
+        place-items: center;
+    }
+
+    .visual-die-3d.dealer-die {
+        background: linear-gradient(135deg, #fff8e1 0%, #ffe082 100%);
+        border-color: #5d4037;
+    }
+
+    .visual-die-3d.shaking {
+        animation: dieTumble 0.14s linear infinite;
+    }
+
+    @keyframes dieTumble {
+        0% {
+            transform: rotate(-10deg) scale(1.04);
+        }
+        50% {
+            transform: rotate(10deg) translateY(-2px);
+        }
+        100% {
+            transform: rotate(-6deg) scale(0.98);
+        }
+    }
+
+    .die-pip {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: transparent;
+    }
+
+    .player-die .die-pip.pip-on {
+        background: #111111;
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
+    }
+
+    .dealer-die .die-pip.pip-on {
+        background: #b71c1c;
+    }
+
+    .fighter-rounds {
+        display: flex;
+        gap: 3px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .mini-r-chip {
+        font-size: 9px;
+        padding: 1px 4px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #b0bec5;
+        border-radius: 2px;
+    }
+
+    .mini-r-chip.filled {
+        background: rgba(0, 255, 136, 0.22);
+        color: #ffffff;
+        font-weight: bold;
+    }
+
+    .dice-vs-divider {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: bold;
+        color: #ffd700;
+        padding: 0 2px;
+    }
+
+    .dice-result-banner {
+        background: #263238;
+        color: #ffffff;
+        font-weight: bold;
+        font-size: 11px;
+        text-align: center;
+        padding: 5px;
+        border: 1px solid #90a4ae;
+    }
+
+    .dice-result-banner.win {
+        background: #004d40;
+        color: #ffff00;
+        border-color: #00ff88;
+    }
+
+    /* Meme Roulette Wheel Banner */
+    .roulette-wheel-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: linear-gradient(90deg, #140826, #0b2438);
+        border: 2px inset #808080;
+        padding: 6px 8px;
+        color: #ffffff;
+    }
+
+    .wheel-disc-wrap {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #ffd700 0%, #b71c1c 60%, #111 100%);
+        border: 2px solid #ffd700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .wheel-disc {
+        font-size: 22px;
+        line-height: 1;
+        transition: transform 0.08s linear;
+    }
+
+    .wheel-info-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-size: 11px;
+    }
+
+    .spinning-badge {
+        color: #00ffff;
+        font-weight: bold;
+    }
+
+    .wheel-history-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        color: #b0bec5;
+    }
+
+    .hist-pip {
+        font-size: 13px;
+    }
+
+    .slot-paytable-strip {
+        display: flex;
+        justify-content: space-around;
+        background: #1a102c;
+        color: #ffd700;
+        font-size: 10px;
+        font-weight: bold;
+        padding: 3px 6px;
+        border: 1px solid #4a148c;
+    }
+
+    /* Rocket Crash LSD Trip Stage */
+    .crash-history-pills {
+        display: flex;
+        gap: 3px;
+    }
+
+    .ch-tag {
+        font-size: 9px;
+        padding: 1px 4px;
+        background: rgba(183, 28, 28, 0.85);
+        color: #ffffff;
+        border-radius: 2px;
+        font-family: monospace;
+    }
+
+    .ch-tag.high {
+        background: rgba(0, 122, 61, 0.9);
+        color: #ffff80;
+    }
+
+    .crash-lsd-stage {
+        position: relative;
+        width: 100%;
+        height: 148px;
+        background: radial-gradient(circle at 30% 70%, #12072b 0%, #05030d 100%);
+        border: 2px inset #808080;
+        overflow: hidden;
+    }
+
+    .crash-lsd-stage.tripping {
+        filter: hue-rotate(var(--lsd-hue, 0deg)) saturate(var(--lsd-sat, 1.5));
+        animation: lsdJitter 0.12s infinite alternate;
+    }
+
+    .crash-lsd-stage.crashed {
+        background: radial-gradient(circle at 50% 50%, #6a001d 0%, #1a0006 100%);
+        filter: none;
+    }
+
+    @keyframes lsdJitter {
+        0% {
+            transform: translate(calc(var(--shake-px, 0px) * -1), calc(var(--shake-px, 0px) * 0.5));
+        }
+        100% {
+            transform: translate(var(--shake-px, 0px), calc(var(--shake-px, 0px) * -0.5));
+        }
+    }
+
+    .lsd-kaleidoscope-bg {
+        position: absolute;
+        inset: -30%;
+        background: conic-gradient(
+            from 0deg,
+            rgba(255, 0, 128, 0.18),
+            rgba(0, 255, 255, 0.18),
+            rgba(255, 235, 59, 0.18),
+            rgba(118, 255, 3, 0.18),
+            rgba(213, 0, 249, 0.18),
+            rgba(255, 0, 128, 0.18)
+        );
+        opacity: 0.22;
+        pointer-events: none;
+    }
+
+    .crash-lsd-stage.tripping .lsd-kaleidoscope-bg {
+        opacity: 0.78;
+        animation: spinKaleidoscope 2.2s linear infinite;
+    }
+
+    @keyframes spinKaleidoscope {
+        from {
+            transform: rotate(0deg) scale(1.1);
+        }
+        to {
+            transform: rotate(360deg) scale(1.35);
+        }
+    }
+
+    .crash-trajectory-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .crash-rocket-node {
+        position: absolute;
+        transform: translate(-50%, -50%) rotate(-32deg);
+        display: flex;
+        align-items: center;
+        pointer-events: none;
+        transition: left 0.05s linear, top 0.05s linear;
+        z-index: 3;
+    }
+
+    .crash-rocket-node.boosting {
+        filter: drop-shadow(0 0 8px #00ffff);
+    }
+
+    .rocket-emoji {
+        font-size: 24px;
+        line-height: 1;
+    }
+
+    .rocket-flame {
+        font-size: 16px;
+        margin-right: -4px;
+        transform: rotate(180deg);
+        animation: flamePulse 0.09s infinite alternate;
+    }
+
+    @keyframes flamePulse {
+        from {
+            transform: rotate(180deg) scale(0.85);
+        }
+        to {
+            transform: rotate(180deg) scale(1.3);
+        }
+    }
+
+    .crash-explosion-node {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 4;
+    }
+
+    .explosion-emoji {
+        font-size: 38px;
+        animation: boomPop 0.35s ease-out;
+    }
+
+    .explosion-ring {
+        position: absolute;
+        width: 58px;
+        height: 58px;
+        border-radius: 50%;
+        border: 3px solid #ffeb3b;
+        box-shadow: 0 0 18px #ff1744;
+        animation: shockwaveExpand 0.6s ease-out infinite;
+    }
+
+    @keyframes boomPop {
+        0% {
+            transform: scale(0.4);
+        }
+        60% {
+            transform: scale(1.35);
+        }
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    @keyframes shockwaveExpand {
+        0% {
+            transform: scale(0.4);
+            opacity: 1;
+        }
+        100% {
+            transform: scale(1.9);
+            opacity: 0;
+        }
+    }
+
+    .crash-hud-readout {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 2;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+    }
+
+    .crash-lsd-stage .crash-mult {
+        font-size: 28px;
+        font-weight: bold;
+        font-family: monospace;
+        color: #00ff88;
+        transition: transform 0.08s linear;
+    }
+
+    .crash-lsd-stage.crashed .crash-mult {
+        color: #ff5252;
     }
 
     /* --- CYBER MINES 5x5 & 90s RETRO ARCADE CENTER STYLES --- */

@@ -7,183 +7,258 @@
 export { DiceDuelManager, type DiceSeat, type PlayerScore, type DiceGamePhase } from './diceDuel';
 export { RouletteGameManager, ROULETTE_SECTORS, BETTABLE_ROULETTE_SECTORS, type RouletteSector } from './rouletteGame';
 
-export type MusicGenre = 'Ambient' | 'Classical' | 'House' | 'Electronic' | 'Techno' | 'Rave';
+export type MusicGenre = 'Lo-Fi' | 'Synthwave' | 'House' | 'Techno' | 'DnB' | 'Chiptune' | 'Classical' | 'Ambient';
 
 export interface DJTrack {
     id: number;
     genre: MusicGenre;
     title: string;
+    artist: string;
+    vibe: string;
     bpm: number;
     wave: OscillatorType;
     bassWave: OscillatorType;
     notes: number[];
     bassNotes: number[];
-    drumPattern: 'none' | 'four_floor' | 'electro' | 'techno' | 'rave';
+    chords?: number[][];
+    drumPattern: 'none' | 'lofi_swing' | 'synthwave' | 'four_floor' | 'techno' | 'dnb_break' | 'chiptune';
+    filterCutoff?: number;
+    detuneCents?: number;
 }
 
 export const DJ_TRACKS: DJTrack[] = [
-    // --- AMBIENT / FOREST (Calm Nature Soundtrack) ---
-    {
-        id: 11,
-        genre: 'Ambient',
-        title: '\u{1F332} Whispering Pine Lullaby (Forest Calm)',
-        bpm: 72,
-        wave: 'sine',
-        bassWave: 'triangle',
-        notes: [
-            329.63, 392.0, 440.0, 523.25, 587.33, 523.25, 440.0, 392.0,
-            293.66, 349.23, 440.0, 523.25, 493.88, 440.0, 392.0, 329.63
-        ],
-        bassNotes: [130.81, 164.81, 146.83, 196.0, 110.0, 146.83, 130.81, 164.81],
-        drumPattern: 'none'
-    },
-    {
-        id: 12,
-        genre: 'Ambient',
-        title: '\u{1F338} Sakura Stream & Kalimba Chimes',
-        bpm: 68,
-        wave: 'triangle',
-        bassWave: 'sine',
-        notes: [
-            523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33, 523.25,
-            440.0, 523.25, 659.25, 783.99, 659.25, 587.33, 523.25, 440.0
-        ],
-        bassNotes: [130.81, 130.81, 174.61, 174.61, 110.0, 110.0, 146.83, 196.0],
-        drumPattern: 'none'
-    },
-    {
-        id: 13,
-        genre: 'Ambient',
-        title: '\u{1F525} Starlight Campfire Reverie',
-        bpm: 76,
-        wave: 'sine',
-        bassWave: 'sine',
-        notes: [
-            261.63, 329.63, 392.0, 493.88, 523.25, 493.88, 392.0, 329.63,
-            220.0, 293.66, 349.23, 440.0, 392.0, 349.23, 293.66, 261.63
-        ],
-        bassNotes: [130.81, 98.0, 110.0, 87.31, 130.81, 98.0, 87.31, 98.0],
-        drumPattern: 'none'
-    },
-
-    // --- CLASSICAL ---
+    // --- LO-FI CHILLHOP / JAZZ HOP ---
     {
         id: 1,
-        genre: 'Classical',
-        title: '\u{1F3BB} Bach — Toccata & Fugue in D Minor',
-        bpm: 112,
-        wave: 'sawtooth',
-        bassWave: 'triangle',
-        notes: [587.33, 523.25, 587.33, 440.0, 349.23, 392.0, 440.0, 293.66, 440.0, 523.25, 466.16, 440.0, 392.0, 349.23, 329.63, 293.66],
-        bassNotes: [146.83, 146.83, 110.0, 110.0, 174.61, 146.83, 110.0, 146.83],
-        drumPattern: 'none'
+        genre: 'Lo-Fi',
+        title: '☕ Midnight Tokyo Rain & Rhodes',
+        artist: 'UwU Beats Collective',
+        vibe: 'Warm Rhodes 9th Chords • Vinyl Boom-Bap',
+        bpm: 84,
+        wave: 'triangle',
+        bassWave: 'sine',
+        notes: [523.25, 0, 659.25, 587.33, 493.88, 0, 440.0, 392.0, 523.25, 587.33, 659.25, 0, 493.88, 440.0, 392.0, 0],
+        bassNotes: [130.81, 130.81, 110.0, 110.0, 146.83, 146.83, 98.0, 98.0],
+        chords: [
+            [261.63, 329.63, 392.0, 493.88], // Cmaj7
+            [220.0, 261.63, 329.63, 392.0],  // Am7
+            [293.66, 349.23, 440.0, 523.25], // Dm7
+            [196.0, 246.94, 293.66, 349.23]  // G7
+        ],
+        drumPattern: 'lofi_swing',
+        filterCutoff: 1100
     },
     {
         id: 2,
-        genre: 'Classical',
-        title: '\u{1F3BC} Beethoven — Für Elise & Moonlight Arpeggio',
-        bpm: 118,
-        wave: 'triangle',
-        bassWave: 'sine',
-        notes: [659.25, 622.25, 659.25, 622.25, 659.25, 493.88, 587.33, 523.25, 440.0, 261.63, 329.63, 440.0, 493.88, 329.63, 415.3, 493.88],
-        bassNotes: [110.0, 164.81, 220.0, 164.81, 82.41, 164.81, 207.65, 164.81],
-        drumPattern: 'none'
+        genre: 'Lo-Fi',
+        title: '🌙 Rooftop Cassette Dreams',
+        artist: 'Neko Vinyl',
+        vibe: 'Mellow Jazz Guitar • Dusty Snare',
+        bpm: 78,
+        wave: 'sine',
+        bassWave: 'triangle',
+        notes: [440.0, 523.25, 0, 659.25, 587.33, 0, 523.25, 440.0, 392.0, 440.0, 523.25, 0, 392.0, 349.23, 329.63, 0],
+        bassNotes: [146.83, 146.83, 196.0, 196.0, 130.81, 130.81, 110.0, 110.0],
+        chords: [
+            [293.66, 349.23, 440.0, 523.25],
+            [196.0, 246.94, 329.63, 392.0],
+            [261.63, 329.63, 392.0, 493.88],
+            [220.0, 261.63, 329.63, 440.0]
+        ],
+        drumPattern: 'lofi_swing',
+        filterCutoff: 950
+    },
+
+    // --- SYNTHWAVE / OUTRUN ---
+    {
+        id: 3,
+        genre: 'Synthwave',
+        title: '🌆 Miami 1986 Testarossa Sunset',
+        artist: 'Kavinsky Cyber',
+        vibe: 'Detuned Analog Brass • Gated 80s Snare',
+        bpm: 108,
+        wave: 'sawtooth',
+        bassWave: 'sawtooth',
+        notes: [440.0, 0, 523.25, 587.33, 659.25, 0, 587.33, 523.25, 493.88, 0, 440.0, 392.0, 440.0, 0, 329.63, 0],
+        bassNotes: [110.0, 220.0, 110.0, 220.0, 87.31, 174.61, 130.81, 196.0],
+        chords: [
+            [220.0, 261.63, 329.63],
+            [174.61, 220.0, 261.63],
+            [261.63, 329.63, 392.0],
+            [196.0, 246.94, 293.66]
+        ],
+        drumPattern: 'synthwave',
+        filterCutoff: 2400,
+        detuneCents: 14
+    },
+    {
+        id: 4,
+        genre: 'Synthwave',
+        title: '🌌 Cyber Blade Runner 2049',
+        artist: 'Vangelis Protocol',
+        vibe: 'Wide CS-80 Lead • Rolling Arpeggio',
+        bpm: 102,
+        wave: 'sawtooth',
+        bassWave: 'triangle',
+        notes: [293.66, 349.23, 440.0, 587.33, 523.25, 440.0, 349.23, 293.66, 261.63, 329.63, 392.0, 523.25, 440.0, 392.0, 329.63, 261.63],
+        bassNotes: [73.42, 146.83, 73.42, 146.83, 58.27, 116.54, 65.41, 130.81],
+        drumPattern: 'synthwave',
+        filterCutoff: 1900,
+        detuneCents: 18
     },
 
     // --- HOUSE ---
     {
-        id: 3,
+        id: 5,
         genre: 'House',
-        title: '\u{1F3E0} Ibiza Sunset Deep House Groove',
+        title: '🏝️ Ibiza Terrace Deep Organ Groove',
+        artist: 'Solomun UwU',
+        vibe: 'M1 Organ Chords • 4x4 Club Kick',
         bpm: 124,
         wave: 'triangle',
         bassWave: 'sine',
-        notes: [329.63, 392.0, 493.88, 587.33, 493.88, 392.0, 369.99, 440.0, 523.25, 440.0, 392.0, 329.63],
+        notes: [329.63, 0, 392.0, 493.88, 0, 587.33, 493.88, 392.0, 369.99, 0, 440.0, 523.25, 0, 440.0, 392.0, 329.63],
         bassNotes: [82.41, 82.41, 98.0, 110.0, 73.42, 73.42, 87.31, 98.0],
-        drumPattern: 'four_floor'
-    },
-    {
-        id: 4,
-        genre: 'House',
-        title: '\u{1F3B9} French Filter Piano House',
-        bpm: 126,
-        wave: 'sawtooth',
-        bassWave: 'triangle',
-        notes: [440.0, 554.37, 659.25, 880.0, 659.25, 554.37, 493.88, 587.33, 739.99, 659.25, 587.33, 493.88],
-        bassNotes: [110.0, 110.0, 146.83, 164.81, 98.0, 123.47, 146.83, 123.47],
-        drumPattern: 'four_floor'
-    },
-
-    // --- ELECTRONIC ---
-    {
-        id: 5,
-        genre: 'Electronic',
-        title: '\u{26A1} Daft Cyber Funk Odyssey',
-        bpm: 120,
-        wave: 'square',
-        bassWave: 'sawtooth',
-        notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23, 440.0, 587.33, 440.0, 349.23],
-        bassNotes: [65.41, 130.81, 65.41, 130.81, 73.42, 146.83, 87.31, 174.61],
-        drumPattern: 'electro'
+        chords: [
+            [329.63, 392.0, 493.88],
+            [293.66, 369.99, 440.0],
+            [261.63, 329.63, 392.0],
+            [293.66, 369.99, 440.0]
+        ],
+        drumPattern: 'four_floor',
+        filterCutoff: 1800
     },
     {
         id: 6,
-        genre: 'Electronic',
-        title: '\u{1F30C} Synthwave Midnight Horizon',
-        bpm: 128,
+        genre: 'House',
+        title: '🥂 French Touch Filter Disco',
+        artist: 'Stardust 98',
+        vibe: 'Funky Slap Bass • Sweeping Filter Chords',
+        bpm: 126,
         wave: 'sawtooth',
-        bassWave: 'sawtooth',
-        notes: [196.0, 246.94, 293.66, 392.0, 493.88, 392.0, 293.66, 246.94, 220.0, 261.63, 329.63, 440.0],
-        bassNotes: [98.0, 98.0, 98.0, 98.0, 82.41, 82.41, 110.0, 110.0],
-        drumPattern: 'electro'
+        bassWave: 'triangle',
+        notes: [440.0, 554.37, 659.25, 880.0, 0, 659.25, 554.37, 493.88, 587.33, 739.99, 659.25, 0, 587.33, 493.88, 440.0, 0],
+        bassNotes: [110.0, 220.0, 146.83, 164.81, 98.0, 196.0, 146.83, 123.47],
+        chords: [
+            [440.0, 554.37, 659.25],
+            [392.0, 493.88, 587.33],
+            [369.99, 440.0, 554.37],
+            [329.63, 415.3, 493.88]
+        ],
+        drumPattern: 'four_floor',
+        filterCutoff: 2200,
+        detuneCents: 8
     },
 
     // --- TECHNO ---
     {
         id: 7,
         genre: 'Techno',
-        title: '\u{1F50A} Berlin Underground Acid 303',
-        bpm: 135,
+        title: '🔊 Berghain 4AM Acid 303 Squelch',
+        artist: 'Kobosil 303',
+        vibe: 'Resonant TB-303 Acid Line • Dark Rumble',
+        bpm: 136,
         wave: 'sawtooth',
         bassWave: 'square',
-        notes: [146.83, 293.66, 155.56, 146.83, 220.0, 146.83, 311.13, 293.66, 146.83, 174.61, 293.66, 220.0],
-        bassNotes: [73.42, 73.42, 73.42, 77.78, 73.42, 73.42, 110.0, 73.42],
-        drumPattern: 'techno'
-    },
-    {
-        id: 8,
-        genre: 'Techno',
-        title: '\u{1F916} Industrial Warehouse Peak-Time',
-        bpm: 138,
-        wave: 'square',
-        bassWave: 'sawtooth',
-        notes: [130.81, 138.59, 130.81, 196.0, 130.81, 261.63, 196.0, 155.56],
-        bassNotes: [65.41, 65.41, 65.41, 65.41, 69.3, 69.3, 65.41, 77.78],
-        drumPattern: 'techno'
+        notes: [146.83, 293.66, 155.56, 146.83, 220.0, 146.83, 311.13, 293.66, 146.83, 174.61, 293.66, 146.83, 220.0, 311.13, 293.66, 146.83],
+        bassNotes: [73.42, 73.42, 73.42, 77.78, 73.42, 73.42, 73.42, 65.41],
+        drumPattern: 'techno',
+        filterCutoff: 2800
     },
 
-    // --- RAVE ---
+    // --- JUNGLE / DRUM & BASS ---
+    {
+        id: 8,
+        genre: 'DnB',
+        title: '💿 1997 Liquid Jungle Breakbeat',
+        artist: 'LTJ Bukem UwU',
+        vibe: '166 BPM Amen Break • Deep Reese Sub & Pads',
+        bpm: 164,
+        wave: 'sine',
+        bassWave: 'sawtooth',
+        notes: [587.33, 0, 698.46, 880.0, 0, 783.99, 698.46, 587.33, 523.25, 0, 659.25, 783.99, 0, 659.25, 587.33, 0],
+        bassNotes: [73.42, 73.42, 58.27, 58.27, 65.41, 65.41, 82.41, 82.41],
+        chords: [
+            [293.66, 349.23, 440.0, 523.25],
+            [233.08, 293.66, 349.23, 440.0],
+            [261.63, 329.63, 392.0, 493.88],
+            [329.63, 392.0, 493.88, 587.33]
+        ],
+        drumPattern: 'dnb_break',
+        filterCutoff: 1400,
+        detuneCents: 12
+    },
+
+    // --- 8-BIT CHIPTUNE ---
     {
         id: 9,
-        genre: 'Rave',
-        title: '\u{1F386} 90s Euphoric Hardcore Rave Anthem',
-        bpm: 148,
-        wave: 'sawtooth',
-        bassWave: 'square',
-        notes: [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25, 587.33, 698.46, 880.0, 1174.66, 880.0, 783.99],
-        bassNotes: [130.81, 261.63, 146.83, 293.66, 164.81, 329.63, 174.61, 349.23],
-        drumPattern: 'rave'
+        genre: 'Chiptune',
+        title: '🕹️ Mega Boss Stage 1992 (8-Bit NES)',
+        artist: ' Famitracker Hero',
+        vibe: 'Fast Square Arpeggios • Triangle Bass',
+        bpm: 144,
+        wave: 'square',
+        bassWave: 'triangle',
+        notes: [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25, 587.33, 698.46, 880.0, 1174.66, 880.0, 698.46, 659.25, 783.99, 987.77, 1318.5],
+        bassNotes: [130.81, 261.63, 146.83, 293.66, 164.81, 329.63, 196.0, 392.0],
+        drumPattern: 'chiptune',
+        filterCutoff: 4200
     },
+
+    // --- CLASSICAL ---
     {
         id: 10,
-        genre: 'Rave',
-        title: '\u{1F6A8} Big Room Laser Rave Strobe Drop',
-        bpm: 145,
-        wave: 'square',
+        genre: 'Classical',
+        title: '🎻 Vivaldi — Winter Allegro Chamber',
+        artist: 'Venice Strings',
+        vibe: 'Baroque Harpsichord & Cello Counterpoint',
+        bpm: 116,
+        wave: 'triangle',
         bassWave: 'sawtooth',
-        notes: [440.0, 440.0, 523.25, 587.33, 659.25, 659.25, 587.33, 523.25, 493.88, 440.0, 392.0, 440.0],
-        bassNotes: [110.0, 110.0, 130.81, 146.83, 164.81, 164.81, 146.83, 110.0],
-        drumPattern: 'rave'
+        notes: [698.46, 659.25, 698.46, 523.25, 440.0, 466.16, 523.25, 349.23, 523.25, 587.33, 622.25, 587.33, 523.25, 466.16, 440.0, 392.0],
+        bassNotes: [174.61, 174.61, 130.81, 130.81, 116.54, 130.81, 174.61, 130.81],
+        chords: [
+            [349.23, 415.3, 523.25],
+            [261.63, 329.63, 392.0],
+            [233.08, 293.66, 349.23],
+            [261.63, 329.63, 400.0]
+        ],
+        drumPattern: 'none',
+        filterCutoff: 2200
+    },
+
+    // --- AMBIENT / WHISPERING WOODS ---
+    {
+        id: 11,
+        genre: 'Ambient',
+        title: '🌲 Whispering Pine Kalimba & Stream',
+        artist: 'Forest Sanctuary',
+        vibe: 'Pentatonic Kalimba Plucks • Warm Choir Pad',
+        bpm: 72,
+        wave: 'sine',
+        bassWave: 'triangle',
+        notes: [329.63, 392.0, 440.0, 523.25, 587.33, 523.25, 440.0, 392.0, 293.66, 349.23, 440.0, 523.25, 493.88, 440.0, 392.0, 329.63],
+        bassNotes: [130.81, 164.81, 146.83, 196.0, 110.0, 146.83, 130.81, 164.81],
+        chords: [
+            [261.63, 329.63, 392.0],
+            [220.0, 293.66, 349.23]
+        ],
+        drumPattern: 'none',
+        filterCutoff: 1200
+    },
+    {
+        id: 12,
+        genre: 'Ambient',
+        title: '🌸 Sakura Moonlight Harp',
+        artist: 'Kyoto Garden',
+        vibe: 'Crystal Harp Harmonics • Firefly Shimmer',
+        bpm: 66,
+        wave: 'triangle',
+        bassWave: 'sine',
+        notes: [523.25, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33, 523.25, 440.0, 523.25, 659.25, 783.99, 659.25, 587.33, 523.25, 440.0],
+        bassNotes: [130.81, 130.81, 174.61, 174.61, 110.0, 110.0, 146.83, 196.0],
+        drumPattern: 'none',
+        filterCutoff: 1400
     }
 ];
 
@@ -408,30 +483,31 @@ export class RetroSynthesizer {
         if (this.isMuted || !this.ctx || this.ctx.state !== 'running') return;
 
         const now = this.ctx.currentTime;
-        const noteFreq = track.notes[this.step % track.notes.length];
-        const bassFreq = track.bassNotes[Math.floor(this.step / 2) % track.bassNotes.length];
         const stepIdx = this.step;
         this.step++;
 
+        const noteFreq = track.notes[stepIdx % track.notes.length];
+        const bassFreq = track.bassNotes[Math.floor(stepIdx / 2) % track.bassNotes.length];
+
         try {
-            // Special calm polyphonic synthesis for Forest Ambient tracks
+            // 1. AMBIENT / FOREST: Soft Kalimba plucks + long warm breathing pads
             if (track.genre === 'Ambient') {
-                // Soft harp / kalimba pluck with gentle attack and long warm decay
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                osc.type = track.wave;
-                osc.frequency.setValueAtTime(noteFreq, now);
+                if (noteFreq > 0) {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = track.wave;
+                    osc.frequency.setValueAtTime(noteFreq, now);
 
-                gain.gain.setValueAtTime(0.001, now);
-                gain.gain.linearRampToValueAtTime(0.032, now + 0.04);
-                gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.65);
+                    gain.gain.setValueAtTime(0.001, now);
+                    gain.gain.linearRampToValueAtTime(0.032, now + 0.04);
+                    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.65);
 
-                osc.connect(gain);
-                gain.connect(this.ctx.destination);
-                osc.start(now);
-                osc.stop(now + 0.68);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.68);
+                }
 
-                // Warm fifth/octave shimmer on every 4th step
                 if (stepIdx % 4 === 0) {
                     const pad = this.ctx.createOscillator();
                     const padGain = this.ctx.createGain();
@@ -450,70 +526,327 @@ export class RetroSynthesizer {
                 return;
             }
 
-            // 1. Lead Synth Channel
-            const osc = this.ctx.createOscillator();
-            const gain = this.ctx.createGain();
-            osc.type = track.wave;
-            osc.frequency.setValueAtTime(noteFreq, now);
+            // 2. POLYPHONIC CHORD STABS / RHODES / PADS (Lo-Fi, House, Synthwave, DnB, Classical)
+            if (track.chords && track.chords.length > 0) {
+                const isChordTrigger =
+                    track.genre === 'Lo-Fi'
+                        ? stepIdx % 4 === 0 || stepIdx % 8 === 3
+                        : track.genre === 'House'
+                          ? stepIdx % 2 === 1 // Classic off-beat House organ stab
+                          : stepIdx % 4 === 0;
 
-            const leadVol = track.genre === 'Classical' ? 0.042 : 0.032;
-            const leadDur = track.genre === 'Classical' ? 0.24 : 0.16;
-            gain.gain.setValueAtTime(leadVol, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + leadDur);
+                if (isChordTrigger) {
+                    const chordNotes = track.chords[Math.floor(stepIdx / 4) % track.chords.length];
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    const cutoff = track.filterCutoff || 1600;
+                    filter.frequency.setValueAtTime(
+                        track.genre === 'House' ? cutoff * (0.7 + 0.4 * Math.sin(stepIdx * 0.4)) : cutoff,
+                        now
+                    );
+                    filter.connect(this.ctx.destination);
 
-            osc.connect(gain);
-            gain.connect(this.ctx.destination);
-            osc.start(now);
-            osc.stop(now + leadDur + 0.02);
+                    const chordDur = track.genre === 'House' ? 0.14 : track.genre === 'Lo-Fi' ? 0.48 : 0.38;
+                    const chordVol = track.genre === 'Lo-Fi' ? 0.018 : 0.014;
 
-            // 2. Bassline / Counterpoint Channel
-            if (stepIdx % 2 === 0 || track.drumPattern === 'rave' || track.drumPattern === 'techno') {
-                const bass = this.ctx.createOscillator();
-                const bassGain = this.ctx.createGain();
-                bass.type = track.bassWave;
-                bass.frequency.setValueAtTime(bassFreq, now);
-
-                bassGain.gain.setValueAtTime(0.045, now);
-                bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-
-                bass.connect(bassGain);
-                bassGain.connect(this.ctx.destination);
-                bass.start(now);
-                bass.stop(now + 0.2);
-            }
-
-            // 3. Drum / Percussion Synthesis
-            if (track.drumPattern !== 'none') {
-                if (stepIdx % 2 === 0) {
-                    const kick = this.ctx.createOscillator();
-                    const kickGain = this.ctx.createGain();
-                    kick.type = 'sine';
-                    const startPitch = track.drumPattern === 'rave' || track.drumPattern === 'techno' ? 145 : 115;
-                    kick.frequency.setValueAtTime(startPitch, now);
-                    kick.frequency.exponentialRampToValueAtTime(32, now + 0.12);
-
-                    kickGain.gain.setValueAtTime(0.11, now);
-                    kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-
-                    kick.connect(kickGain);
-                    kickGain.connect(this.ctx.destination);
-                    kick.start(now);
-                    kick.stop(now + 0.15);
-                } else {
-                    const hat = this.ctx.createOscillator();
-                    const hatGain = this.ctx.createGain();
-                    hat.type = 'square';
-                    hat.frequency.setValueAtTime(3200 + (stepIdx % 3) * 600, now);
-
-                    hatGain.gain.setValueAtTime(0.012, now);
-                    hatGain.gain.exponentialRampToValueAtTime(0.0005, now + 0.045);
-
-                    hat.connect(hatGain);
-                    hatGain.connect(this.ctx.destination);
-                    hat.start(now);
-                    hat.stop(now + 0.05);
+                    chordNotes.forEach((cFreq) => {
+                        if (!this.ctx) return;
+                        const cOsc = this.ctx.createOscillator();
+                        const cGain = this.ctx.createGain();
+                        cOsc.type = track.genre === 'Lo-Fi' ? 'triangle' : 'sawtooth';
+                        cOsc.frequency.setValueAtTime(cFreq, now);
+                        cGain.gain.setValueAtTime(0.001, now);
+                        cGain.gain.linearRampToValueAtTime(chordVol, now + 0.015);
+                        cGain.gain.exponentialRampToValueAtTime(0.0008, now + chordDur);
+                        cOsc.connect(cGain);
+                        cGain.connect(filter);
+                        cOsc.start(now);
+                        cOsc.stop(now + chordDur + 0.02);
+                    });
                 }
             }
+
+            // 3. LEAD SYNTH / ACID 303 / CHIPTUNE ARPEGGIO CHANNEL
+            if (noteFreq > 0) {
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                if (track.genre === 'Techno') {
+                    // Resonant TB-303 Acid Filter Sweep!
+                    filter.Q.setValueAtTime(9.5, now);
+                    const sweepStart = stepIdx % 3 === 0 ? 2900 : 950;
+                    filter.frequency.setValueAtTime(sweepStart, now);
+                    filter.frequency.exponentialRampToValueAtTime(280, now + 0.14);
+                } else {
+                    filter.frequency.setValueAtTime(track.filterCutoff || 2600, now);
+                }
+                filter.connect(this.ctx.destination);
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = track.wave;
+                osc.frequency.setValueAtTime(noteFreq, now);
+
+                const leadVol =
+                    track.genre === 'Classical'
+                        ? 0.038
+                        : track.genre === 'Lo-Fi'
+                          ? 0.024
+                          : track.genre === 'Chiptune'
+                            ? 0.028
+                            : 0.03;
+                const leadDur =
+                    track.genre === 'Classical' || track.genre === 'Synthwave'
+                        ? 0.25
+                        : track.genre === 'Chiptune'
+                          ? 0.11
+                          : 0.16;
+
+                gain.gain.setValueAtTime(leadVol, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + leadDur);
+
+                osc.connect(gain);
+                gain.connect(filter);
+                osc.start(now);
+                osc.stop(now + leadDur + 0.02);
+
+                // Detuned second chorus oscillator for rich Synthwave / DnB width
+                if (track.detuneCents) {
+                    const osc2 = this.ctx.createOscillator();
+                    const gain2 = this.ctx.createGain();
+                    osc2.type = track.wave;
+                    osc2.frequency.setValueAtTime(noteFreq, now);
+                    osc2.detune.setValueAtTime(track.detuneCents, now);
+                    gain2.gain.setValueAtTime(leadVol * 0.65, now);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, now + leadDur);
+                    osc2.connect(gain2);
+                    gain2.connect(filter);
+                    osc2.start(now);
+                    osc2.stop(now + leadDur + 0.02);
+                }
+            }
+
+            // 4. BASSLINE CHANNEL
+            const shouldPlayBass =
+                track.genre === 'Synthwave' || track.genre === 'Techno' || track.genre === 'Chiptune'
+                    ? true
+                    : stepIdx % 2 === 0;
+            if (shouldPlayBass && bassFreq > 0) {
+                const bass = this.ctx.createOscillator();
+                const bassGain = this.ctx.createGain();
+                const bassFilter = this.ctx.createBiquadFilter();
+                bassFilter.type = 'lowpass';
+                bassFilter.frequency.setValueAtTime(track.genre === 'DnB' ? 320 : 650, now);
+
+                bass.type = track.bassWave;
+                const activeBassFreq =
+                    track.genre === 'Synthwave' && stepIdx % 2 === 1 ? bassFreq * 2 : bassFreq;
+                bass.frequency.setValueAtTime(activeBassFreq, now);
+
+                const bassDur = track.genre === 'DnB' ? 0.28 : 0.18;
+                bassGain.gain.setValueAtTime(0.048, now);
+                bassGain.gain.exponentialRampToValueAtTime(0.001, now + bassDur);
+
+                bass.connect(bassFilter);
+                bassFilter.connect(bassGain);
+                bassGain.connect(this.ctx.destination);
+                bass.start(now);
+                bass.stop(now + bassDur + 0.02);
+            }
+
+            // 5. DISTINCT GENRE DRUM GROOVES
+            const dp = track.drumPattern;
+            if (dp === 'none') return;
+
+            const barStep = stepIdx % 8;
+
+            if (dp === 'lofi_swing') {
+                // Boom-bap swung kick on 0, 3 and dusty snare on 2, 6
+                if (barStep === 0 || barStep === 3) {
+                    this.triggerKick(now, 95, 36, 0.085);
+                } else if (barStep === 2 || barStep === 6) {
+                    this.triggerSnare(now, 0.04, 0.09);
+                }
+                this.triggerHiHat(now + (stepIdx % 2 === 1 ? 0.03 : 0), 0.008, 2400);
+            } else if (dp === 'synthwave') {
+                // Big 80s kick on 0, 4 and gated snare on 2, 6
+                if (barStep % 4 === 0) {
+                    this.triggerKick(now, 120, 34, 0.11);
+                } else if (barStep % 4 === 2) {
+                    this.triggerSnare(now, 0.065, 0.16);
+                }
+                this.triggerHiHat(now, 0.01, 3800);
+            } else if (dp === 'four_floor') {
+                // Punchy House 4x4 kick on even steps + offbeat open hat on odd steps
+                if (barStep % 2 === 0) {
+                    this.triggerKick(now, 125, 35, 0.11);
+                } else {
+                    this.triggerHiHat(now, 0.016, 4200, 0.08);
+                }
+                if (barStep === 2 || barStep === 6) {
+                    this.triggerSnare(now, 0.035, 0.08);
+                }
+            } else if (dp === 'techno') {
+                // Hard 136 BPM industrial kick + rumble sub + crisp 909 hat
+                if (barStep % 2 === 0) {
+                    this.triggerKick(now, 150, 30, 0.13);
+                } else {
+                    this.triggerHiHat(now, 0.018, 4800, 0.06);
+                }
+            } else if (dp === 'dnb_break') {
+                // Syncopated 164 BPM Jungle / Amen break: Kick on 0 & 5, Snare on 2 & 6
+                if (barStep === 0 || barStep === 5) {
+                    this.triggerKick(now, 130, 38, 0.1);
+                } else if (barStep === 2 || barStep === 6 || barStep === 7) {
+                    this.triggerSnare(now, barStep === 7 ? 0.028 : 0.055, 0.07);
+                }
+                this.triggerHiHat(now, 0.012, 5200, 0.035);
+            } else if (dp === 'chiptune') {
+                if (barStep % 4 === 0) {
+                    this.triggerKick(now, 140, 45, 0.08);
+                } else if (barStep % 4 === 2) {
+                    this.triggerSnare(now, 0.04, 0.06);
+                }
+            }
+        } catch {}
+    }
+
+    private triggerKick(now: number, startFreq: number, endFreq: number, vol: number) {
+        if (!this.ctx) return;
+        const kick = this.ctx.createOscillator();
+        const kickGain = this.ctx.createGain();
+        kick.type = 'sine';
+        kick.frequency.setValueAtTime(startFreq, now);
+        kick.frequency.exponentialRampToValueAtTime(endFreq, now + 0.12);
+        kickGain.gain.setValueAtTime(vol, now);
+        kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+        kick.connect(kickGain);
+        kickGain.connect(this.ctx.destination);
+        kick.start(now);
+        kick.stop(now + 0.15);
+    }
+
+    private triggerSnare(now: number, vol: number, dur: number) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(95, now + dur);
+        gain.gain.setValueAtTime(vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + dur + 0.01);
+
+        // Crisp high-frequency snare snap
+        const snap = this.ctx.createOscillator();
+        const snapGain = this.ctx.createGain();
+        snap.type = 'sawtooth';
+        snap.frequency.setValueAtTime(1650, now);
+        snap.frequency.exponentialRampToValueAtTime(420, now + dur * 0.7);
+        snapGain.gain.setValueAtTime(vol * 0.45, now);
+        snapGain.gain.exponentialRampToValueAtTime(0.0008, now + dur * 0.75);
+        snap.connect(snapGain);
+        snapGain.connect(this.ctx.destination);
+        snap.start(now);
+        snap.stop(now + dur);
+    }
+
+    private triggerHiHat(now: number, vol: number, freq: number, dur = 0.04) {
+        if (!this.ctx) return;
+        const hat = this.ctx.createOscillator();
+        const hatGain = this.ctx.createGain();
+        hat.type = 'square';
+        hat.frequency.setValueAtTime(freq, now);
+        hatGain.gain.setValueAtTime(vol, now);
+        hatGain.gain.exponentialRampToValueAtTime(0.0005, now + dur);
+        hat.connect(hatGain);
+        hatGain.connect(this.ctx.destination);
+        hat.start(now);
+        hat.stop(now + dur + 0.01);
+    }
+
+    /**
+     * Dramatic escalating psychedelic Shepard-style synth pulse as Rocket Crash climbs!
+     */
+    public playCrashClimbSfx(multiplier: number) {
+        this.initContext();
+        if (this.isMuted || !this.ctx) return;
+
+        try {
+            const now = this.ctx.currentTime;
+            const intensity = Math.min(1, (multiplier - 1) / 6);
+            const baseFreq = Math.min(1600, 220 * Math.pow(1.18, Math.min(14, multiplier - 1)));
+
+            const osc = this.ctx.createOscillator();
+            const osc2 = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+
+            osc.type = intensity > 0.4 ? 'sawtooth' : 'triangle';
+            osc2.type = 'sine';
+            osc.frequency.setValueAtTime(baseFreq, now);
+            osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.08, now + 0.09);
+
+            // Harmonic fifth/octave shimmer as intensity rises
+            osc2.frequency.setValueAtTime(baseFreq * (intensity > 0.5 ? 1.5 : 1.25), now);
+
+            const vol = 0.022 + intensity * 0.035;
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+            osc.connect(gain);
+            osc2.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            osc.start(now);
+            osc2.start(now);
+            osc.stop(now + 0.11);
+            osc2.stop(now + 0.11);
+        } catch {}
+    }
+
+    /**
+     * Massive sub-bass boom + explosion synth when the Rocket crashes!
+     */
+    public playCrashExplosionSfx() {
+        this.initContext();
+        if (this.isMuted || !this.ctx) return;
+
+        try {
+            const now = this.ctx.currentTime;
+            // 1. Sub-bass shockwave drop
+            const sub = this.ctx.createOscillator();
+            const subGain = this.ctx.createGain();
+            sub.type = 'sawtooth';
+            sub.frequency.setValueAtTime(160, now);
+            sub.frequency.exponentialRampToValueAtTime(24, now + 0.48);
+
+            subGain.gain.setValueAtTime(0.14, now);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+
+            sub.connect(subGain);
+            subGain.connect(this.ctx.destination);
+            sub.start(now);
+            sub.stop(now + 0.55);
+
+            // 2. Chaotic dissonant debris bursts
+            [310, 465, 620, 890].forEach((freq, i) => {
+                if (!this.ctx) return;
+                const dOsc = this.ctx.createOscillator();
+                const dGain = this.ctx.createGain();
+                dOsc.type = 'square';
+                dOsc.frequency.setValueAtTime(freq, now + i * 0.03);
+                dOsc.frequency.exponentialRampToValueAtTime(55 + i * 15, now + 0.35);
+
+                dGain.gain.setValueAtTime(0.05, now + i * 0.03);
+                dGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.38);
+
+                dOsc.connect(dGain);
+                dGain.connect(this.ctx.destination);
+                dOsc.start(now + i * 0.03);
+                dOsc.stop(now + 0.4);
+            });
         } catch {}
     }
 

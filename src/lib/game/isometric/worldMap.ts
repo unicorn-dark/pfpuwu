@@ -230,8 +230,8 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 4.5,
         height: 0.6,
         depthOffset: -120,
-        title: 'HIGH ROLLER CASINO',
-        subtitle: 'CRAPS • ROULETTE • BLACKJACK • SLOTS • CRASH',
+        title: 'UWU ROYALE CASINO',
+        subtitle: 'CRAPS • ROULETTE • 21 • SLOTS • CRASH',
         badgeColor: '#ffd700',
         solidTiles: []
     },
@@ -243,8 +243,8 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 4.5,
         height: 0.6,
         depthOffset: -120,
-        title: 'CYBER NIGHTCLUB',
-        subtitle: 'CLASSICAL • HOUSE • TECHNO • RAVE DJ',
+        title: 'CLUB NEON DJ STAGE',
+        subtitle: 'LO-FI • SYNTHWAVE • HOUSE • TECHNO • DNB',
         badgeColor: '#00ffff',
         solidTiles: []
     },
@@ -256,8 +256,8 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 4.0,
         height: 0.6,
         depthOffset: -120,
-        title: 'WEST VIP LOUNGE',
-        subtitle: 'CHILL SOFAS & PROXIMITY VOICE HANGOUT',
+        title: 'VIP LOUNGE',
+        subtitle: 'CHILL & VOICE HANGOUT',
         badgeColor: '#00ffff',
         solidTiles: []
     },
@@ -269,8 +269,8 @@ export const WORLD_OBJECTS: WorldObject[] = [
         width: 4.2,
         height: 0.6,
         depthOffset: -120,
-        title: '90s ARCADE & GRAFFITI',
-        subtitle: '5 ARCADE GAMES • CYBER MINES • MURAL • WOODS →',
+        title: 'RETRO ARCADE & ART',
+        subtitle: 'ARCADE • MINES • MURAL • WOODS →',
         badgeColor: '#00ff88',
         solidTiles: []
     },
