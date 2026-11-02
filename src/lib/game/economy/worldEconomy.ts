@@ -487,3 +487,335 @@ export async function executeUwuTransfer(
 
     return { ok: true, newBalance, record };
 }
+
+// ============================================================================
+// 24-HOUR PERSISTENT SKY WISH LANTERNS (Whispering Woods Sanctuary)
+// ============================================================================
+
+export type LanternColor = 'gold' | 'sakura' | 'cyan' | 'emerald' | 'violet';
+
+export interface WishLanternRecord {
+    id: string;
+    user_id: string;
+    username: string;
+    wish: string;
+    color: LanternColor;
+    created_at: string;
+    expires_at: string; // created_at + 24 hours
+    likes: string[]; // @usernames who sent glow
+}
+
+export const WISH_LANTERN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LOCAL_LANTERNS_KEY = 'pfpuwu_world_wish_lanterns_v1';
+const SUPABASE_LANTERNS_ROW_ID = 'wish_lanterns_v1';
+
+export function filterActiveLanterns(list: WishLanternRecord[]): WishLanternRecord[] {
+    const now = Date.now();
+    const byId = new Map<string, WishLanternRecord>();
+    for (const item of list) {
+        if (!item || !item.id || !item.wish || !item.username) continue;
+        const exp = new Date(item.expires_at).getTime();
+        if (isNaN(exp) || exp <= now) continue;
+        const prev = byId.get(item.id);
+        const likes = Array.from(
+            new Set([...(prev?.likes || []), ...(Array.isArray(item.likes) ? item.likes : [])])
+        );
+        byId.set(item.id, {
+            id: String(item.id),
+            user_id: String(item.user_id || item.username),
+            username: String(item.username).replace(/^@/, '').toLowerCase(),
+            wish: String(item.wish).slice(0, 140),
+            color: (['gold', 'sakura', 'cyan', 'emerald', 'violet'].includes(item.color)
+                ? item.color
+                : 'gold') as LanternColor,
+            created_at: item.created_at,
+            expires_at: item.expires_at,
+            likes
+        });
+    }
+    return Array.from(byId.values())
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 50);
+}
+
+export function formatLanternTimeRemaining(expiresAtIso: string): string {
+    const exp = new Date(expiresAtIso).getTime();
+    if (isNaN(exp)) return 'Expired';
+    const remMs = Math.max(0, exp - Date.now());
+    if (remMs <= 0) return 'Expired';
+    const totalMins = Math.ceil(remMs / 60000);
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    if (hours > 0) {
+        return `${hours}h ${mins}m left`;
+    }
+    return `${mins}m left`;
+}
+
+export async function loadActiveWishLanterns(): Promise<WishLanternRecord[]> {
+    let localList: WishLanternRecord[] = [];
+    if (typeof window !== 'undefined') {
+        try {
+            const raw = localStorage.getItem(LOCAL_LANTERNS_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    localList = filterActiveLanterns(parsed);
+                }
+            }
+        } catch {}
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('uwu_graffiti_wall')
+            .select('id, pixels, updated_at')
+            .eq('id', SUPABASE_LANTERNS_ROW_ID)
+            .maybeSingle();
+
+        if (!error && data?.pixels) {
+            const p = data.pixels as any;
+            const remoteArr = Array.isArray(p?.lanterns) ? p.lanterns : Array.isArray(p) ? p : [];
+            const merged = filterActiveLanterns([...remoteArr, ...localList]);
+            if (typeof window !== 'undefined') {
+                try {
+                    localStorage.setItem(LOCAL_LANTERNS_KEY, JSON.stringify(merged));
+                } catch {}
+            }
+            return merged;
+        }
+    } catch {}
+
+    return localList;
+}
+
+export async function saveNewWishLantern(
+    lantern: WishLanternRecord
+): Promise<WishLanternRecord[]> {
+    const current = await loadActiveWishLanterns();
+    const merged = filterActiveLanterns([lantern, ...current]);
+
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(LOCAL_LANTERNS_KEY, JSON.stringify(merged));
+        } catch {}
+    }
+
+    try {
+        await supabase.from('uwu_graffiti_wall').upsert(
+            {
+                id: SUPABASE_LANTERNS_ROW_ID,
+                pixels: { lanterns: merged },
+                updated_by: lantern.username.replace(/^@/, '').toLowerCase(),
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'id' }
+        );
+    } catch {}
+
+    return merged;
+}
+
+export async function toggleWishLanternGlow(
+    lanternId: string,
+    username: string
+): Promise<WishLanternRecord[]> {
+    const cleanUser = username.trim().replace(/^@/, '').toLowerCase();
+    const current = await loadActiveWishLanterns();
+    if (!cleanUser) return current;
+
+    const updated = current.map((l) => {
+        if (l.id !== lanternId) return l;
+        const hasLiked = l.likes.includes(cleanUser);
+        const nextLikes = hasLiked
+            ? l.likes.filter((u) => u !== cleanUser)
+            : [...l.likes, cleanUser];
+        return { ...l, likes: nextLikes };
+    });
+
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(LOCAL_LANTERNS_KEY, JSON.stringify(updated));
+        } catch {}
+    }
+
+    try {
+        await supabase.from('uwu_graffiti_wall').upsert(
+            {
+                id: SUPABASE_LANTERNS_ROW_ID,
+                pixels: { lanterns: updated },
+                updated_by: cleanUser,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'id' }
+        );
+    } catch {}
+
+    return updated;
+}
+
+// ============================================================================
+// PERSISTENT GLOBAL ARCADE HIGH SCORE BOARDS (Per-Game Top 10)
+// ============================================================================
+
+export type ArcadeScoreGameId = 'brick' | 'snake' | 'coin' | 'whack';
+
+export interface ArcadeHighScoreEntry {
+    user_id: string;
+    username: string;
+    score: number;
+    updated_at: string;
+}
+
+export type ArcadeLeaderboardMap = Record<ArcadeScoreGameId, ArcadeHighScoreEntry[]>;
+
+const LOCAL_ARCADE_LB_KEY = 'pfpuwu_world_arcade_leaderboards_v1';
+const SUPABASE_ARCADE_LB_ROW_ID = 'arcade_leaderboards_v1';
+const ARCADE_GAME_KEYS: ArcadeScoreGameId[] = ['brick', 'snake', 'coin', 'whack'];
+
+function createEmptyArcadeLeaderboardMap(): ArcadeLeaderboardMap {
+    return {
+        brick: [],
+        snake: [],
+        coin: [],
+        whack: []
+    };
+}
+
+export function normalizeArcadeGameBoard(list: ArcadeHighScoreEntry[]): ArcadeHighScoreEntry[] {
+    const byUser = new Map<string, ArcadeHighScoreEntry>();
+    for (const item of list || []) {
+        if (!item || !item.username || typeof item.score !== 'number' || item.score <= 0) continue;
+        const cleanUser = String(item.username).replace(/^@/, '').toLowerCase();
+        if (!cleanUser || /^anon\d*$/i.test(cleanUser)) continue;
+        const existing = byUser.get(cleanUser);
+        if (!existing || item.score > existing.score) {
+            byUser.set(cleanUser, {
+                user_id: String(item.user_id || cleanUser),
+                username: cleanUser,
+                score: Math.round(item.score),
+                updated_at: item.updated_at || new Date().toISOString()
+            });
+        }
+    }
+    return Array.from(byUser.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
+}
+
+export function mergeArcadeLeaderboardMaps(
+    a: Partial<ArcadeLeaderboardMap> | null | undefined,
+    b: Partial<ArcadeLeaderboardMap> | null | undefined
+): ArcadeLeaderboardMap {
+    const out = createEmptyArcadeLeaderboardMap();
+    for (const key of ARCADE_GAME_KEYS) {
+        const listA = Array.isArray(a?.[key]) ? a![key]! : [];
+        const listB = Array.isArray(b?.[key]) ? b![key]! : [];
+        out[key] = normalizeArcadeGameBoard([...listA, ...listB]);
+    }
+    return out;
+}
+
+export async function loadArcadeLeaderboards(): Promise<ArcadeLeaderboardMap> {
+    let localMap: ArcadeLeaderboardMap = createEmptyArcadeLeaderboardMap();
+    if (typeof window !== 'undefined') {
+        try {
+            const raw = localStorage.getItem(LOCAL_ARCADE_LB_KEY);
+            if (raw) {
+                localMap = mergeArcadeLeaderboardMaps(localMap, JSON.parse(raw));
+            }
+        } catch {}
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('uwu_graffiti_wall')
+            .select('id, pixels, updated_at')
+            .eq('id', SUPABASE_ARCADE_LB_ROW_ID)
+            .maybeSingle();
+
+        if (!error && data?.pixels) {
+            const p = data.pixels as any;
+            const remoteBoards = p?.boards || p;
+            const merged = mergeArcadeLeaderboardMaps(remoteBoards, localMap);
+            if (typeof window !== 'undefined') {
+                try {
+                    localStorage.setItem(LOCAL_ARCADE_LB_KEY, JSON.stringify(merged));
+                } catch {}
+            }
+            return merged;
+        }
+    } catch {}
+
+    return localMap;
+}
+
+export async function submitArcadeHighScore(
+    gameId: ArcadeScoreGameId,
+    entry: ArcadeHighScoreEntry
+): Promise<{
+    leaderboards: ArcadeLeaderboardMap;
+    isNewPersonalBest: boolean;
+    isNewGlobalRecord: boolean;
+    rank: number | null;
+}> {
+    const current = await loadArcadeLeaderboards();
+    const cleanUser = entry.username.replace(/^@/, '').toLowerCase();
+    if (!cleanUser || entry.score <= 0) {
+        return {
+            leaderboards: current,
+            isNewPersonalBest: false,
+            isNewGlobalRecord: false,
+            rank: null
+        };
+    }
+
+    const prevBoard = current[gameId] || [];
+    const prevTopScore = prevBoard[0]?.score || 0;
+    const prevUserEntry = prevBoard.find((e) => e.username.toLowerCase() === cleanUser);
+    const isNewPersonalBest = !prevUserEntry || entry.score > prevUserEntry.score;
+    const isNewGlobalRecord = entry.score > prevTopScore;
+
+    const updatedBoard = normalizeArcadeGameBoard([
+        ...prevBoard,
+        {
+            user_id: entry.user_id,
+            username: cleanUser,
+            score: Math.round(entry.score),
+            updated_at: entry.updated_at || new Date().toISOString()
+        }
+    ]);
+
+    const nextMap: ArcadeLeaderboardMap = {
+        ...current,
+        [gameId]: updatedBoard
+    };
+
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(LOCAL_ARCADE_LB_KEY, JSON.stringify(nextMap));
+        } catch {}
+    }
+
+    if (isNewPersonalBest) {
+        try {
+            await supabase.from('uwu_graffiti_wall').upsert(
+                {
+                    id: SUPABASE_ARCADE_LB_ROW_ID,
+                    pixels: { boards: nextMap },
+                    updated_by: cleanUser,
+                    updated_at: new Date().toISOString()
+                },
+                { onConflict: 'id' }
+            );
+        } catch {}
+    }
+
+    const rankIdx = updatedBoard.findIndex((e) => e.username.toLowerCase() === cleanUser);
+    return {
+        leaderboards: nextMap,
+        isNewPersonalBest,
+        isNewGlobalRecord,
+        rank: rankIdx !== -1 ? rankIdx + 1 : null
+    };
+}

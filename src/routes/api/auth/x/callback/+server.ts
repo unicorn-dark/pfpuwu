@@ -92,7 +92,7 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
             throw redirect(
                 302,
                 `/?auth_error=${encodeURIComponent(
-                    'X login session expired or failed. Please try again or click Alt Sign In (OAuth 2.0).'
+                    'X login session expired or failed. Please try again or click Force Fresh X Login.'
                 )}`
             );
         }
@@ -155,6 +155,15 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         if (!userRes.ok) {
             const errText = await userRes.text();
             console.error('Failed to fetch X user profile:', userRes.status, errText);
+            clearCookieEverywhere('x_oauth_state');
+            clearCookieEverywhere('x_oauth_verifier');
+
+            // If X returns 403 client-not-enrolled (because App 33541174 is a Standalone App not attached to a Project),
+            // automatically fall back to OAuth 1.0a force_login on api.x.com which does not use v2 endpoints!
+            if (userRes.status === 403 && env.X_API_KEY && env.X_API_SECRET) {
+                throw redirect(302, `/api/auth/x/login?flow=force&_t=${Date.now()}`);
+            }
+
             const cleanErr = errText.slice(0, 150).replace(/[^\w\s-]/g, ' ');
             throw redirect(302, `/?auth_error=X+Profile+Error+${userRes.status}+${encodeURIComponent(cleanErr)}`);
         }

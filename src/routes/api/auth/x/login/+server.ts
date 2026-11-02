@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
     const cookieDomain = resolveCookieDomain(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
     const isProd = isHttps;
-    const requestedFlow = url.searchParams.get('flow'); // 'oauth1' | 'oauth2' | 'force'
+    const requestedFlow = url.searchParams.get('flow'); // 'oauth1' | 'authorize' | 'force' | 'oauth2'
 
     const apiKey = env.X_API_KEY;
     const apiSecret = env.X_API_SECRET;
@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         }
     };
 
-    // 1. Prefer OAuth 1.0a ("Sign in with X") on api.x.com unless user explicitly chose 'oauth2'
+    // 1. Prefer OAuth 1.0a on api.x.com (works with Standalone App 33541174 without requiring an X v2 Project)
     let oauth1Url: string | null = null;
     if (requestedFlow !== 'oauth2' && apiKey && apiSecret) {
         try {
@@ -57,13 +57,13 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
             setCookieWithDomainFallback(`x_secret_${oauthToken}`, oauthTokenSecret, 60 * 15);
             setCookieWithDomainFallback('x_oauth1_secret', oauthTokenSecret, 60 * 15);
 
-            // IMPORTANT: Always use api.x.com (NOT api.twitter.com) so X's redirect_x.js script
-            // does not trigger a client-side hostname swap that drops POST form bodies and causes
-            // "Whoa there! There is no request token for this page." for users logged into x.com!
-            if (requestedFlow === 'force') {
-                oauth1Url = `https://api.x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}&force_login=true`;
+            // IMPORTANT: Always redirect the browser to https://x.com/oauth/... (NOT api.twitter.com or api.x.com)
+            // so the browser sends the user's active x.com session cookies directly.
+            // Never pass force_login=true because X's /i/flow/login router drops redirect_after_login and dumps users on x.com/home.
+            if (requestedFlow === 'authorize' || requestedFlow === 'force') {
+                oauth1Url = `https://x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}`;
             } else {
-                oauth1Url = `https://api.x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
+                oauth1Url = `https://x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
             }
         } catch (err: any) {
             console.error('OAuth 1.0a initiation failed, falling back to OAuth 2.0:', err);

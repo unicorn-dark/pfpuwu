@@ -305,7 +305,7 @@ export async function getOAuth1UserProfile(
             skip_status: 'true'
         };
 
-        const url = 'https://api.twitter.com/1.1/account/verify_credentials.json';
+        const url = 'https://api.x.com/1.1/account/verify_credentials.json';
         const header = buildOAuth1Header('GET', url, params, apiSecret, userTokenSecret);
 
         const res = await fetch(`${url}?include_entities=false&skip_status=true`, {

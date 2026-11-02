@@ -230,7 +230,7 @@ export function requireSocialAccess(
 }
 
 export async function loginWithX(
-    flow: 'oauth1' | 'oauth2' | 'force' = 'oauth1'
+    flow: 'oauth1' | 'authorize' | 'force' | 'oauth2' = 'oauth1'
 ): Promise<{ ok: boolean; error?: string }> {
     try {
         authError.set('');

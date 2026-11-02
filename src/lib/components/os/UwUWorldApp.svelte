@@ -75,7 +75,19 @@
         executeUwuTransfer,
         loadSavedGraffitiWall,
         saveGraffitiWallState,
-        type PlayerEconomyStats
+        loadActiveWishLanterns,
+        saveNewWishLantern,
+        toggleWishLanternGlow,
+        formatLanternTimeRemaining,
+        WISH_LANTERN_TTL_MS,
+        loadArcadeLeaderboards,
+        submitArcadeHighScore,
+        mergeArcadeLeaderboardMaps,
+        type PlayerEconomyStats,
+        type WishLanternRecord,
+        type LanternColor,
+        type ArcadeScoreGameId,
+        type ArcadeLeaderboardMap
     } from "$lib/game/economy/worldEconomy";
 
     let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -294,12 +306,12 @@
     let minesSafeClicks = $state(0);
     let minesMessage = $state("Uncover glowing gems and cash out anytime!");
 
-    // --- 90s RETRO ARCADE CENTER STATE (5 Playable Games: Free Play + 100 $UWU Token Challenge) ---
+    // --- 90s RETRO ARCADE CENTER STATE (Hardcore Base Difficulty + Persistent High Score Boards) ---
     type ArcadeGameId = "mines" | "brick" | "snake" | "coin" | "whack";
     let activeArcadeTab = $state<ArcadeGameId>("brick");
     let arcadePlayMode = $state<"free" | "token">("free");
     const ARCADE_TOKEN_COST = 100;
-    const ARCADE_TOKEN_PAYOUT = 175; // 1.75x skill challenge reward
+    const ARCADE_TOKEN_PAYOUT = 200; // 2.0x skill challenge reward for beating hardcore arcade targets
     let arcadeBestScores = $state<Record<ArcadeGameId, number>>({
         mines: 0,
         brick: 0,
@@ -307,8 +319,14 @@
         coin: 0,
         whack: 0
     });
+    let arcadeLeaderboards = $state<ArcadeLeaderboardMap>({
+        brick: [],
+        snake: [],
+        coin: [],
+        whack: []
+    });
 
-    // Arcade Game 2: Neon Brick Breaker (Arkanoid)
+    // Arcade Game 2: Neon Brick Breaker (Hardcore Arkanoid: 48px paddle, fast ball, armored top row)
     interface ArcadeBrick {
         x: number;
         y: number;
@@ -316,18 +334,20 @@
         h: number;
         color: string;
         pts: number;
+        hp: number;
         alive: boolean;
     }
     let brickPhase = $state<"idle" | "playing" | "won" | "lost">("idle");
     let brickScore = $state(0);
     let brickLives = $state(3);
-    let brickPaddleX = $state(128);
-    let brickBall = $state({ x: 160, y: 190, vx: 3.1, vy: -3.3 });
+    let brickPaddleX = $state(136);
+    const BRICK_PADDLE_WIDTH = 48;
+    let brickBall = $state({ x: 160, y: 190, vx: 4.1, vy: -4.4 });
     let brickList = $state<ArcadeBrick[]>([]);
     let brickTimerId: number | null = null;
-    const BRICK_TARGET_SCORE = 450;
+    const BRICK_TARGET_SCORE = 600;
 
-    // Arcade Game 3: Cyber Snake 1998
+    // Arcade Game 3: Cyber Snake 1998 (Fast 78ms tick + Glitch Firewall Obstacles)
     let snakePhase = $state<"idle" | "playing" | "won" | "lost">("idle");
     let snakeScore = $state(0);
     let snakeBody = $state<Array<{ x: number; y: number }>>([
@@ -335,13 +355,21 @@
         { x: 7, y: 6 },
         { x: 6, y: 6 }
     ]);
+    let snakeHazards = $state<Array<{ x: number; y: number }>>([
+        { x: 3, y: 2 },
+        { x: 12, y: 2 },
+        { x: 3, y: 9 },
+        { x: 12, y: 9 },
+        { x: 8, y: 3 },
+        { x: 8, y: 9 }
+    ]);
     let snakeDir = $state<{ x: number; y: number }>({ x: 1, y: 0 });
     let snakeNextDir = { x: 1, y: 0 };
     let snakeFood = $state<{ x: number; y: number; kind: "orb" | "unicorn" }>({ x: 12, y: 6, kind: "orb" });
     let snakeTimerId: number | null = null;
-    const SNAKE_TARGET_SCORE = 300;
+    const SNAKE_TARGET_SCORE = 450;
 
-    // Arcade Game 4: Cyber Coin Rush (25s Basket Catcher)
+    // Arcade Game 4: Cyber Coin Rush (High-Speed 25s Rain Catcher)
     interface FallingArcadeItem {
         id: number;
         x: number;
@@ -354,13 +382,14 @@
     let coinPhase = $state<"idle" | "playing" | "done">("idle");
     let coinScore = $state(0);
     let coinTimeLeft = $state(25);
-    let coinBasketX = $state(135);
+    let coinBasketX = $state(137);
+    const COIN_BASKET_WIDTH = 46;
     let coinItems = $state<FallingArcadeItem[]>([]);
     let coinTimerId: number | null = null;
     let coinCountdownId: number | null = null;
-    const COIN_TARGET_SCORE = 320;
+    const COIN_TARGET_SCORE = 500;
 
-    // Arcade Game 5: Whack-A-Glitch (20s 3x3 Cyber Terminal Reflex)
+    // Arcade Game 5: Whack-A-Glitch (High-Speed 20s 3x3 Cyber Terminal Reflex)
     interface GlitchCell {
         kind: "empty" | "bug" | "golden" | "bomb";
         expiresAt: number;
@@ -373,7 +402,7 @@
     );
     let whackTimerId: number | null = null;
     let whackCountdownId: number | null = null;
-    const WHACK_TARGET_SCORE = 350;
+    const WHACK_TARGET_SCORE = 480;
 
     // --- WHISPERING WOODS SOCIAL ACTIVITIES (NON-GAMBLING) ---
     // 1. Campfire Story & Trivia Circle
@@ -403,13 +432,65 @@
     let caughtKoi = $state<KoiSpecimen | null>(null);
     let koiCollection = $state<string[]>([]);
 
-    // 4. Firefly Meadow & Wishing Shrine
+    // 4. Wild Firefly Hunting, Net Catcher Minigame & 24-Hour Sky Wish Lantern Sanctuary
+    interface WildFirefly {
+        id: number;
+        anchorX: number;
+        anchorY: number;
+        x: number;
+        y: number;
+        phase: number;
+        speed: number;
+        color: string;
+        respawnUntil: number;
+    }
+    let wildFireflies: WildFirefly[] = [
+        { id: 1, anchorX: 9.5, anchorY: 13.5, x: 9.5, y: 13.5, phase: 0.2, speed: 1.4, color: "#ccff66", respawnUntil: 0 },
+        { id: 2, anchorX: 14.5, anchorY: 10.2, x: 14.5, y: 10.2, phase: 1.5, speed: 1.7, color: "#ffd700", respawnUntil: 0 },
+        { id: 3, anchorX: 20.5, anchorY: 14.2, x: 20.5, y: 14.2, phase: 2.8, speed: 1.5, color: "#00ffcc", respawnUntil: 0 },
+        { id: 4, anchorX: 18.8, anchorY: 20.4, x: 18.8, y: 20.4, phase: 4.1, speed: 1.8, color: "#ccff66", respawnUntil: 0 },
+        { id: 5, anchorX: 24.8, anchorY: 18.2, x: 24.8, y: 18.2, phase: 5.0, speed: 1.6, color: "#ff99ff", respawnUntil: 0 },
+        { id: 6, anchorX: 14.0, anchorY: 23.5, x: 14.0, y: 23.5, phase: 3.3, speed: 1.5, color: "#ccff66", respawnUntil: 0 },
+        { id: 7, anchorX: 23.8, anchorY: 12.8, x: 23.8, y: 12.8, phase: 0.9, speed: 1.9, color: "#ffd700", respawnUntil: 0 }
+    ];
+    let activeWildFireflyId = $state<number | null>(null);
     let fireflyJarCount = $state(0);
-    let fireflyCommunityGoal = $state(12);
-    let fireflyWishes = $state<Array<{ user: string; wish: string }>>([
-        { user: "SakuraSpirit", wish: "May all frens find cozy vibes in UwU World ✨" }
-    ]);
+
+    // Interactive Firefly Net Catcher Minigame State
+    let showFireflyCatcherModal = $state(false);
+    let catcherPhase = $state<"idle" | "playing" | "won" | "escaped">("idle");
+    let catcherHits = $state(0);
+    const CATCHER_REQUIRED_HITS = 3;
+    let catcherTimeLeft = $state(10);
+    let catcherNetPos = $state({ x: 160, y: 105 });
+    let catcherSwingCooldownUntil = $state(0);
+    let catcherSwingAnimUntil = $state(0);
+    let catcherStatusMsg = $state("Move your net over the darting firefly and click / press SPACE to swing!");
+    let catcherTarget = $state({
+        x: 160,
+        y: 95,
+        vx: 4.2,
+        vy: 3.1,
+        isSweetSpot: false,
+        nextBurstAt: 0
+    });
+    let catcherDecoys = $state<Array<{ id: number; x: number; y: number; vx: number; vy: number; icon: string }>>([]);
+    let catcherTimerId: number | null = null;
+    let catcherCountdownId: number | null = null;
+
+    // 24-Hour Persistent Sky Wish Lanterns State
+    let showLanternModal = $state(false);
+    let wishLanterns = $state<WishLanternRecord[]>([]);
+    let selectedLanternColor = $state<LanternColor>("gold");
     let fireflyWishInput = $state("");
+    let isReleasingLantern = $state(false);
+    const LANTERN_COLOR_OPTIONS: Array<{ id: LanternColor; label: string; hex: string; border: string }> = [
+        { id: "gold", label: "🏮 Amber Gold", hex: "#ffd700", border: "#ff9900" },
+        { id: "sakura", label: "🌸 Sakura Pink", hex: "#ff80bf", border: "#ff3399" },
+        { id: "cyan", label: "💎 Moonlit Cyan", hex: "#00e5ff", border: "#0099cc" },
+        { id: "emerald", label: "🌿 Forest Glow", hex: "#66ff99", border: "#00cc66" },
+        { id: "violet", label: "🔮 Mystic Violet", hex: "#cc88ff", border: "#9933ff" }
+    ];
 
     let hoveredTile = $state<{ x: number; y: number } | null>(null);
 
@@ -678,7 +759,7 @@
         }
     }
 
-    async function handleWorldXLogin(flow: "oauth1" | "oauth2" | "force" = "oauth1") {
+    async function handleWorldXLogin(flow: "oauth1" | "authorize" | "force" | "oauth2" = "oauth1") {
         isLoggingInWithX = true;
         const res = await loginWithX(flow);
         isLoggingInWithX = false;
@@ -723,6 +804,27 @@
                 applyGraffitiDataUrl(savedDataUrl);
             }
         });
+
+        // Load persistent 24h Sky Wish Lanterns & Arcade Leaderboards
+        loadActiveWishLanterns().then((lanterns) => {
+            wishLanterns = lanterns;
+        });
+        loadArcadeLeaderboards().then((boards) => {
+            arcadeLeaderboards = boards;
+            const myClean = myUsername.replace(/^@/, "").toLowerCase();
+            for (const gKey of ["brick", "snake", "coin", "whack"] as const) {
+                const mine = boards[gKey]?.find((e) => e.username.toLowerCase() === myClean);
+                if (mine && mine.score > arcadeBestScores[gKey]) {
+                    arcadeBestScores = { ...arcadeBestScores, [gKey]: mine.score };
+                }
+            }
+        });
+        try {
+            const savedJar = localStorage.getItem(`pfpuwu_firefly_jar_${myUsername.toLowerCase()}`);
+            if (savedJar !== null) {
+                fireflyJarCount = Math.max(0, parseInt(savedJar, 10) || 0);
+            }
+        } catch {}
 
         loadOrInitPlayerStats(myId, myUsername, avatarUrl, profile.x_display_name).then((loaded) => {
             chips = loaded.chips;
@@ -831,9 +933,38 @@
             } else if (payload.kind === "koi_caught") {
                 showToast(`🐟 @${payload.user} caught & admired a ${payload.koiName} at the Koi Pond!`, 4000);
             } else if (payload.kind === "firefly_wish") {
-                fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
-                fireflyWishes = [{ user: payload.user, wish: payload.wish }, ...fireflyWishes.slice(0, 6)];
-                showToast(`✨ @${payload.user} released a Firefly Wish at the Shrine!`, 4500);
+                if (payload.lantern) {
+                    const exists = wishLanterns.some((l) => l.id === payload.lantern.id);
+                    if (!exists) {
+                        wishLanterns = [payload.lantern, ...wishLanterns].slice(0, 50);
+                    }
+                }
+                showToast(`🏮 @${payload.user} released a 24h Sky Wish Lantern at the Shrine!`, 4500);
+            } else if (payload.kind === "lantern_glow") {
+                if (payload.lanternId && payload.user) {
+                    const u = String(payload.user).replace(/^@/, "").toLowerCase();
+                    wishLanterns = wishLanterns.map((l) => {
+                        if (l.id !== payload.lanternId) return l;
+                        const has = l.likes.includes(u);
+                        return {
+                            ...l,
+                            likes: has ? l.likes.filter((x) => x !== u) : [...l.likes, u]
+                        };
+                    });
+                }
+            } else if (payload.kind === "arcade_highscore") {
+                if (payload.gameId && payload.entry) {
+                    const gId = payload.gameId as ArcadeScoreGameId;
+                    arcadeLeaderboards = mergeArcadeLeaderboardMaps(arcadeLeaderboards, {
+                        [gId]: [payload.entry]
+                    });
+                    if (payload.isRecord) {
+                        showToast(
+                            `🕹️ NEW ARCADE #1 RECORD: @${payload.entry.username} scored ${payload.entry.score} PTS on ${payload.gameLabel || gId}!`,
+                            5500
+                        );
+                    }
+                }
             }
         };
         networkManager.onDJTrackChanged = (trackId, djUser) => {
@@ -948,6 +1079,12 @@
                 applyGraffitiDataUrl(savedDataUrl);
             }
         });
+        loadActiveWishLanterns().then((lanterns) => {
+            wishLanterns = lanterns;
+        });
+        loadArcadeLeaderboards().then((boards) => {
+            arcadeLeaderboards = boards;
+        });
 
         diceManager.onStateChanged = () => {
             diceTick++;
@@ -1051,6 +1188,7 @@
         if (graffitiSaveTimeout) clearTimeout(graffitiSaveTimeout);
         if (fishingHookTimer) clearTimeout(fishingHookTimer);
         stopAllArcadeTimers();
+        stopFireflyCatcherTimers();
         synth.stop();
         diceManager.destroy();
         rouletteManager.destroy();
@@ -1098,6 +1236,30 @@
             return;
         }
 
+        // If Firefly Net Catcher Modal is open, route arrow/WASD keys to aim the net and Space/Enter to swing!
+        if (showFireflyCatcherModal) {
+            const code = e.code;
+            const key = e.key.toLowerCase();
+            if (code === "ArrowLeft" || code === "KeyA" || key === "a") {
+                e.preventDefault();
+                catcherNetPos = { ...catcherNetPos, x: Math.max(24, catcherNetPos.x - 22) };
+            } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
+                e.preventDefault();
+                catcherNetPos = { ...catcherNetPos, x: Math.min(296, catcherNetPos.x + 22) };
+            } else if (code === "ArrowUp" || code === "KeyW" || key === "w") {
+                e.preventDefault();
+                catcherNetPos = { ...catcherNetPos, y: Math.max(24, catcherNetPos.y - 22) };
+            } else if (code === "ArrowDown" || code === "KeyS" || key === "s") {
+                e.preventDefault();
+                catcherNetPos = { ...catcherNetPos, y: Math.min(186, catcherNetPos.y + 22) };
+            } else if (code === "Space" || code === "Enter" || key === "e") {
+                e.preventDefault();
+                if (catcherPhase === "playing") swingFireflyNet();
+                else startFireflyCatcherGame();
+            }
+            return;
+        }
+
         // If 90s Retro Arcade Center Modal is open, route arrow/WASD keys to the active arcade mini-game!
         if (showArcadeModal) {
             const code = e.code;
@@ -1108,7 +1270,7 @@
                     brickPaddleX = Math.max(8, brickPaddleX - 24);
                 } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
                     e.preventDefault();
-                    brickPaddleX = Math.min(248, brickPaddleX + 24);
+                    brickPaddleX = Math.min(320 - BRICK_PADDLE_WIDTH - 8, brickPaddleX + 24);
                 }
             } else if (activeArcadeTab === "snake") {
                 if (code === "ArrowUp" || code === "KeyW" || key === "w") {
@@ -1130,7 +1292,7 @@
                     coinBasketX = Math.max(8, coinBasketX - 24);
                 } else if (code === "ArrowRight" || code === "KeyD" || key === "d") {
                     e.preventDefault();
-                    coinBasketX = Math.min(256, coinBasketX + 24);
+                    coinBasketX = Math.min(320 - COIN_BASKET_WIDTH - 8, coinBasketX + 24);
                 }
             }
             return;
@@ -1323,8 +1485,21 @@
                 castFishingLine();
                 return;
             }
+            // Check if player is near a wild firefly first
+            const nowMs = Date.now();
+            const nearbyFly = wildFireflies.find(
+                (f) => f.respawnUntil <= nowMs && gridDistance(myX, myY, f.x, f.y) <= 3.6
+            );
+            if (nearbyFly && activeStation !== "fireflies") {
+                openFireflyCatcher(nearbyFly.id);
+                return;
+            }
             if (activeStation === "fireflies") {
-                catchFirefly();
+                openLanternSanctuary();
+                return;
+            }
+            if (nearbyFly) {
+                openFireflyCatcher(nearbyFly.id);
                 return;
             }
         }
@@ -1902,6 +2077,9 @@
         stopAllArcadeTimers();
         activeArcadeTab = defaultTab;
         showArcadeModal = true;
+        loadArcadeLeaderboards().then((boards) => {
+            arcadeLeaderboards = boards;
+        });
     }
 
     function closeArcadeModal() {
@@ -1922,7 +2100,12 @@
         return true;
     }
 
-    function settleArcadeGameResult(gameId: ArcadeGameId, finalScore: number, targetScore: number, gameLabel: string) {
+    async function settleArcadeGameResult(
+        gameId: ArcadeGameId,
+        finalScore: number,
+        targetScore: number,
+        gameLabel: string
+    ) {
         if (finalScore > arcadeBestScores[gameId]) {
             arcadeBestScores = { ...arcadeBestScores, [gameId]: finalScore };
         }
@@ -1932,13 +2115,13 @@
                 synth.playWinFanfare();
                 triggerConfettiCelebration();
                 showToast(
-                    `🕹️ ${gameLabel} TARGET BEAT (${finalScore} >= ${targetScore})! Won +${ARCADE_TOKEN_PAYOUT} $UWU (1.75x)!`,
+                    `🕹️ ${gameLabel} TARGET BEAT (${finalScore} >= ${targetScore})! Won +${ARCADE_TOKEN_PAYOUT} $UWU (2.0x)!`,
                     6000
                 );
             } else {
                 recordGameOutcome(0, "loss", finalScore);
                 showToast(
-                    `🕹️ ${gameLabel} Score: ${finalScore}/${targetScore}. Needed ${targetScore} pts to win the 175 $UWU token prize!`,
+                    `🕹️ ${gameLabel} Score: ${finalScore}/${targetScore}. Needed ${targetScore} pts to win the ${ARCADE_TOKEN_PAYOUT} $UWU prize!`,
                     4500
                 );
             }
@@ -1948,16 +2131,44 @@
                 showToast(`🕹️ High Score on ${gameLabel}: ${finalScore} pts!`, 3500);
             }
         }
+
+        // Persist to Global Arcade Leaderboard if score > 0
+        if (finalScore > 0 && gameId !== "mines" && myUsername) {
+            const entry = {
+                user_id: myId || myUsername,
+                username: myUsername.replace(/^@/, "").toLowerCase(),
+                score: Math.round(finalScore),
+                updated_at: new Date().toISOString()
+            };
+            const res = await submitArcadeHighScore(gameId as ArcadeScoreGameId, entry);
+            arcadeLeaderboards = res.leaderboards;
+            if (res.isNewPersonalBest) {
+                networkManager?.broadcastForestEvent({
+                    kind: "arcade_highscore",
+                    gameId,
+                    gameLabel,
+                    entry,
+                    isRecord: res.isNewGlobalRecord
+                });
+                if (res.isNewGlobalRecord) {
+                    triggerConfettiCelebration();
+                    showToast(
+                        `👑 NEW #1 ALL-TIME RECORD on ${gameLabel}: ${finalScore} PTS!`,
+                        5500
+                    );
+                }
+            }
+        }
     }
 
-    // Arcade Game 2: Neon Brick Breaker (Arkanoid)
+    // Arcade Game 2: Neon Brick Breaker (Hardcore Arkanoid: 48px paddle, fast ball, armored top row)
     function startBrickBreaker() {
         stopAllArcadeTimers();
         if (!payArcadeEntryIfTokenMode()) return;
         synth.playChipSfx();
 
         const rowColors = ["#ff0055", "#ff7700", "#ffd700", "#00ff88", "#00ffff"];
-        const rowPts = [30, 25, 20, 15, 10];
+        const rowPts = [40, 30, 25, 20, 15];
         const bricks: ArcadeBrick[] = [];
         for (let r = 0; r < 5; r++) {
             for (let c = 0; c < 7; c++) {
@@ -1968,6 +2179,7 @@
                     h: 11,
                     color: rowColors[r],
                     pts: rowPts[r],
+                    hp: r === 0 ? 2 : 1, // Top crimson row is armored (requires 2 hits)
                     alive: true
                 });
             }
@@ -1975,8 +2187,8 @@
         brickList = bricks;
         brickScore = 0;
         brickLives = 3;
-        brickPaddleX = 128;
-        brickBall = { x: 160, y: 185, vx: 2.9 * (Math.random() > 0.5 ? 1 : -1), vy: -3.2 };
+        brickPaddleX = 136;
+        brickBall = { x: 160, y: 185, vx: 3.9 * (Math.random() > 0.5 ? 1 : -1), vy: -4.2 };
         brickPhase = "playing";
 
         brickTimerId = window.setInterval(() => {
@@ -1995,11 +2207,18 @@
                 by = 8;
             }
 
-            // Paddle collision (y = 204..214, width = 64)
-            if (vy > 0 && by >= 198 && by <= 212 && bx >= brickPaddleX - 4 && bx <= brickPaddleX + 68) {
-                const hitOffset = (bx - (brickPaddleX + 32)) / 32; // -1..1
-                vx = hitOffset * 4.1;
-                vy = -Math.max(2.9, Math.abs(vy));
+            // Paddle collision (y = 204..214, width = BRICK_PADDLE_WIDTH = 48)
+            const halfPaddle = BRICK_PADDLE_WIDTH / 2;
+            if (
+                vy > 0 &&
+                by >= 198 &&
+                by <= 212 &&
+                bx >= brickPaddleX - 4 &&
+                bx <= brickPaddleX + BRICK_PADDLE_WIDTH + 4
+            ) {
+                const hitOffset = (bx - (brickPaddleX + halfPaddle)) / halfPaddle; // -1..1
+                vx = hitOffset * 4.9;
+                vy = -Math.max(4.0, Math.min(5.8, Math.abs(vy) * 1.02));
                 by = 197;
                 synth.playSlotTickSfx(360);
             }
@@ -2011,9 +2230,14 @@
                 if (bx >= b.x - 4 && bx <= b.x + b.w + 4 && by >= b.y - 4 && by <= b.y + b.h + 4) {
                     hitBrick = true;
                     vy = -vy;
+                    if (b.hp > 1) {
+                        brickScore += 15;
+                        synth.playSlotTickSfx(440);
+                        return { ...b, hp: b.hp - 1, color: "#ff66aa" };
+                    }
                     brickScore += b.pts;
                     synth.playSlotTickSfx(520 + b.pts * 6);
-                    return { ...b, alive: false };
+                    return { ...b, hp: 0, alive: false };
                 }
                 return b;
             });
@@ -2021,7 +2245,7 @@
 
             if (brickList.every((b) => !b.alive)) {
                 brickPhase = "won";
-                brickScore += brickLives * 50;
+                brickScore += brickLives * 60;
                 stopAllArcadeTimers();
                 settleArcadeGameResult("brick", brickScore, BRICK_TARGET_SCORE, "Neon Brick Breaker");
                 return;
@@ -2036,15 +2260,15 @@
                     settleArcadeGameResult("brick", brickScore, BRICK_TARGET_SCORE, "Neon Brick Breaker");
                     return;
                 } else {
-                    bx = brickPaddleX + 32;
+                    bx = brickPaddleX + halfPaddle;
                     by = 190;
-                    vx = 2.9 * (Math.random() > 0.5 ? 1 : -1);
-                    vy = -3.2;
+                    vx = 3.9 * (Math.random() > 0.5 ? 1 : -1);
+                    vy = -4.2;
                 }
             }
 
             brickBall = { x: bx, y: by, vx, vy };
-        }, 25);
+        }, 20);
     }
 
     function handleBrickPointerMove(e: MouseEvent | TouchEvent) {
@@ -2053,16 +2277,18 @@
         const rect = el.getBoundingClientRect();
         const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
         const relX = ((clientX - rect.left) / rect.width) * 320;
-        brickPaddleX = Math.max(8, Math.min(248, relX - 32));
+        brickPaddleX = Math.max(8, Math.min(320 - BRICK_PADDLE_WIDTH - 8, relX - BRICK_PADDLE_WIDTH / 2));
     }
 
-    // Arcade Game 3: Cyber Snake 1998
+    // Arcade Game 3: Cyber Snake 1998 (Fast 78ms tick + Glitch Firewall Obstacles)
     function spawnSnakeFood(currentBody: Array<{ x: number; y: number }>) {
-        for (let attempt = 0; attempt < 50; attempt++) {
+        for (let attempt = 0; attempt < 60; attempt++) {
             const fx = Math.floor(Math.random() * 16);
             const fy = Math.floor(Math.random() * 12);
-            if (!currentBody.some((seg) => seg.x === fx && seg.y === fy)) {
-                snakeFood = { x: fx, y: fy, kind: Math.random() < 0.25 ? "unicorn" : "orb" };
+            const onBody = currentBody.some((seg) => seg.x === fx && seg.y === fy);
+            const onHazard = snakeHazards.some((h) => h.x === fx && h.y === fy);
+            if (!onBody && !onHazard) {
+                snakeFood = { x: fx, y: fy, kind: Math.random() < 0.28 ? "unicorn" : "orb" };
                 return;
             }
         }
@@ -2097,7 +2323,15 @@
             const nx = head.x + snakeDir.x;
             const ny = head.y + snakeDir.y;
 
-            if (nx < 0 || nx >= 16 || ny < 0 || ny >= 12 || snakeBody.some((s) => s.x === nx && s.y === ny)) {
+            const hitHazard = snakeHazards.some((h) => h.x === nx && h.y === ny);
+            if (
+                nx < 0 ||
+                nx >= 16 ||
+                ny < 0 ||
+                ny >= 12 ||
+                hitHazard ||
+                snakeBody.some((s) => s.x === nx && s.y === ny)
+            ) {
                 snakePhase = snakeScore >= SNAKE_TARGET_SCORE ? "won" : "lost";
                 synth.playDiceRollSfx();
                 stopAllArcadeTimers();
@@ -2107,7 +2341,7 @@
 
             const nextBody = [{ x: nx, y: ny }, ...snakeBody];
             if (nx === snakeFood.x && ny === snakeFood.y) {
-                const pts = snakeFood.kind === "unicorn" ? 75 : 30;
+                const pts = snakeFood.kind === "unicorn" ? 80 : 35;
                 snakeScore += pts;
                 synth.playSlotTickSfx(snakeFood.kind === "unicorn" ? 760 : 520);
                 spawnSnakeFood(nextBody);
@@ -2115,10 +2349,10 @@
                 nextBody.pop();
             }
             snakeBody = nextBody;
-        }, 125);
+        }, 78);
     }
 
-    // Arcade Game 4: Cyber Coin Rush (25s Falling Catcher)
+    // Arcade Game 4: Cyber Coin Rush (Fast-Paced 25s Falling Catcher)
     function startCoinRush() {
         stopAllArcadeTimers();
         if (!payArcadeEntryIfTokenMode()) return;
@@ -2126,36 +2360,40 @@
 
         coinScore = 0;
         coinTimeLeft = 25;
-        coinBasketX = 132;
+        coinBasketX = 137;
         coinItems = [];
         coinPhase = "playing";
         let nextItemId = 1;
 
         coinTimerId = window.setInterval(() => {
             if (coinPhase !== "playing") return;
-            if (Math.random() < 0.16) {
+            if (Math.random() < 0.25) {
                 const roll = Math.random();
                 let icon = "🪙";
-                let pts = 20;
+                let pts = 25;
                 let isBomb = false;
-                if (roll < 0.25) {
+                if (roll < 0.30) {
                     icon = "💣";
-                    pts = -50;
+                    pts = -65;
                     isBomb = true;
                 } else if (roll < 0.42) {
+                    icon = "💀";
+                    pts = -95;
+                    isBomb = true;
+                } else if (roll < 0.64) {
                     icon = "💎";
-                    pts = 45;
-                } else if (roll < 0.52) {
+                    pts = 50;
+                } else if (roll < 0.74) {
                     icon = "🦄";
-                    pts = 75;
+                    pts = 85;
                 }
                 coinItems = [
                     ...coinItems,
                     {
                         id: nextItemId++,
                         x: 16 + Math.random() * 288,
-                        y: -10,
-                        vy: 2.3 + Math.random() * 1.8,
+                        y: -12,
+                        vy: 4.5 + Math.random() * 3.1,
                         icon,
                         pts,
                         isBomb
@@ -2163,19 +2401,24 @@
                 ];
             }
 
+            const halfBasket = COIN_BASKET_WIDTH / 2;
             const remaining: FallingArcadeItem[] = [];
             for (const item of coinItems) {
                 const ny = item.y + item.vy;
-                if (ny >= 186 && ny <= 214 && Math.abs(item.x - (coinBasketX + 28)) <= 32) {
+                if (
+                    ny >= 184 &&
+                    ny <= 214 &&
+                    Math.abs(item.x - (coinBasketX + halfBasket)) <= halfBasket + 4
+                ) {
                     coinScore = Math.max(0, coinScore + item.pts);
                     if (item.isBomb) synth.playDiceRollSfx();
                     else synth.playSlotTickSfx(540);
-                } else if (ny < 224) {
+                } else if (ny < 226) {
                     remaining.push({ ...item, y: ny });
                 }
             }
             coinItems = remaining;
-        }, 30);
+        }, 20);
 
         coinCountdownId = window.setInterval(() => {
             if (coinPhase !== "playing") return;
@@ -2194,10 +2437,10 @@
         const rect = el.getBoundingClientRect();
         const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
         const relX = ((clientX - rect.left) / rect.width) * 320;
-        coinBasketX = Math.max(8, Math.min(256, relX - 28));
+        coinBasketX = Math.max(8, Math.min(320 - COIN_BASKET_WIDTH - 8, relX - COIN_BASKET_WIDTH / 2));
     }
 
-    // Arcade Game 5: Whack-A-Glitch (20s 3x3 Cyber Terminal Reflex)
+    // Arcade Game 5: Whack-A-Glitch (Fast 20s 3x3 Cyber Terminal Reflex)
     function startWhackAGlitch() {
         stopAllArcadeTimers();
         if (!payArcadeEntryIfTokenMode()) return;
@@ -2211,16 +2454,18 @@
         whackTimerId = window.setInterval(() => {
             if (whackPhase !== "playing") return;
             const now = Date.now();
-            const next = whackGrid.map((cell) => (cell.expiresAt > 0 && now > cell.expiresAt ? { kind: "empty" as const, expiresAt: 0 } : cell));
+            const next = whackGrid.map((cell) =>
+                cell.expiresAt > 0 && now > cell.expiresAt ? { kind: "empty" as const, expiresAt: 0 } : cell
+            );
             const emptyIndices = next.map((c, idx) => (c.kind === "empty" ? idx : -1)).filter((idx) => idx !== -1);
-            if (emptyIndices.length > 0 && Math.random() < 0.68) {
+            if (emptyIndices.length > 0 && Math.random() < 0.78) {
                 const pickIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
                 const r = Math.random();
-                const kind: GlitchCell["kind"] = r < 0.22 ? "bomb" : r < 0.42 ? "golden" : "bug";
-                next[pickIdx] = { kind, expiresAt: now + 950 };
+                const kind: GlitchCell["kind"] = r < 0.34 ? "bomb" : r < 0.56 ? "golden" : "bug";
+                next[pickIdx] = { kind, expiresAt: now + 590 };
             }
             whackGrid = next;
-        }, 280);
+        }, 185);
 
         whackCountdownId = window.setInterval(() => {
             if (whackPhase !== "playing") return;
@@ -2243,13 +2488,13 @@
         whackGrid = next;
 
         if (cell.kind === "bomb") {
-            whackScore = Math.max(0, whackScore - 45);
+            whackScore = Math.max(0, whackScore - 65);
             synth.playDiceRollSfx();
         } else if (cell.kind === "golden") {
-            whackScore += 65;
+            whackScore += 70;
             synth.playSlotTickSfx(780);
         } else {
-            whackScore += 30;
+            whackScore += 35;
             synth.playSlotTickSfx(520);
         }
     }
@@ -2352,36 +2597,277 @@
         }, 1800 + Math.random() * 1800);
     }
 
-    function catchFirefly() {
-        synth.playNatureChimeSfx();
-        fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
-        triggerEmote("✨");
-        for (let i = 0; i < 16; i++) {
-            particles.push({
-                x: myX + (Math.random() - 0.5) * 3,
-                y: myY + (Math.random() - 0.5) * 3,
-                vx: (Math.random() - 0.5) * 0.08,
-                vy: (Math.random() - 0.5) * 0.08,
-                color: "#ccff66",
-                size: 4,
-                life: 0,
-                maxLife: 55
-            });
+    // --- INTERACTIVE WILD FIREFLY NET CATCHER MINIGAME & 24-HOUR SKY WISH LANTERNS ---
+    function persistFireflyJarCount(nextCount: number) {
+        fireflyJarCount = Math.max(0, nextCount);
+        if (typeof window !== "undefined" && myUsername) {
+            try {
+                localStorage.setItem(
+                    `pfpuwu_firefly_jar_${myUsername.toLowerCase()}`,
+                    String(fireflyJarCount)
+                );
+            } catch {}
         }
     }
 
-    function releaseFireflyWish() {
-        const wish = fireflyWishInput.trim() || "Wishing peace & cozy vibes to everyone in UwU World ✨";
+    function stopFireflyCatcherTimers() {
+        if (catcherTimerId) {
+            clearInterval(catcherTimerId);
+            catcherTimerId = null;
+        }
+        if (catcherCountdownId) {
+            clearInterval(catcherCountdownId);
+            catcherCountdownId = null;
+        }
+    }
+
+    function openFireflyCatcher(wildFlyId: number | null = null) {
+        activeWildFireflyId = wildFlyId;
+        showFireflyCatcherModal = true;
+        startFireflyCatcherGame();
+    }
+
+    function closeFireflyCatcher() {
+        stopFireflyCatcherTimers();
+        showFireflyCatcherModal = false;
+    }
+
+    function startFireflyCatcherGame() {
+        stopFireflyCatcherTimers();
+        synth.playNatureChimeSfx();
+        catcherHits = 0;
+        catcherTimeLeft = 10;
+        catcherPhase = "playing";
+        catcherSwingCooldownUntil = 0;
+        catcherSwingAnimUntil = 0;
+        catcherStatusMsg = "Aim your net over the darting ✨ Firefly and click / press SPACE (3x to capture)!";
+        catcherTarget = {
+            x: 60 + Math.random() * 200,
+            y: 45 + Math.random() * 110,
+            vx: (Math.random() > 0.5 ? 1 : -1) * 4.4,
+            vy: (Math.random() > 0.5 ? 1 : -1) * 3.5,
+            isSweetSpot: false,
+            nextBurstAt: Date.now() + 450
+        };
+        catcherDecoys = [
+            { id: 1, x: 70, y: 60, vx: 3.1, vy: -2.4, icon: "🐝" },
+            { id: 2, x: 240, y: 140, vx: -3.4, vy: 2.7, icon: "🐝" },
+            { id: 3, x: 160, y: 165, vx: 2.8, vy: -3.2, icon: "🦇" }
+        ];
+
+        catcherTimerId = window.setInterval(() => {
+            if (catcherPhase !== "playing") return;
+            const now = Date.now();
+            const speedMult = 1 + catcherHits * 0.34;
+
+            let tx = catcherTarget.x + catcherTarget.vx;
+            let ty = catcherTarget.y + catcherTarget.vy;
+            let tvx = catcherTarget.vx;
+            let tvy = catcherTarget.vy;
+            let isSweetSpot = catcherTarget.isSweetSpot;
+            let nextBurstAt = catcherTarget.nextBurstAt;
+
+            if (now >= nextBurstAt) {
+                // 28% chance of brief 0.45s Sweet-Spot hover, otherwise erratic high-speed dart!
+                if (!isSweetSpot && Math.random() < 0.28) {
+                    isSweetSpot = true;
+                    tvx *= 0.22;
+                    tvy *= 0.22;
+                    nextBurstAt = now + 460;
+                } else {
+                    isSweetSpot = false;
+                    const angle = Math.random() * Math.PI * 2;
+                    const baseSpd = (4.1 + Math.random() * 2.2) * speedMult;
+                    tvx = Math.cos(angle) * baseSpd;
+                    tvy = Math.sin(angle) * baseSpd;
+                    nextBurstAt = now + 380 + Math.random() * 340;
+                }
+            }
+
+            if (tx <= 22 || tx >= 298) {
+                tvx = -tvx;
+                tx = Math.max(22, Math.min(298, tx));
+            }
+            if (ty <= 22 || ty >= 188) {
+                tvy = -tvy;
+                ty = Math.max(22, Math.min(188, ty));
+            }
+
+            catcherTarget = { x: tx, y: ty, vx: tvx, vy: tvy, isSweetSpot, nextBurstAt };
+
+            catcherDecoys = catcherDecoys.map((d) => {
+                let dx = d.x + d.vx;
+                let dy = d.y + d.vy;
+                let dvx = d.vx;
+                let dvy = d.vy;
+                if (dx <= 18 || dx >= 302) {
+                    dvx = -dvx;
+                    dx = Math.max(18, Math.min(302, dx));
+                }
+                if (dy <= 18 || dy >= 192) {
+                    dvy = -dvy;
+                    dy = Math.max(18, Math.min(192, dy));
+                }
+                return { ...d, x: dx, y: dy, vx: dvx, vy: dvy };
+            });
+        }, 22);
+
+        catcherCountdownId = window.setInterval(() => {
+            if (catcherPhase !== "playing") return;
+            catcherTimeLeft--;
+            if (catcherTimeLeft <= 0) {
+                catcherPhase = "escaped";
+                stopFireflyCatcherTimers();
+                synth.playDiceRollSfx();
+                catcherStatusMsg = "✨ Whoosh! The wild firefly darted up into the forest canopy! Try again.";
+            }
+        }, 1000);
+    }
+
+    function handleCatcherPointerMove(e: MouseEvent | TouchEvent) {
+        const el = e.currentTarget as HTMLElement;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+        const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+        const relX = ((clientX - rect.left) / rect.width) * 320;
+        const relY = ((clientY - rect.top) / rect.height) * 210;
+        catcherNetPos = {
+            x: Math.max(20, Math.min(300, relX)),
+            y: Math.max(20, Math.min(190, relY))
+        };
+    }
+
+    function swingFireflyNet(e?: MouseEvent | TouchEvent) {
+        if (e) {
+            handleCatcherPointerMove(e);
+        }
+        if (catcherPhase !== "playing") return;
+        const now = Date.now();
+        if (now < catcherSwingCooldownUntil) return;
+
+        catcherSwingAnimUntil = now + 220;
+
+        // Check if player hit a stinging wasp/bat decoy first
+        const hitDecoy = catcherDecoys.find(
+            (d) => Math.hypot(d.x - catcherNetPos.x, d.y - catcherNetPos.y) <= 22
+        );
+        if (hitDecoy) {
+            synth.playDiceRollSfx();
+            catcherTimeLeft = Math.max(1, catcherTimeLeft - 1);
+            catcherSwingCooldownUntil = now + 650;
+            catcherStatusMsg = `🐝 Ouch! Netted a ${hitDecoy.icon} decoy (-1s & brief net stun)!`;
+            return;
+        }
+
+        const dist = Math.hypot(catcherTarget.x - catcherNetPos.x, catcherTarget.y - catcherNetPos.y);
+        const catchRadius = catcherTarget.isSweetSpot ? 32 : 25;
+
+        if (dist <= catchRadius) {
+            catcherHits++;
+            synth.playNatureChimeSfx();
+            if (catcherHits >= CATCHER_REQUIRED_HITS) {
+                catcherPhase = "won";
+                stopFireflyCatcherTimers();
+                persistFireflyJarCount(fireflyJarCount + 1);
+                if (activeWildFireflyId !== null) {
+                    const wf = wildFireflies.find((f) => f.id === activeWildFireflyId);
+                    if (wf) wf.respawnUntil = Date.now() + 14000;
+                }
+                triggerEmote("✨");
+                for (let i = 0; i < 20; i++) {
+                    particles.push({
+                        x: myX + (Math.random() - 0.5) * 3,
+                        y: myY + (Math.random() - 0.5) * 3,
+                        vx: (Math.random() - 0.5) * 0.09,
+                        vy: (Math.random() - 0.5) * 0.09,
+                        color: "#ccff66",
+                        size: 4,
+                        life: 0,
+                        maxLife: 60
+                    });
+                }
+                catcherStatusMsg = `🫙 CAPTURED! You now have ${fireflyJarCount} ✨ Firefly${fireflyJarCount === 1 ? "" : "s"} in your jar!`;
+                showToast(`🦋 Caught a wild Firefly! (🫙 ${fireflyJarCount} in Jar — Visit the Shrine to light a 24h Lantern!)`, 5000);
+            } else {
+                // Firefly darts to a new spot and speeds up!
+                const angle = Math.random() * Math.PI * 2;
+                const spd = 5.4 + catcherHits * 1.4;
+                catcherTarget = {
+                    x: 40 + Math.random() * 240,
+                    y: 35 + Math.random() * 140,
+                    vx: Math.cos(angle) * spd,
+                    vy: Math.sin(angle) * spd,
+                    isSweetSpot: false,
+                    nextBurstAt: now + 360
+                };
+                catcherStatusMsg = `✨ Netted (${catcherHits}/${CATCHER_REQUIRED_HITS})! It broke free and sped up — catch it again!`;
+            }
+        } else {
+            synth.playCardSfx();
+            catcherSwingCooldownUntil = now + 520;
+            catcherStatusMsg = "💨 Missed! Wait 0.5s for net recovery and time your swing!";
+        }
+    }
+
+    function openLanternSanctuary() {
+        showLanternModal = true;
+        loadActiveWishLanterns().then((lanterns) => {
+            wishLanterns = lanterns;
+        });
+    }
+
+    async function releaseFireflyWish() {
+        if (isReleasingLantern) return;
+        if (fireflyJarCount <= 0) {
+            showToast("🦋 You need 1 ✨ Captured Firefly in your Jar to light a Wish Lantern! Catch one in the Woods first.", 4500);
+            return;
+        }
+        const wish = fireflyWishInput.trim();
+        if (!wish) {
+            showToast("🏮 Write a message for your 24-hour Sky Wish Lantern first!", 3500);
+            return;
+        }
+
+        isReleasingLantern = true;
         fireflyWishInput = "";
+        persistFireflyJarCount(fireflyJarCount - 1);
         synth.playNatureChimeSfx();
         triggerConfettiCelebration();
-        fireflyJarCount = Math.min(fireflyCommunityGoal, fireflyJarCount + 1);
-        fireflyWishes = [{ user: myUsername, wish }, ...fireflyWishes.slice(0, 6)];
-        speechBubble = { text: `🏮 ${wish}`, expiresAt: Date.now() + 6500 };
+
+        const nowMs = Date.now();
+        const newLantern: WishLanternRecord = {
+            id: `lantern_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+            user_id: myId || myUsername,
+            username: myUsername.replace(/^@/, "").toLowerCase(),
+            wish: wish.slice(0, 120),
+            color: selectedLanternColor,
+            created_at: new Date(nowMs).toISOString(),
+            expires_at: new Date(nowMs + WISH_LANTERN_TTL_MS).toISOString(),
+            likes: []
+        };
+
+        wishLanterns = await saveNewWishLantern(newLantern);
+        isReleasingLantern = false;
+
+        speechBubble = { text: `🏮 ${wish}`, expiresAt: Date.now() + 7000 };
         networkManager?.broadcastForestEvent({
             kind: "firefly_wish",
             user: myUsername,
-            wish
+            wish,
+            lantern: newLantern
+        });
+        showToast("🏮 Your Sky Wish Lantern has been released and will glow for 24 hours!", 5000);
+    }
+
+    async function handleGlowLantern(lanternId: string) {
+        if (!myUsername) return;
+        synth.playNatureChimeSfx();
+        wishLanterns = await toggleWishLanternGlow(lanternId, myUsername);
+        networkManager?.broadcastForestEvent({
+            kind: "lantern_glow",
+            lanternId,
+            user: myUsername
         });
     }
 
@@ -2468,6 +2954,26 @@
             }
         } else {
             pendingInteractionTarget = null;
+            const nowMs = Date.now();
+            // 1. Direct click on a roaming Wild Firefly in the Whispering Woods
+            const clickedFly = wildFireflies.find(
+                (f) => f.respawnUntil <= nowMs && gridDistance(gridPos.x, gridPos.y, f.x, f.y) <= 1.45
+            );
+            if (clickedFly) {
+                activeWildFireflyId = clickedFly.id;
+                if (gridDistance(myX, myY, clickedFly.x, clickedFly.y) <= 3.6) {
+                    openFireflyCatcher(clickedFly.id);
+                    return;
+                }
+                pendingInteractionTarget = "catch_firefly";
+            } else if (gx >= 21 && gx <= 23 && gy >= 22 && gy <= 24) {
+                // 2. Direct click on the Firefly Wish Lantern Shrine (22, 23)
+                if (gridDistance(myX, myY, 22.0, 23.0) <= 3.6) {
+                    openLanternSanctuary();
+                    return;
+                }
+                pendingInteractionTarget = "lantern_shrine";
+            }
         }
 
         const activeCollision = currentZone === "forest" ? FOREST_COLLISION_MAP : COLLISION_MAP;
@@ -2700,7 +3206,16 @@
         let moveY = 0;
         const speed = 4.8;
 
-        if (!isTypingInTextInput() && !showArcadeModal && !showGraffitiModal && !showDJModal && !showGuideModal && !showLeaderboardModal) {
+        if (
+            !isTypingInTextInput() &&
+            !showArcadeModal &&
+            !showGraffitiModal &&
+            !showDJModal &&
+            !showGuideModal &&
+            !showLeaderboardModal &&
+            !showFireflyCatcherModal &&
+            !showLanternModal
+        ) {
             if (keysPressed["KeyW"] || keysPressed["ArrowUp"] || keysPressed["w"]) {
                 moveX -= 1;
                 moveY -= 1;
@@ -2743,6 +3258,8 @@
                     if (pendingInteractionTarget === "graffiti") openGraffitiModal();
                     else if (pendingInteractionTarget === "arcade") openArcadeModal("brick");
                     else if (pendingInteractionTarget === "dj") showDJModal = true;
+                    else if (pendingInteractionTarget === "catch_firefly") openFireflyCatcher(activeWildFireflyId);
+                    else if (pendingInteractionTarget === "lantern_shrine") openLanternSanctuary();
                     pendingInteractionTarget = null;
                 }
             } else {
@@ -2860,6 +3377,17 @@
                 rouletteSpinningState = true;
             }
         } else {
+            // Animate Wild Roaming Fireflies across the Whispering Woods
+            const nowMs = Date.now();
+            for (const wf of wildFireflies) {
+                if (wf.respawnUntil > nowMs) continue;
+                const dToPlayer = gridDistance(myX, myY, wf.x, wf.y);
+                const panicBoost = dToPlayer < 2.2 ? 1.85 : 1.0;
+                wf.phase += deltaSec * wf.speed * panicBoost;
+                wf.x = wf.anchorX + Math.sin(wf.phase) * 1.45 + Math.cos(wf.phase * 2.1) * 0.35;
+                wf.y = wf.anchorY + Math.cos(wf.phase * 1.3) * 1.15 + Math.sin(wf.phase * 1.7) * 0.35;
+            }
+
             // Whispering Woods Social Station Proximity Detection
             const forestCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
                 { id: "campfire", dist: gridDistance(myX, myY, 16.0, 16.0), maxRadius: 3.4 },
@@ -3147,6 +3675,57 @@
             const sc = gridToScreen(p.x, p.y, 0.5, cameraX, cameraY, canvasWidth, canvasHeight);
             ctx.fillStyle = p.color;
             ctx.fillRect(sc.x, sc.y, p.size, p.size);
+        }
+
+        // Render roaming wild fireflies in Whispering Woods
+        if (currentZone === "forest") {
+            const nowMs = Date.now();
+            for (const wf of wildFireflies) {
+                if (wf.respawnUntil > nowMs) continue;
+                const bobZ = 0.42 + Math.sin(timeMs / 240 + wf.phase) * 0.14;
+                const sc = gridToScreen(wf.x, wf.y, bobZ, cameraX, cameraY, canvasWidth, canvasHeight);
+                const pulse = 0.65 + Math.sin(timeMs / 170 + wf.phase) * 0.35;
+
+                ctx.save();
+                const aura = ctx.createRadialGradient(sc.x, sc.y, 1, sc.x, sc.y, 18);
+                aura.addColorStop(0, `rgba(212, 255, 110, ${0.88 * pulse})`);
+                aura.addColorStop(0.5, `rgba(120, 255, 160, ${0.38 * pulse})`);
+                aura.addColorStop(1, "rgba(0, 255, 140, 0)");
+                ctx.fillStyle = aura;
+                ctx.beginPath();
+                ctx.arc(sc.x, sc.y, 18, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Fluttering wings
+                const wingSpread = 4 + Math.sin(timeMs / 45 + wf.phase) * 2.5;
+                ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+                ctx.beginPath();
+                ctx.ellipse(sc.x - 3.5, sc.y - 2, wingSpread, 2.2, -0.4, 0, Math.PI * 2);
+                ctx.ellipse(sc.x + 3.5, sc.y - 2, wingSpread, 2.2, 0.4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Glowing abdomen
+                ctx.fillStyle = "#eaff7b";
+                ctx.beginPath();
+                ctx.arc(sc.x, sc.y, 3.4, 0, Math.PI * 2);
+                ctx.fill();
+
+                const distToPlayer = gridDistance(myX, myY, wf.x, wf.y);
+                const isHovered =
+                    hoveredTile !== null && gridDistance(hoveredTile.x + 0.5, hoveredTile.y + 0.5, wf.x, wf.y) <= 1.8;
+                if (distToPlayer <= 3.8 || isHovered) {
+                    ctx.font = "bold 9px monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillStyle = "rgba(6, 24, 16, 0.88)";
+                    ctx.fillRect(sc.x - 42, sc.y - 23, 84, 13);
+                    ctx.strokeStyle = "#ccff66";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(sc.x - 42, sc.y - 23, 84, 13);
+                    ctx.fillStyle = "#ccff66";
+                    ctx.fillText("🦋 CATCH [CLICK/E]", sc.x, sc.y - 14);
+                }
+                ctx.restore();
+            }
         }
 
         renderProximityPill(ctx);
@@ -3686,8 +4265,46 @@
                 ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
                 ctx.fill();
             }
-            ctx.font = "13px sans-serif";
+
+            // Floating 24-Hour Sky Wish Lanterns above the Shrine
+            const visibleLanterns = wishLanterns.slice(0, 7);
+            const lanternPalette: Record<string, string> = {
+                gold: "#ffd54f",
+                sakura: "#ff80ab",
+                cyan: "#4dd0e1",
+                emerald: "#69f0ae",
+                violet: "#b388ff"
+            };
+            for (let lIdx = 0; lIdx < visibleLanterns.length; lIdx++) {
+                const lantern = visibleLanterns[lIdx];
+                const angle = (lIdx / Math.max(1, visibleLanterns.length)) * Math.PI * 2 + timeMs / 2800;
+                const radiusX = 28 + (lIdx % 2) * 14;
+                const lx = Math.cos(angle) * radiusX;
+                const ly = -52 - (lIdx % 3) * 13 + Math.sin(timeMs / 480 + lIdx) * 4;
+                const lColor = lanternPalette[lantern.color] || "#ffd54f";
+
+                // Warm lantern glow
+                const lGlow = ctx.createRadialGradient(lx, ly, 1, lx, ly, 12);
+                lGlow.addColorStop(0, lColor);
+                lGlow.addColorStop(1, "rgba(255, 213, 79, 0)");
+                ctx.fillStyle = lGlow;
+                ctx.beginPath();
+                ctx.arc(lx, ly, 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Lantern body
+                ctx.fillStyle = lColor;
+                ctx.fillRect(lx - 4, ly - 5, 8, 10);
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 0.8;
+                ctx.strokeRect(lx - 4, ly - 5, 8, 10);
+            }
+
+            ctx.font = "bold 9px monospace";
             ctx.textAlign = "center";
+            ctx.fillStyle = "#ffe082";
+            ctx.fillText(`🏮 ${wishLanterns.length} WISHES [CLICK/E]`, 0, -78);
+            ctx.font = "13px sans-serif";
             ctx.fillText("🏮✨", 0, -54);
         } else if (obj.type === "sofa") {
             ctx.fillStyle = "rgba(0,0,0,0.38)";
@@ -3814,14 +4431,20 @@
                 promptText = "🌲 Walk East → Whispering Woods";
             }
         } else {
-            if (activeStation === "campfire") {
+            const nowMs = Date.now();
+            const nearbyWildFly = wildFireflies.find(
+                (wf) => wf.respawnUntil <= nowMs && gridDistance(myX, myY, wf.x, wf.y) <= 3.6
+            );
+            if (nearbyWildFly) {
+                promptText = `🦋 Wild Firefly Nearby [Press E / Click to Catch] (🫙 ${fireflyJarCount})`;
+            } else if (activeStation === "campfire") {
                 promptText = "🔥 Campfire Circle";
             } else if (activeStation === "picnic") {
                 promptText = "🧺 Woodland Picnic";
             } else if (activeStation === "fishing") {
                 promptText = "🎣 Koi Pond [Press E to Cast]";
             } else if (activeStation === "fireflies") {
-                promptText = "✨ Firefly Shrine [Press E]";
+                promptText = `🏮 Wish Lantern Shrine [Press E — ${wishLanterns.length} Active 24h]`;
             } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
                 promptText = "🎲 Walk West → Casino Lounge";
             }
@@ -4869,33 +5492,44 @@
             </div>
         {/if}
 
-        <!-- 9. WHISPERING WOODS: FIREFLY SHRINE HUD -->
+        <!-- 9. WHISPERING WOODS: FIREFLY SHRINE & 24H WISH LANTERN HUD -->
         {#if activeStation === "fireflies"}
             <div class="game-hud win98-window">
                 <div class="win98-title-bar">
-                    <span class="win98-title">✨ Firefly Shrine</span>
-                    <span class="hud-payout-tag">✨ {fireflyJarCount}/{fireflyCommunityGoal}</span>
+                    <span class="win98-title">🏮 Firefly Wish Shrine</span>
+                    <span class="hud-payout-tag">🫙 Jar: {fireflyJarCount} ✨</span>
                 </div>
                 <div class="hud-body">
-                    <div class="scores-table" style="background:#14241b; padding:5px; border:1px solid #ccff66;">
-                        {#each fireflyWishes.slice(0, 3) as w}
-                            <div class="player-score-row" style="color:#f0fff0;">
-                                <span>🏮 <strong>@{w.user}:</strong> {w.wish}</span>
+                    <div class="roulette-status-bar" style="background:#0d1f16; color:#ccff66; border-color:#2e7d32;">
+                        <span>🏮 Active (24h): <strong>{wishLanterns.length}</strong></span>
+                        <span>🫙 Caught: <strong>{fireflyJarCount}</strong></span>
+                    </div>
+
+                    <div class="scores-table" style="background:#102218; padding:5px; border:1px solid #69f0ae;">
+                        {#each wishLanterns.slice(0, 3) as w}
+                            <div class="player-score-row" style="color:#f0fff0; justify-content:space-between; gap:6px;">
+                                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    🏮 <strong>@{w.username}:</strong> {w.wish}
+                                </span>
+                                <small style="color:#a5d6a7; flex-shrink:0;">{formatLanternTimeRemaining(w.expires_at)}</small>
                             </div>
                         {/each}
                     </div>
 
                     <div class="bj-actions-row">
-                        <input
-                            type="text"
-                            class="win98-input"
-                            style="flex:1; padding:4px 6px; font-size:11px;"
-                            placeholder="Write a lantern wish..."
-                            bind:value={fireflyWishInput}
-                            maxlength="90"
-                        />
-                        <button class="win98-btn primary-start-btn" onclick={releaseFireflyWish}>
-                            🏮 Release
+                        <button
+                            class="win98-btn"
+                            style="flex:1; font-weight:bold; background:#1b5e20; color:#ccff66;"
+                            onclick={() => openFireflyCatcher()}
+                        >
+                            🦋 Catch Firefly
+                        </button>
+                        <button
+                            class="win98-btn primary-start-btn"
+                            style="flex:1.2;"
+                            onclick={openLanternSanctuary}
+                        >
+                            🏮 Sky Lanterns ({wishLanterns.length})
                         </button>
                     </div>
                 </div>
@@ -5323,7 +5957,7 @@
                                     class:active-wager={arcadePlayMode === "token"}
                                     onclick={() => (arcadePlayMode = "token")}
                                 >
-                                    🪙 100 $UWU Token (Win 175 $UWU)
+                                    🪙 100 $UWU Token (Win 200 $UWU)
                                 </button>
                             </div>
                             <span class="arcade-balance-pill">🪙 {chips.toLocaleString()} $UWU</span>
@@ -5348,6 +5982,7 @@
                                     {#if b.alive}
                                         <div
                                             class="arcade-brick"
+                                            class:armored-brick={b.hp > 1}
                                             style="left:{b.x}px; top:{b.y}px; width:{b.w}px; height:{b.h}px; background:{b.color};"
                                         ></div>
                                     {/if}
@@ -5360,7 +5995,7 @@
 
                                 <div
                                     class="arcade-paddle"
-                                    style="left:{brickPaddleX}px; top:204px; width:64px;"
+                                    style="left:{brickPaddleX}px; top:204px; width:{BRICK_PADDLE_WIDTH}px;"
                                 ></div>
 
                                 {#if brickPhase !== "playing"}
@@ -5388,7 +6023,7 @@
                                           ? "🪙 Launch (100 $UWU)"
                                           : "🕹️ Start Game"}
                                 </button>
-                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.min(248, brickPaddleX + 28))}>▶</button>
+                                <button class="win98-btn" onclick={() => (brickPaddleX = Math.min(312 - BRICK_PADDLE_WIDTH, brickPaddleX + 28))}>▶</button>
                             </div>
                         </div>
 
@@ -5402,6 +6037,15 @@
                             </div>
 
                             <div class="arcade-crt-stage snake-stage">
+                                {#each snakeHazards as hz}
+                                    <div
+                                        class="snake-hazard-cell"
+                                        style="left:{hz.x * 20}px; top:{hz.y * 18.5}px;"
+                                    >
+                                        ⚡
+                                    </div>
+                                {/each}
+
                                 <div
                                     class="snake-food-cell"
                                     style="left:{snakeFood.x * 20}px; top:{snakeFood.y * 18.5}px;"
@@ -5427,7 +6071,7 @@
                                                   : "🐍 CYBER SNAKE 98"}
                                         </div>
                                         <p class="crt-sub">
-                                            Use <strong>[WASD / Arrows]</strong> to collect 💎 & 🦄
+                                            Use <strong>[WASD / Arrows]</strong> to collect 💎 & 🦄 — Dodge ⚡!
                                         </p>
                                     </div>
                                 {/if}
@@ -5475,7 +6119,7 @@
 
                                 <div
                                     class="arcade-paddle coin-basket"
-                                    style="left:{coinBasketX}px; top:196px; width:56px;"
+                                    style="left:{coinBasketX}px; top:196px; width:{COIN_BASKET_WIDTH}px;"
                                 >
                                     🧺 CATCH
                                 </div>
@@ -5488,7 +6132,7 @@
                                                 : "🪙 CYBER COIN RUSH"}
                                         </div>
                                         <p class="crt-sub">
-                                            Catch 🪙 💎 🦄 — Dodge 💣!
+                                            Catch 🪙 💎 🦄 — Dodge 💣 & 💀!
                                         </p>
                                     </div>
                                 {/if}
@@ -5503,7 +6147,7 @@
                                           ? "🪙 Start (100 $UWU)"
                                           : "🕹️ Start Game"}
                                 </button>
-                                <button class="win98-btn" onclick={() => (coinBasketX = Math.min(256, coinBasketX + 28))}>▶</button>
+                                <button class="win98-btn" onclick={() => (coinBasketX = Math.min(312 - COIN_BASKET_WIDTH, coinBasketX + 28))}>▶</button>
                             </div>
                         </div>
 
@@ -5534,7 +6178,7 @@
                                             <small>+65</small>
                                         {:else if cell.kind === "bomb"}
                                             <span class="whack-sprite">💣</span>
-                                            <small>-45</small>
+                                            <small>-60</small>
                                         {:else}
                                             <span class="whack-empty">🕳️</span>
                                         {/if}
@@ -5620,6 +6264,36 @@
                                     💣 START MINES ({selectedWager} $UWU)
                                 </button>
                             {/if}
+                        </div>
+                    {/if}
+
+                    <!-- Persistent Global Top 10 High Score Board (Skill Arcade Cabinets) -->
+                    {#if activeArcadeTab !== "mines"}
+                        {@const activeBoard = arcadeLeaderboards[activeArcadeTab] || []}
+                        <div class="arcade-leaderboard-panel">
+                            <div class="arcade-lb-header">
+                                <span>🏆 GLOBAL TOP 10 HIGH SCORES — {activeArcadeTab === "brick" ? "BRICK BREAKER" : activeArcadeTab === "snake" ? "SNAKE 98" : activeArcadeTab === "coin" ? "COIN RUSH" : "WHACK-A-GLITCH"}</span>
+                                <span class="arcade-lb-sub">Your Best: {arcadeBestScores[activeArcadeTab]} PTS</span>
+                            </div>
+                            <div class="arcade-lb-list">
+                                {#if activeBoard.length === 0}
+                                    <div class="arcade-lb-empty">No scores recorded yet — set the #1 world record!</div>
+                                {:else}
+                                    {#each activeBoard as row, rIdx}
+                                        {@const isMyRow = row.username.toLowerCase() === myUsername.replace(/^@/, "").toLowerCase()}
+                                        <div class="arcade-lb-row" class:is-me={isMyRow}>
+                                            <span class="arcade-lb-rank">
+                                                {rIdx === 0 ? "🥇" : rIdx === 1 ? "🥈" : rIdx === 2 ? "🥉" : `#${rIdx + 1}`}
+                                            </span>
+                                            <span class="arcade-lb-user">
+                                                @{row.username}
+                                                {#if isMyRow}<small class="you-pill">YOU</small>{/if}
+                                            </span>
+                                            <span class="arcade-lb-score">{row.score.toLocaleString()} PTS</span>
+                                        </div>
+                                    {/each}
+                                {/if}
+                            </div>
                         </div>
                     {/if}
                 </div>
@@ -5790,6 +6464,228 @@
         </div>
     {/if}
 
+    <!-- Modal 5: 🦋 WILD FIREFLY NET CATCHER CHALLENGE -->
+    {#if showFireflyCatcherModal}
+        <div class="modal-overlay" onclick={closeFireflyCatcher}>
+            <div class="win98-window firefly-catcher-window" onclick={(e) => e.stopPropagation()}>
+                <div class="win98-title-bar">
+                    <span class="win98-title">🦋 Whispering Woods — Firefly Net Catcher</span>
+                    <button class="win98-close" onclick={closeFireflyCatcher}>X</button>
+                </div>
+                <div class="win98-body arcade-body">
+                    <div class="roulette-status-bar" style="background:#0d1f16; color:#ccff66; border-color:#2e7d32;">
+                        <span>🎯 Catches: <strong>{catcherHits} / {CATCHER_REQUIRED_HITS}</strong></span>
+                        <span>⏱️ Time: <strong>{catcherTimeLeft.toFixed(1)}s</strong></span>
+                        <span>🫙 Jar: <strong>{fireflyJarCount} ✨</strong></span>
+                    </div>
+
+                    <div
+                        class="arcade-crt-stage firefly-catcher-stage"
+                        onmousemove={handleCatcherPointerMove}
+                        ontouchmove={handleCatcherPointerMove}
+                        onmousedown={swingFireflyNet}
+                    >
+                        <!-- Moonlit forest atmosphere -->
+                        <div class="catcher-moon">🌙</div>
+
+                        <!-- Decoy hazards (Wasps & Bats) -->
+                        {#each catcherDecoys as decoy (decoy.id)}
+                            <div
+                                class="catcher-decoy-sprite"
+                                style="left:{decoy.x - 12}px; top:{decoy.y - 12}px;"
+                            >
+                                {decoy.icon}
+                            </div>
+                        {/each}
+
+                        <!-- Erratic Wild Firefly Target -->
+                        <div
+                            class="catcher-firefly-sprite"
+                            style="left:{catcherTarget.x - 14}px; top:{catcherTarget.y - 14}px;"
+                        >
+                            <span class="catcher-firefly-core">✨</span>
+                        </div>
+
+                        <!-- Player Bamboo Net Reticle -->
+                        <div
+                            class="catcher-net-reticle"
+                            class:net-swinging={catcherSwingAnimUntil > Date.now()}
+                            style="left:{catcherNetPos.x - 22}px; top:{catcherNetPos.y - 22}px;"
+                        >
+                            🦋
+                        </div>
+
+                        {#if catcherStatusMsg}
+                            <div class="catcher-feedback-banner">{catcherStatusMsg}</div>
+                        {/if}
+
+                        {#if catcherPhase !== "playing"}
+                            <div class="arcade-crt-overlay">
+                                <div class="crt-title" style="color:#ccff66;">
+                                    {catcherPhase === "won"
+                                        ? "🫙✨ WILD FIREFLY CAPTURED!"
+                                        : "💨 THE FIREFLY DARTED INTO THE TREES!"}
+                                </div>
+                                <p class="crt-sub">
+                                    {catcherPhase === "won"
+                                        ? `You now have ${fireflyJarCount} firefl${fireflyJarCount === 1 ? "y" : "ies"} in your jar to light a 24h Sky Wish Lantern!`
+                                        : "Track the darting glow and time 3 net swings while avoiding 🐝 & 🦇."}
+                                </p>
+                            </div>
+                        {/if}
+                    </div>
+
+                    <div class="arcade-controls-row">
+                        {#if catcherPhase === "playing"}
+                            <button class="win98-btn cashout-btn" style="flex:1;" onclick={() => swingFireflyNet()}>
+                                🦋 SWING NET! [Click / Space] ({catcherHits}/{CATCHER_REQUIRED_HITS})
+                            </button>
+                        {:else}
+                            <button class="win98-btn" style="flex:1;" onclick={startFireflyCatcherGame}>
+                                🔄 Hunt Another Firefly
+                            </button>
+                            <button
+                                class="win98-btn primary-start-btn"
+                                style="flex:1.2;"
+                                onclick={() => {
+                                    closeFireflyCatcher();
+                                    openLanternSanctuary();
+                                }}
+                            >
+                                🏮 Go to Sky Lanterns ({fireflyJarCount} ✨)
+                            </button>
+                        {/if}
+                    </div>
+                </div>
+            </div>
+        </div>
+    {/if}
+
+    <!-- Modal 6: 🏮 24-HOUR SKY WISH LANTERN SANCTUARY -->
+    {#if showLanternModal}
+        <div class="modal-overlay" onclick={() => (showLanternModal = false)}>
+            <div class="win98-window lantern-sanctuary-window" onclick={(e) => e.stopPropagation()}>
+                <div class="win98-title-bar">
+                    <span class="win98-title">🏮 Whispering Woods — 24-Hour Sky Wish Lantern Sanctuary</span>
+                    <button class="win98-close" onclick={() => (showLanternModal = false)}>X</button>
+                </div>
+                <div class="win98-body lantern-sanctuary-body">
+                    <!-- Top Firefly Jar & Compose Bar -->
+                    <div class="lantern-compose-card">
+                        <div class="lantern-compose-top">
+                            <div class="jar-status-badge" class:has-firefly={fireflyJarCount > 0}>
+                                <span>🫙 Firefly Jar: <strong>{fireflyJarCount} Caught ✨</strong></span>
+                                <small>(1 Captured Firefly lights 1 24-Hour Lantern)</small>
+                            </div>
+                            <button
+                                class="win98-btn"
+                                style="background:#1b5e20; color:#ccff66; font-weight:bold;"
+                                onclick={() => {
+                                    showLanternModal = false;
+                                    openFireflyCatcher();
+                                }}
+                            >
+                                🦋 Hunt Wild Firefly
+                            </button>
+                        </div>
+
+                        <div class="lantern-color-row">
+                            <span class="field-label">Lantern Glow:</span>
+                            <div class="lantern-color-pills">
+                                {#each LANTERN_COLOR_OPTIONS as cOpt}
+                                    <button
+                                        type="button"
+                                        class="win98-btn lantern-color-btn"
+                                        class:active-wager={selectedLanternColor === cOpt.id}
+                                        onclick={() => (selectedLanternColor = cOpt.id)}
+                                    >
+                                        <span class="color-dot" style="background:{cOpt.hex};"></span>
+                                        {cOpt.label}
+                                    </button>
+                                {/each}
+                            </div>
+                        </div>
+
+                        {#if fireflyJarCount > 0}
+                            <div class="lantern-input-row">
+                                <input
+                                    type="text"
+                                    class="win98-input"
+                                    style="flex:1; padding:6px 8px; font-size:12px;"
+                                    placeholder="Write a wish or message for the woods (stays in the sky for 24 hours)..."
+                                    bind:value={fireflyWishInput}
+                                    maxlength="120"
+                                    onkeydown={(e) => {
+                                        if (e.key === "Enter") releaseFireflyWish();
+                                    }}
+                                />
+                                <button
+                                    class="win98-btn primary-start-btn"
+                                    disabled={isReleasingLantern || !fireflyWishInput.trim()}
+                                    onclick={releaseFireflyWish}
+                                >
+                                    {isReleasingLantern ? "Releasing..." : "🏮 Light & Release (24h)"}
+                                </button>
+                            </div>
+                        {:else}
+                            <div class="lantern-need-firefly-notice">
+                                <span>🦋 Your Firefly Jar is empty! Catch a wild firefly flying in the Whispering Woods to light a 24-hour Wish Lantern.</span>
+                                <button
+                                    class="win98-btn primary-start-btn"
+                                    onclick={() => {
+                                        showLanternModal = false;
+                                        openFireflyCatcher();
+                                    }}
+                                >
+                                    🦋 Catch a Firefly Now
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
+
+                    <!-- Starry Night Sky Gallery of Active 24-Hour Lanterns -->
+                    <div class="lantern-sky-header">
+                        <span>🌌 Active Sky Lanterns ({wishLanterns.length}) — Persists Globally for 24 Hours</span>
+                    </div>
+
+                    <div class="lantern-sky-grid">
+                        {#if wishLanterns.length === 0}
+                            <div class="lantern-sky-empty">
+                                No lanterns are floating right now. Catch a firefly and release the first wish into the night sky!
+                            </div>
+                        {:else}
+                            {#each wishLanterns as lantern (lantern.id)}
+                                {@const colorMeta = LANTERN_COLOR_OPTIONS.find((c) => c.id === lantern.color) || LANTERN_COLOR_OPTIONS[0]}
+                                {@const hasLiked = lantern.likes.some((u) => u.toLowerCase() === myUsername.replace(/^@/, "").toLowerCase())}
+                                <div class="sky-lantern-card" style="--lantern-accent: {colorMeta.hex};">
+                                    <div class="sky-lantern-card-head">
+                                        <span class="sky-lantern-author">
+                                            <span class="sky-lantern-ico">🏮</span>
+                                            <strong>@{lantern.username}</strong>
+                                        </span>
+                                        <span class="sky-lantern-ttl" title="Expires after 24 hours">
+                                            ⏳ {formatLanternTimeRemaining(lantern.expires_at)}
+                                        </span>
+                                    </div>
+                                    <p class="sky-lantern-wish">"{lantern.wish}"</p>
+                                    <div class="sky-lantern-card-foot">
+                                        <button
+                                            class="win98-btn lantern-glow-btn"
+                                            class:glowed={hasLiked}
+                                            onclick={() => handleGlowLantern(lantern.id)}
+                                        >
+                                            ✨ Glow {lantern.likes.length > 0 ? `(${lantern.likes.length})` : ""}
+                                        </button>
+                                    </div>
+                                </div>
+                            {/each}
+                        {/if}
+                    </div>
+                </div>
+            </div>
+        </div>
+    {/if}
+
     <!-- Full-Game 𝕏 Authentication Gate Overlay (Prevents anon joins, DB spam & graffiti resets) -->
     {#if !$userProfile}
         <div class="world-auth-gate-overlay" onclick={(e) => e.stopPropagation()}>
@@ -5830,10 +6726,10 @@
                             <button
                                 type="button"
                                 class="win98-btn gate-secondary-btn"
-                                onclick={() => handleWorldXLogin("oauth2")}
+                                onclick={() => handleWorldXLogin("force")}
                                 disabled={isLoggingInWithX}
                             >
-                                🔄 Alt Sign In (OAuth 2.0 / Fix Token Error)
+                                🔄 Force Fresh 𝕏 Login (Fix Token / Session Error)
                             </button>
 
                             <button
@@ -8169,6 +9065,386 @@
         opacity: 0.45;
     }
 
+    .arcade-brick.armored-brick {
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 8px #ffd700, inset 0 0 4px rgba(0, 0, 0, 0.5);
+    }
+
+    .snake-hazard-cell {
+        position: absolute;
+        width: 20px;
+        height: 18.5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        background: rgba(255, 23, 68, 0.28);
+        border: 1px solid #ff1744;
+        box-shadow: 0 0 6px rgba(255, 23, 68, 0.6);
+        border-radius: 2px;
+    }
+
+    /* Persistent Global Top 10 Arcade High Score Board */
+    .arcade-leaderboard-panel {
+        background: #0b0e1a;
+        border: 2px inset #808080;
+        padding: 6px 8px;
+        color: #e0f7fa;
+        font-size: 11px;
+    }
+
+    .arcade-lb-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding-bottom: 4px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid rgba(0, 255, 255, 0.25);
+        font-weight: bold;
+        color: #ffd700;
+        font-size: 10.5px;
+    }
+
+    .arcade-lb-sub {
+        color: #00ffff;
+        font-weight: bold;
+    }
+
+    .arcade-lb-list {
+        max-height: 112px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .arcade-lb-empty {
+        text-align: center;
+        padding: 8px;
+        color: #90a4ae;
+        font-style: italic;
+    }
+
+    .arcade-lb-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2px 6px;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 2px;
+    }
+
+    .arcade-lb-row.is-me {
+        background: rgba(0, 255, 136, 0.16);
+        border: 1px solid rgba(0, 255, 136, 0.45);
+    }
+
+    .arcade-lb-rank {
+        width: 28px;
+        font-weight: bold;
+        color: #ffd700;
+    }
+
+    .arcade-lb-user {
+        flex: 1;
+        font-weight: bold;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .you-pill {
+        background: #00e676;
+        color: #002412;
+        padding: 0 4px;
+        border-radius: 2px;
+        font-size: 9px;
+        font-weight: bold;
+    }
+
+    .arcade-lb-score {
+        font-family: monospace;
+        font-weight: bold;
+        color: #00ffff;
+    }
+
+    /* Wild Firefly Net Catcher Mini-Game Modal */
+    .firefly-catcher-window {
+        width: 400px;
+        max-width: 96vw;
+    }
+
+    .firefly-catcher-stage {
+        background: radial-gradient(circle at 50% 25%, #163324 0%, #07140d 65%, #030906 100%);
+        box-shadow: inset 0 0 22px rgba(105, 240, 174, 0.25);
+        cursor: crosshair;
+    }
+
+    .catcher-moon {
+        position: absolute;
+        top: 10px;
+        right: 16px;
+        font-size: 22px;
+        opacity: 0.75;
+        pointer-events: none;
+    }
+
+    .catcher-firefly-sprite {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(234, 255, 123, 0.95) 0%, rgba(105, 240, 174, 0.45) 55%, transparent 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        box-shadow: 0 0 14px #ccff66;
+    }
+
+    .catcher-firefly-core {
+        font-size: 16px;
+        filter: drop-shadow(0 0 4px #ffffff);
+    }
+
+    .catcher-decoy-sprite {
+        position: absolute;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        pointer-events: none;
+        filter: drop-shadow(0 0 5px #ff1744);
+    }
+
+    .catcher-net-reticle {
+        position: absolute;
+        width: 44px;
+        height: 44px;
+        border: 2px dashed rgba(204, 255, 102, 0.85);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        pointer-events: none;
+        transition: transform 0.08s ease;
+        background: rgba(204, 255, 102, 0.08);
+    }
+
+    .catcher-net-reticle.net-swinging {
+        transform: scale(1.25) rotate(-18deg);
+        border-style: solid;
+        border-color: #ffffff;
+        background: rgba(204, 255, 102, 0.32);
+        box-shadow: 0 0 14px #ccff66;
+    }
+
+    .catcher-feedback-banner {
+        position: absolute;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(5, 20, 12, 0.9);
+        border: 1px solid #ccff66;
+        color: #ccff66;
+        padding: 2px 10px;
+        font-size: 11px;
+        font-weight: bold;
+        white-space: nowrap;
+        pointer-events: none;
+    }
+
+    /* 24-Hour Sky Wish Lantern Sanctuary Modal */
+    .lantern-sanctuary-window {
+        width: 560px;
+        max-width: 96vw;
+    }
+
+    .lantern-sanctuary-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .lantern-compose-card {
+        background: linear-gradient(180deg, #0d1f17 0%, #07120d 100%);
+        border: 2px inset #2e7d32;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        color: #e8f5e9;
+    }
+
+    .lantern-compose-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .jar-status-badge {
+        display: flex;
+        flex-direction: column;
+        font-size: 11px;
+        color: #ffd54f;
+    }
+
+    .jar-status-badge.has-firefly {
+        color: #ccff66;
+    }
+
+    .jar-status-badge small {
+        font-size: 10px;
+        color: #a5d6a7;
+    }
+
+    .lantern-color-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: 11px;
+    }
+
+    .lantern-color-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .lantern-color-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10.5px;
+        padding: 3px 7px;
+    }
+
+    .color-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1px solid #000;
+        display: inline-block;
+    }
+
+    .lantern-input-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .lantern-need-firefly-notice {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        background: rgba(255, 213, 79, 0.12);
+        border: 1px dashed #ffd54f;
+        padding: 6px 8px;
+        font-size: 11px;
+        color: #fff8e1;
+    }
+
+    .lantern-sky-header {
+        font-size: 11px;
+        font-weight: bold;
+        color: #1b5e20;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .lantern-sky-grid {
+        max-height: 250px;
+        overflow-y: auto;
+        background: radial-gradient(circle at 50% 15%, #162238 0%, #090d18 75%, #05070e 100%);
+        border: 3px inset #808080;
+        padding: 8px;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .lantern-sky-empty {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 28px 12px;
+        color: #b0bec5;
+        font-size: 11.5px;
+    }
+
+    .sky-lantern-card {
+        background: rgba(14, 22, 38, 0.88);
+        border: 1px solid var(--lantern-accent, #ffd54f);
+        box-shadow: 0 0 10px rgba(255, 213, 79, 0.15);
+        border-radius: 4px;
+        padding: 7px 9px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 5px;
+        color: #ffffff;
+    }
+
+    .sky-lantern-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 4px;
+        font-size: 10.5px;
+    }
+
+    .sky-lantern-author {
+        color: var(--lantern-accent, #ffd54f);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .sky-lantern-ttl {
+        font-size: 9.5px;
+        color: #90caf9;
+        background: rgba(0, 0, 0, 0.45);
+        padding: 1px 5px;
+        border-radius: 3px;
+    }
+
+    .sky-lantern-wish {
+        margin: 2px 0;
+        font-size: 11.5px;
+        line-height: 1.35;
+        color: #fffde7;
+        word-break: break-word;
+    }
+
+    .sky-lantern-card-foot {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .lantern-glow-btn {
+        font-size: 10px;
+        padding: 2px 7px;
+        background: #1c2838;
+        color: #ffe082;
+    }
+
+    .lantern-glow-btn.glowed {
+        background: #ffd54f;
+        color: #1a1200;
+        font-weight: bold;
+    }
+
     @media (max-width: 768px) {
         .desktop-ptt-hint {
             display: none;
@@ -8180,8 +9456,9 @@
             z-index: 25;
         }
         .guide-grid,
-        .my-stats-banner {
-            grid-template-columns: repeat(2, 1fr);
+        .my-stats-banner,
+        .lantern-sky-grid {
+            grid-template-columns: repeat(1, 1fr);
         }
     }
 </style>

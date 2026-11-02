@@ -21,7 +21,7 @@
         showDevMode = false;
     }
 
-    async function handleOAuthClick(flow: "oauth1" | "oauth2" | "force" = "oauth1") {
+    async function handleOAuthClick(flow: "oauth1" | "authorize" | "force" | "oauth2" = "oauth1") {
         isSubmitting = true;
         statusMessage = "";
         const res = await loginWithX(flow);
@@ -129,10 +129,10 @@
                         <button
                             type="button"
                             class="win98-btn oauth-alt-btn"
-                            onclick={() => handleOAuthClick("oauth2")}
+                            onclick={() => handleOAuthClick("force")}
                             disabled={isSubmitting}
                         >
-                            🔄 Having trouble or seeing "No request token"? Use Alt 𝕏 Login (OAuth 2.0)
+                            🔄 Having trouble or seeing "No request token"? Force Fresh 𝕏 Login
                         </button>
                     </div>
 
