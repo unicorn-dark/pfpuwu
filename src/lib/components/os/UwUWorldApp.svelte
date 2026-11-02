@@ -445,13 +445,10 @@
         respawnUntil: number;
     }
     let wildFireflies: WildFirefly[] = [
-        { id: 1, anchorX: 9.5, anchorY: 13.5, x: 9.5, y: 13.5, phase: 0.2, speed: 1.4, color: "#ccff66", respawnUntil: 0 },
-        { id: 2, anchorX: 14.5, anchorY: 10.2, x: 14.5, y: 10.2, phase: 1.5, speed: 1.7, color: "#ffd700", respawnUntil: 0 },
-        { id: 3, anchorX: 20.5, anchorY: 14.2, x: 20.5, y: 14.2, phase: 2.8, speed: 1.5, color: "#00ffcc", respawnUntil: 0 },
-        { id: 4, anchorX: 18.8, anchorY: 20.4, x: 18.8, y: 20.4, phase: 4.1, speed: 1.8, color: "#ccff66", respawnUntil: 0 },
-        { id: 5, anchorX: 24.8, anchorY: 18.2, x: 24.8, y: 18.2, phase: 5.0, speed: 1.6, color: "#ff99ff", respawnUntil: 0 },
-        { id: 6, anchorX: 14.0, anchorY: 23.5, x: 14.0, y: 23.5, phase: 3.3, speed: 1.5, color: "#ccff66", respawnUntil: 0 },
-        { id: 7, anchorX: 23.8, anchorY: 12.8, x: 23.8, y: 12.8, phase: 0.9, speed: 1.9, color: "#ffd700", respawnUntil: 0 }
+        { id: 1, anchorX: 20.9, anchorY: 22.1, x: 20.9, y: 22.1, phase: 0.2, speed: 1.3, color: "#ccff66", respawnUntil: 0 },
+        { id: 2, anchorX: 23.1, anchorY: 22.1, x: 23.1, y: 22.1, phase: 1.8, speed: 1.5, color: "#ffd700", respawnUntil: 0 },
+        { id: 3, anchorX: 21.0, anchorY: 23.9, x: 21.0, y: 23.9, phase: 3.4, speed: 1.4, color: "#00ffcc", respawnUntil: 0 },
+        { id: 4, anchorX: 23.1, anchorY: 23.9, x: 23.1, y: 23.9, phase: 4.9, speed: 1.6, color: "#ccff66", respawnUntil: 0 }
     ];
     let activeWildFireflyId = $state<number | null>(null);
     let fireflyJarCount = $state(0);
@@ -1485,21 +1482,12 @@
                 castFishingLine();
                 return;
             }
-            // Check if player is near a wild firefly first
-            const nowMs = Date.now();
-            const nearbyFly = wildFireflies.find(
-                (f) => f.respawnUntil <= nowMs && gridDistance(myX, myY, f.x, f.y) <= 3.6
-            );
-            if (nearbyFly && activeStation !== "fireflies") {
-                openFireflyCatcher(nearbyFly.id);
-                return;
-            }
             if (activeStation === "fireflies") {
-                openLanternSanctuary();
-                return;
-            }
-            if (nearbyFly) {
-                openFireflyCatcher(nearbyFly.id);
+                if (fireflyJarCount > 0) {
+                    openLanternSanctuary();
+                } else {
+                    openFireflyCatcher(1);
+                }
                 return;
             }
         }
@@ -2954,20 +2942,8 @@
             }
         } else {
             pendingInteractionTarget = null;
-            const nowMs = Date.now();
-            // 1. Direct click on a roaming Wild Firefly in the Whispering Woods
-            const clickedFly = wildFireflies.find(
-                (f) => f.respawnUntil <= nowMs && gridDistance(gridPos.x, gridPos.y, f.x, f.y) <= 1.45
-            );
-            if (clickedFly) {
-                activeWildFireflyId = clickedFly.id;
-                if (gridDistance(myX, myY, clickedFly.x, clickedFly.y) <= 3.6) {
-                    openFireflyCatcher(clickedFly.id);
-                    return;
-                }
-                pendingInteractionTarget = "catch_firefly";
-            } else if (gx >= 21 && gx <= 23 && gy >= 22 && gy <= 24) {
-                // 2. Direct click on the Firefly Wish Lantern Shrine (22, 23)
+            if (gx >= 21 && gx <= 23 && gy >= 22 && gy <= 24) {
+                // Direct click on the Firefly Wish Lantern Shrine (22, 23)
                 if (gridDistance(myX, myY, 22.0, 23.0) <= 3.6) {
                     openLanternSanctuary();
                     return;
@@ -3377,15 +3353,13 @@
                 rouletteSpinningState = true;
             }
         } else {
-            // Animate Wild Roaming Fireflies across the Whispering Woods
+            // Animate Fireflies clustered near the Firefly Lantern Shrine (22, 23)
             const nowMs = Date.now();
             for (const wf of wildFireflies) {
                 if (wf.respawnUntil > nowMs) continue;
-                const dToPlayer = gridDistance(myX, myY, wf.x, wf.y);
-                const panicBoost = dToPlayer < 2.2 ? 1.85 : 1.0;
-                wf.phase += deltaSec * wf.speed * panicBoost;
-                wf.x = wf.anchorX + Math.sin(wf.phase) * 1.45 + Math.cos(wf.phase * 2.1) * 0.35;
-                wf.y = wf.anchorY + Math.cos(wf.phase * 1.3) * 1.15 + Math.sin(wf.phase * 1.7) * 0.35;
+                wf.phase += deltaSec * wf.speed;
+                wf.x = wf.anchorX + Math.sin(wf.phase) * 0.48;
+                wf.y = wf.anchorY + Math.cos(wf.phase * 1.3) * 0.42;
             }
 
             // Whispering Woods Social Station Proximity Detection
@@ -3709,21 +3683,6 @@
                 ctx.beginPath();
                 ctx.arc(sc.x, sc.y, 3.4, 0, Math.PI * 2);
                 ctx.fill();
-
-                const distToPlayer = gridDistance(myX, myY, wf.x, wf.y);
-                const isHovered =
-                    hoveredTile !== null && gridDistance(hoveredTile.x + 0.5, hoveredTile.y + 0.5, wf.x, wf.y) <= 1.8;
-                if (distToPlayer <= 3.8 || isHovered) {
-                    ctx.font = "bold 9px monospace";
-                    ctx.textAlign = "center";
-                    ctx.fillStyle = "rgba(6, 24, 16, 0.88)";
-                    ctx.fillRect(sc.x - 42, sc.y - 23, 84, 13);
-                    ctx.strokeStyle = "#ccff66";
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(sc.x - 42, sc.y - 23, 84, 13);
-                    ctx.fillStyle = "#ccff66";
-                    ctx.fillText("🦋 CATCH [CLICK/E]", sc.x, sc.y - 14);
-                }
                 ctx.restore();
             }
         }
@@ -4431,13 +4390,7 @@
                 promptText = "🌲 Walk East → Whispering Woods";
             }
         } else {
-            const nowMs = Date.now();
-            const nearbyWildFly = wildFireflies.find(
-                (wf) => wf.respawnUntil <= nowMs && gridDistance(myX, myY, wf.x, wf.y) <= 3.6
-            );
-            if (nearbyWildFly) {
-                promptText = `🦋 Wild Firefly Nearby [Press E / Click to Catch] (🫙 ${fireflyJarCount})`;
-            } else if (activeStation === "campfire") {
+            if (activeStation === "campfire") {
                 promptText = "🔥 Campfire Circle";
             } else if (activeStation === "picnic") {
                 promptText = "🧺 Woodland Picnic";
