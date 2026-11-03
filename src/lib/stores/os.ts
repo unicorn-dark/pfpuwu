@@ -37,6 +37,16 @@ export const APP_REGISTRY: AppDefinition[] = [
         route: '/pfp'
     },
     {
+        id: 'namecard',
+        title: 'My Namecard',
+        icon: '🪪',
+        defaultWidth: 880,
+        defaultHeight: 620,
+        minWidth: 340,
+        minHeight: 420,
+        route: '/namecard'
+    },
+    {
         id: 'chatbox',
         title: 'Global Chat (24h)',
         icon: '💬',

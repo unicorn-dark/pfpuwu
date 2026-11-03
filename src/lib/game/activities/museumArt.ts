@@ -234,6 +234,124 @@ export function getSymmetryCoords3D(
 // 3D GEOMETRIC PRIMITIVE GENERATORS (Stamps & Walls)
 // ============================================================================
 
+const HEART_PATTERNS_BY_RADIUS: Record<number, { core: string[]; bevel: string[] }> = {
+    1: {
+        // 5x5 compact heart (bottom-to-top in array order via reverse index)
+        core: [
+            ' # # ',
+            '#####',
+            '#####',
+            ' ### ',
+            '  #  '
+        ],
+        bevel: [
+            '     ',
+            ' # # ',
+            ' ### ',
+            '  #  ',
+            '     '
+        ]
+    },
+    2: {
+        // 7x6 classic voxel heart
+        core: [
+            ' ## ## ',
+            '#######',
+            '#######',
+            ' ##### ',
+            '  ###  ',
+            '   #   '
+        ],
+        bevel: [
+            '  # #  ',
+            ' ##### ',
+            ' ##### ',
+            '  ###  ',
+            '   #   ',
+            '       '
+        ]
+    },
+    3: {
+        // 9x8 sculpted museum heart
+        core: [
+            '  ## ##  ',
+            ' #### ####'[0] ? ' ### ### ' : ' ### ### ',
+            '#########',
+            '#########',
+            ' ####### ',
+            '  #####  ',
+            '   ###   ',
+            '    #    '
+        ],
+        bevel: [
+            '         ',
+            '  ## ##  ',
+            ' ####### ',
+            ' ####### ',
+            '  #####  ',
+            '   ###   ',
+            '    #    ',
+            '         '
+        ]
+    },
+    4: {
+        // 11x9 grand 3D heart
+        core: [
+            '  ### ###  ',
+            ' ##### #####'.slice(0, 11),
+            '###########',
+            '###########',
+            '###########',
+            ' ######### ',
+            '  #######  ',
+            '   #####   ',
+            '    ###    ',
+            '     #     '
+        ],
+        bevel: [
+            '   #   #   ',
+            '  ### ###  ',
+            ' ######### ',
+            ' ######### ',
+            '  #######  ',
+            '   #####   ',
+            '    ###    ',
+            '     #     ',
+            '           ',
+            '           '
+        ]
+    },
+    5: {
+        // 13x11 XL 3D heart
+        core: [
+            '  #### ####  ',
+            ' ##### ##### ',
+            '#############',
+            '#############',
+            '#############',
+            ' ########### ',
+            '  #########  ',
+            '   #######   ',
+            '    #####    ',
+            '     ###     ',
+            '      #      '
+        ],
+        bevel: [
+            '   ##   ##   ',
+            '  #### ####  ',
+            ' ########### ',
+            ' ########### ',
+            '  #########  ',
+            '   #######   ',
+            '    #####    ',
+            '     ###     ',
+            '      #      ',
+            '             ',
+            '             '
+        ]
+    }
+};
+
 export function generate3DStampVoxels(
     kind: 'sphere' | 'dome' | 'pyramid' | 'heart' | 'pillar',
     cx: number,
@@ -245,47 +363,135 @@ export function generate3DStampVoxels(
     gridSize = VOXEL_GRID_SIZE
 ): VoxelBrick[] {
     const out: VoxelBrick[] = [];
-    const r = Math.max(1, Math.min(6, Math.round(radius)));
+    const r = Math.max(1, Math.min(5, Math.round(radius)));
 
-    for (let dx = -r; dx <= r; dx++) {
-        for (let dy = -r; dy <= r; dy++) {
-            for (let dz = -r; dz <= r; dz++) {
+    if (kind === 'heart') {
+        const tpl = HEART_PATTERNS_BY_RADIUS[r] || HEART_PATTERNS_BY_RADIUS[2];
+        const rows = tpl.core;
+        const bevelRows = tpl.bevel;
+        const height = rows.length;
+        const width = rows[0].length;
+        const halfW = Math.floor(width / 2);
+
+        for (let rowIdx = 0; rowIdx < height; rowIdx++) {
+            // rowIdx 0 is top of heart, so z = cz + (height - 1 - rowIdx)
+            const dz = height - 1 - rowIdx;
+            const z = cz + dz;
+            if (z < 0 || z >= gridSize) continue;
+
+            const coreLine = rows[rowIdx];
+            const bevelLine = bevelRows[rowIdx] || '';
+
+            for (let col = 0; col < width; col++) {
+                const dx = col - halfW;
                 const x = cx + dx;
-                const y = cy + dy;
-                const z = cz + dz;
-                if (x < 0 || x >= gridSize || y < 0 || y >= gridSize || z < 0 || z >= gridSize) continue;
+                if (x < 0 || x >= gridSize) continue;
 
-                if (kind === 'sphere') {
-                    if (dx * dx + dy * dy + dz * dz <= r * r + 0.4) {
-                        out.push({ x, y, z, color, material, shape: 'block' });
+                if (coreLine[col] === '#') {
+                    // Center core layer (dy = 0)
+                    if (cy >= 0 && cy < gridSize) {
+                        out.push({ x, y: cy, z, color, material, shape: 'block' });
                     }
-                } else if (kind === 'dome') {
-                    if (dz >= 0 && dx * dx + dy * dy + dz * dz <= r * r + 0.4) {
-                        out.push({ x, y, z, color, material, shape: 'block' });
-                    }
-                } else if (kind === 'pyramid') {
-                    if (dz >= 0 && dz <= r) {
-                        const allowed = r - dz;
-                        if (Math.abs(dx) <= allowed && Math.abs(dy) <= allowed) {
-                            out.push({ x, y, z, color, material, shape: 'block' });
+                    // If radius >= 4, make the core 3 studs thick (dy = -1, 0, +1) and bevel at dy = -2, +2
+                    if (r >= 4) {
+                        if (cy - 1 >= 0 && cy - 1 < gridSize) {
+                            out.push({ x, y: cy - 1, z, color, material, shape: 'block' });
                         }
-                    }
-                } else if (kind === 'pillar') {
-                    if (dx === 0 && dy === 0 && dz >= 0 && dz <= r * 2) {
-                        out.push({ x, y, z, color, material, shape: 'cylinder' });
-                    }
-                } else if (kind === 'heart') {
-                    // Upright 3D heart oriented across X and Z (thickness 2 in Y)
-                    if (Math.abs(dy) <= 1 && dz >= 0 && dz <= r * 2) {
-                        const nx = dx / (r + 0.5);
-                        const nz = (dz - r * 0.85) / (r + 0.5);
-                        const eq = Math.pow(nx * nx + nz * nz - 0.65, 3) - nx * nx * Math.pow(nz, 3);
-                        if (eq <= 0.02) {
-                            out.push({ x, y, z, color, material, shape: 'block' });
+                        if (cy + 1 >= 0 && cy + 1 < gridSize) {
+                            out.push({ x, y: cy + 1, z, color, material, shape: 'block' });
                         }
                     }
                 }
+
+                if (bevelLine[col] === '#') {
+                    const bevelOffset = r >= 4 ? 2 : 1;
+                    if (cy - bevelOffset >= 0 && cy - bevelOffset < gridSize) {
+                        out.push({ x, y: cy - bevelOffset, z, color, material, shape: 'block' });
+                    }
+                    if (cy + bevelOffset >= 0 && cy + bevelOffset < gridSize) {
+                        out.push({ x, y: cy + bevelOffset, z, color, material, shape: 'block' });
+                    }
+                }
             }
+        }
+        return out;
+    }
+
+    if (kind === 'sphere') {
+        // Elevate the sphere center to cz + effR so the full 3D ball sits ON TOP of the baseplate!
+        const effR = Math.max(2, Math.min(5, r + 1));
+        const centerZ = cz + effR;
+        const maxDistSq = (effR + 0.25) * (effR + 0.25);
+
+        for (let dx = -effR; dx <= effR; dx++) {
+            for (let dy = -effR; dy <= effR; dy++) {
+                for (let dz = -effR; dz <= effR; dz++) {
+                    const x = cx + dx;
+                    const y = cy + dy;
+                    const z = centerZ + dz;
+                    if (x < 0 || x >= gridSize || y < 0 || y >= gridSize || z < 0 || z >= gridSize) continue;
+
+                    const d2 = dx * dx + dy * dy + dz * dz;
+                    // Avoid single-stud axis spikes on smaller spheres so it looks smoothly spherical
+                    const isSingleAxisTip =
+                        effR <= 3 &&
+                        ((Math.abs(dx) === effR && dy === 0 && dz === 0) ||
+                            (Math.abs(dy) === effR && dx === 0 && dz === 0) ||
+                            (Math.abs(dz) === effR && dx === 0 && dy === 0));
+
+                    if (d2 <= maxDistSq && !isSingleAxisTip) {
+                        out.push({ x, y, z, color, material, shape: 'block' });
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    if (kind === 'dome') {
+        const effR = Math.max(2, Math.min(6, r + 1));
+        const maxDistSq = (effR + 0.28) * (effR + 0.28);
+        for (let dx = -effR; dx <= effR; dx++) {
+            for (let dy = -effR; dy <= effR; dy++) {
+                for (let dz = 0; dz <= effR; dz++) {
+                    const x = cx + dx;
+                    const y = cy + dy;
+                    const z = cz + dz;
+                    if (x < 0 || x >= gridSize || y < 0 || y >= gridSize || z < 0 || z >= gridSize) continue;
+                    const d2 = dx * dx + dy * dy + dz * dz;
+                    const isTopSpike = dz === effR && dx === 0 && dy === 0 && effR <= 3;
+                    if (d2 <= maxDistSq && !isTopSpike) {
+                        out.push({ x, y, z, color, material, shape: 'block' });
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    if (kind === 'pyramid') {
+        const effR = Math.max(2, Math.min(6, r + 1));
+        for (let dz = 0; dz <= effR; dz++) {
+            const z = cz + dz;
+            if (z < 0 || z >= gridSize) continue;
+            const allowed = effR - dz;
+            for (let dx = -allowed; dx <= allowed; dx++) {
+                for (let dy = -allowed; dy <= allowed; dy++) {
+                    const x = cx + dx;
+                    const y = cy + dy;
+                    if (x < 0 || x >= gridSize || y < 0 || y >= gridSize) continue;
+                    out.push({ x, y, z, color, material, shape: 'block' });
+                }
+            }
+        }
+        return out;
+    }
+
+    // Pillar
+    for (let dz = 0; dz <= r * 2; dz++) {
+        const z = cz + dz;
+        if (cx >= 0 && cx < gridSize && cy >= 0 && cy < gridSize && z >= 0 && z < gridSize) {
+            out.push({ x: cx, y: cy, z, color, material, shape: 'cylinder' });
         }
     }
     return out;
@@ -890,6 +1096,69 @@ export function pickVoxelAtScreenCoord(
         }
     }
     return null;
+}
+
+/**
+ * Analytical inverse isometric projection onto a flat horizontal plane Z.
+ * Used during touch/mouse drag-building so newly placed bricks never cause double-stacking or raycast jumps!
+ */
+export function pickGridCoordOnPlaneZ(
+    px: number,
+    py: number,
+    width: number,
+    height: number,
+    targetZ: number,
+    options: VoxelRenderOptions = {}
+): VoxelHitCandidate | null {
+    const rot = ((options.rotation || 0) % 4 + 4) % 4;
+    const zoom = options.zoom || 1;
+    const panX = options.panX || 0;
+    const panY = options.panY || 0;
+    const gridSize = options.gridSize || VOXEL_GRID_SIZE;
+
+    const baseTileW = Math.min(width / (gridSize * 1.15), height / (gridSize * 0.92)) * zoom;
+    const tileW = Math.max(8, baseTileW);
+    const tileH = tileW * 0.5;
+    const voxelH = tileW * 0.56;
+    const hw = tileW / 2;
+    const hh = tileH / 2;
+
+    const originX = width / 2 + panX;
+    const originY = height * 0.58 - (gridSize * tileH) / 2 + panY;
+
+    const adjX = px - originX;
+    const adjY = py + targetZ * voxelH - originY;
+
+    const rx = Math.round((adjX / hw + adjY / hh) / 2);
+    const ry = Math.round((adjY / hh - adjX / hw) / 2);
+
+    if (rx < 0 || rx >= gridSize || ry < 0 || ry >= gridSize) {
+        return null;
+    }
+
+    // Un-rotate (rx, ry) back to world (x, y)
+    const max = gridSize - 1;
+    let x = rx;
+    let y = ry;
+    if (rot === 1) {
+        x = ry;
+        y = max - rx;
+    } else if (rot === 2) {
+        x = max - rx;
+        y = max - ry;
+    } else if (rot === 3) {
+        x = max - ry;
+        y = rx;
+    }
+
+    return {
+        x,
+        y,
+        z: targetZ,
+        normal: { dx: 0, dy: 0, dz: 0 },
+        isBaseplate: true,
+        poly: []
+    };
 }
 
 /**

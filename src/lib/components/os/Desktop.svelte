@@ -54,6 +54,9 @@
             case "/pfp":
                 launchApp("pfp-app");
                 break;
+            case "/namecard":
+                launchApp("namecard");
+                break;
             case "/chat":
                 openChatDrawer();
                 break;
@@ -140,9 +143,6 @@
             {/each}
         </div>
 
-        <!-- Perma-Pinned Top-Right Y2K Netizen Namecard -->
-        <DesktopNamecard />
-
         {#each $activeWindows as win (win.id)}
             {#if win.isOpen}
                 {@const appDef = APP_REGISTRY.find((a) => a.id === win.appId)}
@@ -160,6 +160,10 @@
                     {#if win.id === "pfp-app"}
                         <div class="app-content">
                             <PfpMaker />
+                        </div>
+                    {:else if win.id === "namecard"}
+                        <div class="app-content">
+                            <DesktopNamecard />
                         </div>
                     {:else if win.id === "meme-explorer"}
                         <div class="app-content">

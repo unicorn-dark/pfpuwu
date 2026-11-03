@@ -147,6 +147,16 @@
                         class="profile-menu-item"
                         onclick={() => {
                             closeProfileMenu();
+                            openWindow("namecard", "My Namecard", 880, 620);
+                        }}
+                    >
+                        <span class="item-icon">🪪</span>
+                        <span>My Namecard</span>
+                    </button>
+                    <button
+                        class="profile-menu-item"
+                        onclick={() => {
+                            closeProfileMenu();
                             showAvatarCustomizer.set(true);
                         }}
                     >

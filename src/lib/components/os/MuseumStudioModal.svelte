@@ -14,6 +14,7 @@
         generate3DStampVoxels,
         renderVoxelSculptureToCanvas,
         pickVoxelAtScreenCoord,
+        pickGridCoordOnPlaneZ,
         exportVoxelSculptureDataUrl,
         getMyPersonalArtworks,
         findPlayerActiveSpot,
@@ -199,6 +200,9 @@
     let dragLockedZ: number | null = null;
     let dragStrokePlacedKeys = new Set<string>();
     let voxelRafId: number | null = null;
+    let lastTouchEventTime = 0;
+    let voxelDownClientPt = { x: 0, y: 0 };
+    let hasPassedDragThreshold = false;
 
     const STUDIO_PALETTE_24 = [
         '#ff0055', '#ff3366', '#ff66b2', '#ffb6c1',
@@ -457,8 +461,12 @@
 
     function handleVoxelPointerMove(e: MouseEvent | TouchEvent) {
         if (!voxelCanvas) return;
-        if ('touches' in e && e.cancelable) {
-            e.preventDefault();
+        const isTouch = 'touches' in e || 'changedTouches' in e;
+        if (isTouch) {
+            lastTouchEventTime = Date.now();
+            if (e.cancelable) e.preventDefault();
+        } else if (Date.now() - lastTouchEventTime < 900) {
+            return;
         }
 
         // 2-Finger Pinch-to-Zoom & Pan on Mobile
@@ -483,14 +491,37 @@
         }
 
         const pt = getVoxelCanvasCoords(e);
-        const hit = pickVoxelAtScreenCoord(pt.x, pt.y, hitCandidates);
 
-        if (isVoxelDragging && hit) {
-            // Stamps & extrude are single-tap on pointerdown so finger jitter doesn't spam 10 spheres
+        if (isVoxelDragging) {
+            // Stamps & extrude are single-tap on pointerdown so finger jitter doesn't spam shapes
             if (['sphere', 'pyramid', 'dome', 'heart', 'extrude'].includes(voxelTool)) {
                 return;
             }
-            // Prevent stacking onto bricks created during the same drag stroke!
+
+            // Require at least 12px of intentional finger/mouse movement before drag-placing additional bricks!
+            // This guarantees a single tap on mobile NEVER spawns a 2nd brick from micro-jitter.
+            const { clientX, clientY } = getPointerClientXY(e);
+            if (!hasPassedDragThreshold) {
+                if (Math.hypot(clientX - voxelDownClientPt.x, clientY - voxelDownClientPt.y) < 12) {
+                    return;
+                }
+                hasPassedDragThreshold = true;
+            }
+
+            // In 'place' mode, project directly onto the flat horizontal plane z = dragLockedZ
+            // so newly placed 3D bricks never intercept the raycast or cause double-stacking!
+            const hit =
+                voxelTool === 'place' && dragLockedZ !== null
+                    ? pickGridCoordOnPlaneZ(pt.x, pt.y, voxelCanvas.width, voxelCanvas.height, dragLockedZ, {
+                          rotation: voxelRotation,
+                          zoom: voxelZoom,
+                          panX: voxelPanX,
+                          panY: voxelPanY
+                      })
+                    : pickVoxelAtScreenCoord(pt.x, pt.y, hitCandidates);
+
+            if (!hit) return;
+
             if (!hit.isBaseplate && dragStrokePlacedKeys.has(`${hit.x},${hit.y},${hit.z}`)) {
                 return;
             }
@@ -508,6 +539,7 @@
         }
 
         // Hover preview on desktop — only redraw when the hovered voxel face actually changes!
+        const hit = pickVoxelAtScreenCoord(pt.x, pt.y, hitCandidates);
         const newHoverKey = hit
             ? `${hit.x},${hit.y},${hit.z},${hit.normal.dx},${hit.normal.dy},${hit.normal.dz},${hit.isBaseplate}`
             : 'none';
@@ -521,8 +553,13 @@
 
     function handleVoxelPointerDown(e: MouseEvent | TouchEvent) {
         if (!voxelCanvas) return;
-        if ('touches' in e && e.cancelable) {
-            e.preventDefault();
+        const isTouch = 'touches' in e || 'changedTouches' in e;
+        if (isTouch) {
+            lastTouchEventTime = Date.now();
+            if (e.cancelable) e.preventDefault();
+        } else if (Date.now() - lastTouchEventTime < 900) {
+            // Ignore synthesized mouse events fired by mobile browsers right after touch!
+            return;
         }
 
         // Check for 2-finger pinch/pan gesture on mobile
@@ -540,9 +577,9 @@
 
         const isRightClick = 'button' in e && e.button === 2;
         const isMiddleClick = 'button' in e && e.button === 1;
+        const { clientX, clientY } = getPointerClientXY(e);
 
         if (voxelTool === 'pan' || isMiddleClick || ('shiftKey' in e && e.shiftKey)) {
-            const { clientX, clientY } = getPointerClientXY(e);
             isVoxelPanning = true;
             voxelPinchStartDist = 0;
             voxelPanStart = { x: clientX, y: clientY, panX: voxelPanX, panY: voxelPanY };
@@ -555,6 +592,8 @@
 
         pushVoxelUndo();
         isVoxelDragging = true;
+        voxelDownClientPt = { x: clientX, y: clientY };
+        hasPassedDragThreshold = false;
         dragStrokePlacedKeys = new Set<string>();
 
         if (!isRightClick && voxelTool === 'place') {
@@ -572,14 +611,18 @@
         applyVoxelActionAtHit(hit, isRightClick);
     }
 
-    function handleVoxelPointerUp() {
+    function handleVoxelPointerUp(e?: MouseEvent | TouchEvent) {
+        if (e && ('touches' in e || 'changedTouches' in e)) {
+            lastTouchEventTime = Date.now();
+        }
         isVoxelDragging = false;
         isVoxelPanning = false;
+        hasPassedDragThreshold = false;
         voxelPinchStartDist = 0;
         dragLockedZ = null;
         dragStrokePlacedKeys.clear();
         lastDraggedCoordKey = '';
-        if ('ontouchstart' in window) {
+        if (typeof window !== 'undefined' && 'ontouchstart' in window) {
             // Clear ghost preview after finger lift on mobile so view stays clean
             ghostPreviewBricks = [];
             scheduleVoxelRedraw();

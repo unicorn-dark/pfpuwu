@@ -19,7 +19,6 @@
         TAGLINE_SUGGESTIONS,
         NAMECARD_STICKER_CATALOG,
         NAMECARD_PAINT_PALETTE,
-        showNamecardStudio,
         generateDefaultNamecardConfig,
         loadNamecardConfig,
         saveNamecardConfig,
@@ -36,23 +35,14 @@
     );
     let playerStats = $state<PlayerEconomyStats | null>(null);
     let cleanAvatarSrc = $state<string>("");
-    let isCollapsed = $state(false);
-    let isPinnedOnTop = $state(false);
 
-    // Inline Editing on the Pinned Card
-    let isEditingInlineName = $state(false);
-    let inlineNameDraft = $state("");
-    let isEditingInlineTagline = $state(false);
-    let inlineTaglineDraft = $state("");
-
-    // Customizer Modal State
+    // Customizer Studio State
     let studioTab = $state<"background" | "style" | "draw" | "stickers">("background");
     let selectedStickerId = $state<string | null>(null);
     let draggingStickerId = $state<string | null>(null);
     let previewContainerEl: HTMLDivElement | null = $state(null);
 
-    // Animated Background Canvases
-    let dockBgCanvasEl: HTMLCanvasElement | null = $state(null);
+    // Animated Background Canvas
     let studioBgCanvasEl: HTMLCanvasElement | null = $state(null);
     let animFrameId: number | null = null;
     let startTime = 0;
@@ -159,8 +149,6 @@
         };
         playerStats = stats;
         cleanAvatarSrc = transparentAvatar;
-        inlineNameDraft = cardConfig.displayName;
-        inlineTaglineDraft = cardConfig.tagline;
     }
 
     // Keep transparent avatar synced whenever userProfile or its avatar_url updates
@@ -191,20 +179,23 @@
         }
     });
 
-    // Hydrate freehand drawing canvas when modal opens
+    // Hydrate freehand drawing canvas when paintCanvasEl mounts or user switches
+    let hydratedPaintUrl = "";
     $effect(() => {
-        if ($showNamecardStudio && paintCanvasEl) {
+        const url = cardConfig.paintDataUrl || "";
+        if (paintCanvasEl && !isDrawingPaint && url !== hydratedPaintUrl) {
+            hydratedPaintUrl = url;
             const ctx = paintCanvasEl.getContext("2d");
             if (!ctx) return;
             ctx.clearRect(0, 0, paintCanvasEl.width, paintCanvasEl.height);
-            if (cardConfig.paintDataUrl) {
+            if (url) {
                 const img = new Image();
                 img.onload = () => {
                     if (!paintCanvasEl) return;
                     ctx.clearRect(0, 0, paintCanvasEl.width, paintCanvasEl.height);
                     ctx.drawImage(img, 0, 0, paintCanvasEl.width, paintCanvasEl.height);
                 };
-                img.src = cardConfig.paintDataUrl;
+                img.src = url;
             }
         }
     });
@@ -213,20 +204,7 @@
         if (!startTime) startTime = now;
         const elapsedSec = (now - startTime) / 1000;
 
-        if (dockBgCanvasEl && !isCollapsed) {
-            const ctx = dockBgCanvasEl.getContext("2d");
-            if (ctx) {
-                drawNamecardBackgroundFrame(
-                    ctx,
-                    dockBgCanvasEl.width,
-                    dockBgCanvasEl.height,
-                    cardConfig,
-                    elapsedSec
-                );
-            }
-        }
-
-        if ($showNamecardStudio && studioBgCanvasEl) {
+        if (studioBgCanvasEl) {
             const ctx = studioBgCanvasEl.getContext("2d");
             if (ctx) {
                 drawNamecardBackgroundFrame(
@@ -258,7 +236,7 @@
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-        if (!$showNamecardStudio || studioTab !== "draw") return;
+        if (studioTab !== "draw") return;
         const target = e.target as HTMLElement | null;
         if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
 
@@ -309,38 +287,16 @@
         if (toastTimer) clearTimeout(toastTimer);
     });
 
-    async function commitInlineDisplayName() {
-        isEditingInlineName = false;
-        const trimmed = inlineNameDraft.trim().slice(0, 26);
-        if (!trimmed || !$userProfile) return;
-        cardConfig.displayName = trimmed;
-        await Promise.all([
-            updateUserDisplayName(trimmed),
-            saveNamecardConfig(cardConfig)
-        ]);
-        triggerToast("✨ Display name updated!");
-    }
-
-    async function commitInlineTagline() {
-        isEditingInlineTagline = false;
-        const trimmed = inlineTaglineDraft.trim().slice(0, 40);
-        if (!$userProfile) return;
-        cardConfig.tagline = trimmed;
-        await saveNamecardConfig(cardConfig);
-    }
-
-    function openStudio(initialTab: "background" | "style" | "draw" | "stickers" = "background") {
-        if (!$userProfile) {
-            authModalReason.set("Sign in with 𝕏 to customize and share your Namecard!");
-            showAuthModal.set(true);
-            return;
-        }
-        studioTab = initialTab;
-        showNamecardStudio.set(true);
+    function promptSignIn(reason = "Sign in with 𝕏 to customize and share your Namecard!") {
+        authModalReason.set(reason);
+        showAuthModal.set(true);
     }
 
     async function handleSaveStudio() {
-        if (!$userProfile) return;
+        if (!$userProfile) {
+            promptSignIn("Sign in with 𝕏 to save your custom Namecard!");
+            return;
+        }
         isSaving = true;
         const cleanName = cardConfig.displayName.trim().slice(0, 26) || $userProfile.x_username;
         cardConfig.displayName = cleanName;
@@ -354,7 +310,7 @@
 
     async function handleCopyCardImage() {
         if (!$userProfile) {
-            openStudio("background");
+            promptSignIn("Sign in with 𝕏 to copy and share your Namecard!");
             return;
         }
         isCopying = true;
@@ -365,7 +321,7 @@
 
     async function handleDownloadCardPng() {
         if (!$userProfile) {
-            openStudio("background");
+            promptSignIn("Sign in with 𝕏 to download your Namecard PNG!");
             return;
         }
         await downloadNamecardPng(cardConfig, $userProfile, playerStats);
@@ -950,329 +906,48 @@
     const liveBestWin = $derived(playerStats?.high_score ?? 0);
 </script>
 
-<!-- PERMA-PINNED TOP-RIGHT DESKTOP NAMECARD -->
-<aside
-    class="nc-dock"
-    class:pinned-top={isPinnedOnTop}
-    class:collapsed={isCollapsed}
-    aria-label="Player Namecard"
+<!-- EMBEDDED OS APP WINDOW FOR MY NAMECARD -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+    class="nc-app-shell"
+    class:expanded-draw={isExpandedDrawView && studioTab === "draw"}
+    onmousemove={handlePreviewPointerMove}
+    onmouseup={stopDraggingSticker}
+    ontouchmove={handlePreviewPointerMove}
+    ontouchend={stopDraggingSticker}
 >
-    {#if isCollapsed}
-        <!-- Sleek Collapsed Pill -->
-        <div class="nc-collapsed-pill tone-{textTone}">
-            {#if cleanAvatarSrc}
-                <img src={cleanAvatarSrc} alt="" class="nc-mini-avatar" />
-            {/if}
-            <span class="nc-collapsed-name">
-                {$userProfile
-                    ? cardConfig.displayName || $userProfile.x_display_name || $userProfile.x_username
-                    : "Guest"}
+    {#if !$userProfile}
+        <div class="nc-guest-banner">
+            <span class="nc-guest-text">
+                🪪 Previewing in Guest Mode — Sign in with 𝕏 to save your custom Namecard, unlock live MMO stats, and share your card!
             </span>
-            {#if $userProfile}
-                <span class="nc-collapsed-stat">{liveChips.toLocaleString()} $UWU</span>
-            {/if}
             <button
                 type="button"
-                class="nc-icon-pill"
-                onclick={() => (isCollapsed = false)}
-                title="Expand Namecard"
+                class="win98-btn primary-save-btn"
+                onclick={() => promptSignIn("Sign in with 𝕏 to unlock and save your personal Namecard!")}
             >
-                ＋
+                𝕏 Sign In
             </button>
         </div>
-    {:else}
-        <div
-            class="nc-card border-{cardConfig.borderId} tone-{textTone}"
-            style="--nc-accent: {accentColor};"
-        >
-            <!-- Animated Liquid / Gradient / Solid Background Canvas -->
-            <canvas
-                bind:this={dockBgCanvasEl}
-                width="360"
-                height="210"
-                class="nc-bg-canvas"
-            ></canvas>
-
-            <!-- Top-Right Subtle Floating Controls -->
-            <div class="nc-top-actions">
-                {#if $userProfile}
-                    <button
-                        type="button"
-                        class="nc-pill-btn"
-                        onclick={() => openStudio("background")}
-                        title="Customize Namecard"
-                    >
-                        Customize
-                    </button>
-                    <button
-                        type="button"
-                        class="nc-pill-btn icon-only"
-                        disabled={isCopying}
-                        onclick={handleCopyCardImage}
-                        title="Copy Card Image"
-                    >
-                        {isCopying ? "…" : "Copy"}
-                    </button>
-                    <button
-                        type="button"
-                        class="nc-pill-btn icon-only"
-                        onclick={handleDownloadCardPng}
-                        title="Download PNG"
-                    >
-                        PNG
-                    </button>
-                {/if}
-                <button
-                    type="button"
-                    class="nc-pill-btn icon-only"
-                    class:active-pin={isPinnedOnTop}
-                    onclick={() => (isPinnedOnTop = !isPinnedOnTop)}
-                    title={isPinnedOnTop ? "Unpin from Always-on-Top" : "Keep Above Windows"}
-                >
-                    📌
-                </button>
-                <button
-                    type="button"
-                    class="nc-pill-btn icon-only"
-                    onclick={() => (isCollapsed = true)}
-                    title="Minimize Card"
-                >
-                    —
-                </button>
-            </div>
-
-            {#if !$userProfile}
-                <!-- Clean Guest State -->
-                <div class="nc-upper-row">
-                    <div class="nc-avatar-wrap">
-                        {#if cleanAvatarSrc}
-                            <img src={cleanAvatarSrc} alt="Avatar" class="nc-avatar-cutout" />
-                        {/if}
-                    </div>
-                    <div class="nc-identity-col">
-                        <div class="nc-display-name">Welcome</div>
-                        <div class="nc-tagline">
-                            Sign in with 𝕏 to customize your personal Namecard, stats & stickers.
-                        </div>
-                        <button
-                            type="button"
-                            class="nc-signin-btn"
-                            onclick={() => {
-                                authModalReason.set("Sign in with 𝕏 to unlock your personal Namecard!");
-                                showAuthModal.set(true);
-                            }}
-                        >
-                            Sign in with 𝕏
-                        </button>
-                    </div>
-                </div>
-            {:else}
-                <!-- Main Upper Section: Frameless Transparent Avatar + Uniform Identity -->
-                <div class="nc-upper-row">
-                    <button
-                        type="button"
-                        class="nc-avatar-wrap interactive"
-                        onclick={() => showAvatarCustomizer.set(true)}
-                        title="Click to edit your Avatar"
-                    >
-                        {#if cleanAvatarSrc}
-                            <img
-                                src={cleanAvatarSrc}
-                                alt={cardConfig.displayName}
-                                class="nc-avatar-cutout"
-                            />
-                        {/if}
-                    </button>
-
-                    <div class="nc-identity-col">
-                        <!-- Editable Display Name -->
-                        {#if isEditingInlineName}
-                            <form
-                                class="nc-inline-form"
-                                onsubmit={(e) => {
-                                    e.preventDefault();
-                                    commitInlineDisplayName();
-                                }}
-                            >
-                                <!-- svelte-ignore a11y_autofocus -->
-                                <input
-                                    type="text"
-                                    class="nc-inline-input"
-                                    bind:value={inlineNameDraft}
-                                    maxlength="26"
-                                    autofocus
-                                    onblur={commitInlineDisplayName}
-                                />
-                            </form>
-                        {:else}
-                            <button
-                                type="button"
-                                class="nc-name-trigger"
-                                onclick={() => {
-                                    inlineNameDraft =
-                                        cardConfig.displayName ||
-                                        $userProfile.x_display_name ||
-                                        $userProfile.x_username;
-                                    isEditingInlineName = true;
-                                }}
-                                title="Click to change display name"
-                            >
-                                <span class="nc-display-name">
-                                    {cardConfig.displayName ||
-                                        $userProfile.x_display_name ||
-                                        $userProfile.x_username}
-                                </span>
-                                <span class="nc-edit-hint">✎</span>
-                            </button>
-                        {/if}
-
-                        <!-- @username Handle -->
-                        <div class="nc-handle">@{cardConfig.username}</div>
-
-                        <!-- Editable Tagline / Status -->
-                        {#if isEditingInlineTagline}
-                            <form
-                                class="nc-inline-form"
-                                onsubmit={(e) => {
-                                    e.preventDefault();
-                                    commitInlineTagline();
-                                }}
-                            >
-                                <!-- svelte-ignore a11y_autofocus -->
-                                <input
-                                    type="text"
-                                    class="nc-inline-input small"
-                                    bind:value={inlineTaglineDraft}
-                                    placeholder="Add a status or tagline..."
-                                    maxlength="40"
-                                    autofocus
-                                    onblur={commitInlineTagline}
-                                />
-                            </form>
-                        {:else}
-                            <button
-                                type="button"
-                                class="nc-tagline-trigger"
-                                onclick={() => {
-                                    inlineTaglineDraft = cardConfig.tagline || "";
-                                    isEditingInlineTagline = true;
-                                }}
-                                title="Click to edit status"
-                            >
-                                {cardConfig.tagline || "✨ add a status..."}
-                            </button>
-                        {/if}
-                    </div>
-                </div>
-
-                <!-- Boxless Floating Stats Row -->
-                <div class="nc-stats-row">
-                    <div class="nc-stat-item">
-                        <span class="nc-stat-label">$UWU</span>
-                        <span class="nc-stat-val">{liveChips.toLocaleString()}</span>
-                    </div>
-                    <div class="nc-stat-divider"></div>
-                    <div class="nc-stat-item">
-                        <span class="nc-stat-label">RECORD</span>
-                        <span class="nc-stat-val">{liveWins}W–{liveLosses}L</span>
-                    </div>
-                    <div class="nc-stat-divider"></div>
-                    <div class="nc-stat-item">
-                        <span class="nc-stat-label">WIN RATE</span>
-                        <span class="nc-stat-val">{liveWinRate}%</span>
-                    </div>
-                    <div class="nc-stat-divider"></div>
-                    <div class="nc-stat-item">
-                        <span class="nc-stat-label">BEST WIN</span>
-                        <span class="nc-stat-val">{liveBestWin.toLocaleString()}</span>
-                    </div>
-                </div>
-
-                <!-- Freehand Drawing Layer -->
-                {#if cardConfig.paintDataUrl}
-                    <img
-                        src={cardConfig.paintDataUrl}
-                        alt=""
-                        class="nc-paint-overlay"
-                        class:layer-behind={cardConfig.paintLayer === "behind"}
-                    />
-                {/if}
-
-                <!-- Stickers Layer -->
-                {#each cardConfig.stickers as stk (stk.id)}
-                    <div
-                        class="nc-sticker-item"
-                        style="
-                            left: {stk.x}%;
-                            top: {stk.y}%;
-                            transform: translate(-50%, -50%) rotate({stk.rotation}deg) scale({stk.scale * 0.78});
-                        "
-                    >
-                        {stk.symbol}
-                    </div>
-                {/each}
-            {/if}
-
-            {#if toastMsg && !$showNamecardStudio}
-                <div class="nc-toast">{toastMsg}</div>
-            {/if}
-        </div>
     {/if}
-</aside>
 
-<!-- RETRO OS WINDOW NAMECARD CUSTOMIZER MODAL (MATCHES SITE-WIDE OS DIALOGS) -->
-{#if $showNamecardStudio && $userProfile}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-        class="win98-modal-backdrop"
-        onclick={() => {
-            stopDraggingSticker();
-            showNamecardStudio.set(false);
-        }}
-    >
-        <div
-            class="win98-dialog nc-studio-dialog"
-            class:expanded-draw={isExpandedDrawView && studioTab === "draw"}
-            onclick={(e) => e.stopPropagation()}
-            onmousemove={handlePreviewPointerMove}
-            onmouseup={stopDraggingSticker}
-            ontouchmove={handlePreviewPointerMove}
-            ontouchend={stopDraggingSticker}
-        >
-            <!-- Classic OS Title Bar -->
-            <div class="title-bar">
-                <div class="title-bar-text">
-                    🪪 Customize Namecard — @{$userProfile.x_username}
-                </div>
-                <div class="title-bar-controls">
-                    <button
-                        type="button"
-                        onclick={() => showNamecardStudio.set(false)}
-                        aria-label="Close"
-                    >
-                        X
-                    </button>
-                </div>
-            </div>
-
-            <div class="dialog-body">
-                <div class="customizer-split">
-                    <!-- LEFT: Live Interactive Card Stage + Zoom/Pan Bar + Name/Tagline Inputs -->
-                    <div class="nc-stage-col">
-                        {#if studioTab === "draw"}
-                            <!-- Zoom, Pan & Workspace Toolbar -->
-                            <div class="nc-viewport-toolbar">
-                                <div class="nc-vp-group">
-                                    <button
-                                        type="button"
-                                        class="win98-btn vp-mini-btn"
-                                        onclick={() => setZoomLevel(canvasZoom - 0.5)}
-                                        disabled={canvasZoom <= 1}
-                                        title="Zoom Out"
-                                    >
-                                        🔍−
-                                    </button>
+    <div class="dialog-body">
+        <div class="customizer-split">
+            <!-- LEFT: Live Interactive Card Stage + Zoom/Pan Bar + Name/Tagline Inputs -->
+            <div class="nc-stage-col">
+                {#if studioTab === "draw"}
+                    <!-- Zoom, Pan & Workspace Toolbar -->
+                    <div class="nc-viewport-toolbar">
+                        <div class="nc-vp-group">
+                            <button
+                                type="button"
+                                class="win98-btn vp-mini-btn"
+                                onclick={() => setZoomLevel(canvasZoom - 0.5)}
+                                disabled={canvasZoom <= 1}
+                                title="Zoom Out"
+                            >
+                                🔍−
+                            </button>
                                     {#each [1, 1.5, 2, 3, 4] as zLvl (zLvl)}
                                         <button
                                             type="button"
@@ -1358,7 +1033,18 @@
                                     class="nc-upper-row studio-upper"
                                     class:dimmed-ui={studioTab === "draw" && dimCardUiWhileDrawing}
                                 >
-                                    <div class="nc-avatar-wrap studio-avatar">
+                                    <button
+                                        type="button"
+                                        class="nc-avatar-wrap studio-avatar interactive"
+                                        onclick={() => {
+                                            if ($userProfile) {
+                                                showAvatarCustomizer.set(true);
+                                            } else {
+                                                promptSignIn("Sign in with 𝕏 to customize your Persona Avatar!");
+                                            }
+                                        }}
+                                        title="Click to customize your Avatar"
+                                    >
                                         {#if cleanAvatarSrc}
                                             <img
                                                 src={cleanAvatarSrc}
@@ -1366,13 +1052,14 @@
                                                 class="nc-avatar-cutout"
                                             />
                                         {/if}
-                                    </div>
+                                    </button>
 
                                     <div class="nc-identity-col">
                                         <div class="nc-display-name studio-name">
                                             {cardConfig.displayName ||
-                                                $userProfile.x_display_name ||
-                                                $userProfile.x_username}
+                                                $userProfile?.x_display_name ||
+                                                $userProfile?.x_username ||
+                                                "Player"}
                                         </div>
                                         <div class="nc-handle studio-handle">@{cardConfig.username}</div>
                                         {#if cardConfig.tagline}
@@ -1983,101 +1670,48 @@
 
                 <div class="dialog-footer">
                     <span class="avatar-rule-hint">
-                        💡 Tip: Drag stickers directly on the card preview, or switch to Draw to sign it.
+                        💡 Tip: Tap the avatar to change your persona, drag stickers on the card, or switch to Draw Studio to sign it.
                     </span>
-                    <button
-                        type="button"
-                        class="win98-btn"
-                        onclick={() => showNamecardStudio.set(false)}
-                    >
-                        Close
-                    </button>
                 </div>
             </div>
-        </div>
-    </div>
-{/if}
+</div>
 
 <style>
     /* 100% UNIFORM MODERN SANS-SERIF FONT STACK ACROSS THE NAMECARD */
     .nc-card,
-    .nc-card *,
-    .nc-collapsed-pill,
-    .nc-collapsed-pill * {
+    .nc-card * {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
         box-sizing: border-box;
     }
 
-    .nc-dock {
-        position: absolute;
-        top: 14px;
-        right: 16px;
-        z-index: 6;
+    .nc-app-shell {
+        width: 100%;
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        background: #c0c0c0;
+        font-family: 'MS Sans Serif', 'Tahoma', Arial, sans-serif;
+        color: #000000;
+        box-sizing: border-box;
         user-select: none;
-        transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
-    .nc-dock.pinned-top {
-        z-index: 12000;
-    }
-
-    /* COLLAPSED COMPACT PILL */
-    .nc-collapsed-pill {
+    .nc-guest-banner {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 6px 12px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.78);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
-        color: #161326;
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    .nc-collapsed-pill.tone-light {
-        background: rgba(18, 19, 36, 0.82);
-        border-color: rgba(255, 255, 255, 0.2);
-        color: #ffffff;
-    }
-
-    .nc-mini-avatar {
-        width: 24px;
-        height: 24px;
-        object-fit: contain;
-        image-rendering: pixelated;
-    }
-
-    .nc-collapsed-name {
-        max-width: 110px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .nc-collapsed-stat {
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        background: #ffffe1;
+        border-bottom: 2px solid #808080;
+        padding: 6px 10px;
         font-size: 11px;
-        font-weight: 600;
-        opacity: 0.75;
+        color: #000000;
     }
 
-    .nc-icon-pill {
-        background: rgba(0, 0, 0, 0.08);
-        border: none;
-        border-radius: 999px;
-        width: 22px;
-        height: 22px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        color: inherit;
-        font-size: 12px;
-        font-weight: 700;
+    .nc-guest-text {
+        font-weight: bold;
     }
 
     /* MAIN NAMECARD CONTAINER */
@@ -3032,5 +2666,62 @@
     .avatar-rule-hint {
         font-size: 10px;
         color: #444444;
+    }
+
+    @media (max-width: 560px) {
+        .nc-zoom-viewport,
+        .nc-zoom-viewport.expanded-vp {
+            height: 224px;
+            padding: 8px;
+        }
+
+        .nc-card.studio-stage,
+        .nc-card.studio-stage.expanded-card {
+            width: 100%;
+            max-width: 336px;
+            height: 196px;
+            padding: 14px 16px 12px;
+            border-radius: 18px;
+        }
+
+        .studio-upper {
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .studio-avatar,
+        .studio-avatar .nc-avatar-cutout {
+            width: 90px;
+            height: 90px;
+        }
+
+        .studio-name {
+            font-size: 18px;
+        }
+
+        .studio-handle {
+            font-size: 12px;
+        }
+
+        .studio-tagline {
+            font-size: 11px;
+        }
+
+        .studio-stats .nc-stat-label {
+            font-size: 8.5px;
+        }
+
+        .studio-stats .nc-stat-val {
+            font-size: 13px;
+        }
+
+        .nc-identity-fields {
+            grid-template-columns: 1fr;
+        }
+
+        .traits-panel,
+        .expanded-draw .traits-panel {
+            max-height: none;
+        }
     }
 </style>
