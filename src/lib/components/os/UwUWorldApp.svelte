@@ -30,6 +30,10 @@
         FOREST_OBJECTS,
         FOREST_COLLISION_MAP,
         FOREST_ANIMATED_TILE_COORDS,
+        MUSEUM_TILES,
+        MUSEUM_OBJECTS,
+        MUSEUM_COLLISION_MAP,
+        MUSEUM_ANIMATED_TILE_COORDS,
         StaticFloorCache,
         drawRichIsometricTile,
         resolveMoveWithSliding,
@@ -37,6 +41,27 @@
         type WorldObject,
         type WorldZone
     } from "$lib/game/isometric/worldMap";
+    import MuseumStudioModal from "./MuseumStudioModal.svelte";
+    import {
+        MUSEUM_GALLERY_FEE,
+        MUSEUM_PEDESTAL_LOCATIONS,
+        isMuseumCuratorAdmin,
+        createEmptyMuseumState,
+        loadMuseumState,
+        saveArtworkToPersonalVault,
+        exhibitArtworkOnSpot,
+        submitArtworkToCuratorQueue,
+        curatorApproveSubmissionToSpot,
+        removeArtworkFromCuratorQueue,
+        vacateMuseumSpot,
+        deleteArtworkFromPersonalVault,
+        toggleMuseumArtworkLike,
+        mergeMuseumSnapshots,
+        getCachedPedestalArtworkCanvas,
+        findPlayerActiveSpot,
+        type ArtworkItem,
+        type MuseumStateSnapshot
+    } from "$lib/game/activities/museumArt";
     import { findPath, type Point } from "$lib/game/isometric/pathfinding";
     import { preloadIsoAssets, drawIsoObjectSprite } from "$lib/game/isometric/isoAssetLoader";
     import {
@@ -101,8 +126,9 @@
     const rouletteManager = new RouletteGameManager();
     const floorCache = new StaticFloorCache();
     const forestFloorCache = new StaticFloorCache();
+    const museumFloorCache = new StaticFloorCache();
 
-    // Active World Zone ('casino' | 'forest')
+    // Active World Zone ('casino' | 'forest' | 'museum')
     let currentZone = $state<WorldZone>("casino");
 
     // Svelte 5 Reactivity Version Counters
@@ -201,6 +227,10 @@
     let showDJModal = $state(false);
     let showArcadeModal = $state(false);
     let showTravelMenu = $state(false);
+    let showMuseumModal = $state(false);
+    let museumModalTab = $state<"inspect" | "studio" | "vault" | "queue">("inspect");
+    let activeMuseumSpot = $state(1);
+    let museumState = $state<MuseumStateSnapshot>(createEmptyMuseumState());
 
     // Persistent Offscreen Graffiti Canvas (48x32)
     let persistentGraffitiCanvas: HTMLCanvasElement | null = null;
@@ -802,9 +832,12 @@
             }
         });
 
-        // Load persistent 24h Sky Wish Lanterns & Arcade Leaderboards
+        // Load persistent 24h Sky Wish Lanterns, Arcade Leaderboards & Museum Exhibits
         loadActiveWishLanterns().then((lanterns) => {
             wishLanterns = lanterns;
+        });
+        loadMuseumState(myUsername).then((mState) => {
+            museumState = mState;
         });
         loadArcadeLeaderboards().then((boards) => {
             arcadeLeaderboards = boards;
@@ -964,6 +997,33 @@
                 }
             }
         };
+        networkManager.onMuseumEventReceived = (payload) => {
+            if (!payload) return;
+            if (payload.snapshot) {
+                museumState = mergeMuseumSnapshots(museumState, payload.snapshot);
+            }
+            if (payload.kind === "exhibit_published" && payload.user) {
+                showToast(
+                    `🏛️ @${payload.user} exhibited "${payload.title || "Artwork"}" on Spot #${payload.spotNumber}!`,
+                    5000
+                );
+            } else if (payload.kind === "curator_approved" && payload.user) {
+                showToast(
+                    `👑 Curator @0xsha3 exhibited @${payload.user}'s "${payload.title || "Artwork"}" on Spot #${payload.spotNumber}!`,
+                    5500
+                );
+            } else if (payload.kind === "queue_submitted" && payload.user) {
+                showToast(
+                    `⏳ @${payload.user} submitted "${payload.title || "Artwork"}" to the Museum Curator Queue!`,
+                    4500
+                );
+            } else if (payload.kind === "exhibit_applauded" && payload.user) {
+                showToast(
+                    `❤️ @${payload.user} applauded "${payload.title || "an artwork"}" in the Museum!`,
+                    3500
+                );
+            }
+        };
         networkManager.onDJTrackChanged = (trackId, djUser) => {
             currentTrackId = trackId;
             if (isMusicPlaying) synth.playTrack(trackId);
@@ -1063,9 +1123,11 @@
     onMount(() => {
         floorCache.build("casino");
         forestFloorCache.build("forest");
+        museumFloorCache.build("museum");
         preloadIsoAssets(() => {
             floorCache.build("casino");
             forestFloorCache.build("forest");
+            museumFloorCache.build("museum");
         });
         initPersistentGraffitiCanvas();
         dealerAvatarSrc = getTransparentDealerDataUrl();
@@ -1078,6 +1140,9 @@
         });
         loadActiveWishLanterns().then((lanterns) => {
             wishLanterns = lanterns;
+        });
+        loadMuseumState(myUsername).then((mState) => {
+            museumState = mState;
         });
         loadArcadeLeaderboards().then((boards) => {
             arcadeLeaderboards = boards;
@@ -1392,8 +1457,19 @@
             currentTrackId = 11; // Whispering Woods Lullaby (Ambient)
             if (isMusicPlaying) synth.playTrack(11);
             showToast(notice || "🌲 Entered the Whispering Woods — Calm Acoustic Social Sanctuary!", 4500);
+        } else if (targetZone === "museum") {
+            currentTrackId = 9; // Nocturne in Cyber Minor (Classical Gallery Vibe)
+            if (isMusicPlaying) synth.playTrack(9);
+            loadMuseumState(myUsername).then((mState) => {
+                museumState = mState;
+            });
+            showToast(
+                notice ||
+                    "🏛️ Entered the UwU Grand Art Museum — Click any of the 25 Pedestals to Inspect or Exhibit 2D & 3D Art!",
+                5000
+            );
         } else {
-            if (currentTrackId >= 11) currentTrackId = 3;
+            if (currentTrackId >= 9) currentTrackId = 3;
             if (isMusicPlaying) synth.playTrack(currentTrackId);
             showToast(notice || "🎲 Returned to the High Roller Casino Lounge!", 4000);
         }
@@ -1477,6 +1553,14 @@
                 else if (minesPhase !== "playing") startCyberMines();
                 return;
             }
+        } else if (currentZone === "museum") {
+            const nearestPed = getNearestMuseumPedestal(myX, myY, 3.3);
+            if (nearestPed) {
+                openMuseumSpotInspector(nearestPed.spotNumber, "inspect");
+                return;
+            }
+            openMuseumSpotInspector(activeMuseumSpot || 1, "studio");
+            return;
         } else {
             if (activeStation === "fishing") {
                 castFishingLine();
@@ -1491,6 +1575,169 @@
                 return;
             }
         }
+    }
+
+    function getNearestMuseumPedestal(px: number, py: number, maxDist = 2.8) {
+        let best: (typeof MUSEUM_PEDESTAL_LOCATIONS)[number] | null = null;
+        let bestDist = Infinity;
+        for (const ped of MUSEUM_PEDESTAL_LOCATIONS) {
+            const d = gridDistance(px, py, ped.x, ped.y);
+            if (d <= maxDist && d < bestDist) {
+                bestDist = d;
+                best = ped;
+            }
+        }
+        return best;
+    }
+
+    function openMuseumSpotInspector(
+        spotNumber: number,
+        tab: "inspect" | "studio" | "vault" | "queue" = "inspect"
+    ) {
+        activeMuseumSpot = spotNumber;
+        museumModalTab = tab;
+        showMuseumModal = true;
+        synth.playNatureChimeSfx();
+        loadMuseumState(myUsername).then((mState) => {
+            museumState = mState;
+        });
+    }
+
+    async function handleSaveArtworkToVault(artwork: ArtworkItem) {
+        if (!myUsername) return;
+        const res = await saveArtworkToPersonalVault(artwork, museumState);
+        museumState = res.snapshot;
+        synth.playNatureChimeSfx();
+        showToast(`💾 Saved "${artwork.title}" to your permanent Personal Art Vault!`, 4000);
+    }
+
+    async function handleExhibitArtworkOnSpot(artwork: ArtworkItem, spotNumber: number) {
+        if (!myUsername) return;
+        const isCurator = isMuseumCuratorAdmin(myUsername);
+        const currentMySpot = findPlayerActiveSpot(myUsername, museumState);
+        const needsFee = !isCurator && currentMySpot === null;
+
+        if (needsFee && !ensureEnoughChips(MUSEUM_GALLERY_FEE)) {
+            return;
+        }
+
+        const res = await exhibitArtworkOnSpot(artwork, spotNumber, myUsername, museumState);
+        if (!res.ok) {
+            showToast(`⚠️ ${res.error || "Could not exhibit on this spot."}`, 4500);
+            return;
+        }
+
+        if (res.chargedFee) {
+            recordGameOutcome(-MUSEUM_GALLERY_FEE, "neutral", 0);
+        }
+
+        museumState = res.snapshot;
+        synth.playWinFanfare();
+        triggerConfettiCelebration();
+        networkManager?.broadcastMuseumEvent({
+            kind: "exhibit_published",
+            user: myUsername,
+            spotNumber,
+            title: artwork.title,
+            snapshot: museumState
+        });
+        showToast(
+            `🏛️ "${artwork.title}" is now exhibited on Museum Pedestal Spot #${spotNumber}!`,
+            5500
+        );
+    }
+
+    async function handleSubmitArtworkToQueue(artwork: ArtworkItem) {
+        if (!myUsername) return;
+        museumState = await submitArtworkToCuratorQueue(artwork, museumState);
+        synth.playNatureChimeSfx();
+        networkManager?.broadcastMuseumEvent({
+            kind: "queue_submitted",
+            user: myUsername,
+            title: artwork.title,
+            snapshot: museumState
+        });
+        showToast(
+            `⏳ Submitted "${artwork.title}" to the Undecided Queue for Curator @0xsha3!`,
+            5000
+        );
+    }
+
+    async function handleCuratorApproveToSpot(artworkId: string, spotNumber: number) {
+        if (!myUsername) return;
+        const res = await curatorApproveSubmissionToSpot(
+            artworkId,
+            spotNumber,
+            myUsername,
+            museumState
+        );
+        if (!res.ok) {
+            showToast(`⚠️ ${res.error || "Could not approve submission."}`, 4500);
+            return;
+        }
+        museumState = res.snapshot;
+        const approvedArt = museumState.spots[spotNumber];
+        synth.playWinFanfare();
+        triggerConfettiCelebration();
+        networkManager?.broadcastMuseumEvent({
+            kind: "curator_approved",
+            user: approvedArt?.artistUsername || myUsername,
+            spotNumber,
+            title: approvedArt?.title || "Artwork",
+            snapshot: museumState
+        });
+        showToast(
+            `👑 Approved & placed "${approvedArt?.title || "Artwork"}" onto Spot #${spotNumber}!`,
+            5000
+        );
+    }
+
+    async function handleRemoveFromCuratorQueue(artworkId: string) {
+        if (!myUsername) return;
+        museumState = await removeArtworkFromCuratorQueue(artworkId, myUsername, museumState);
+        networkManager?.broadcastMuseumEvent({
+            kind: "queue_updated",
+            snapshot: museumState
+        });
+    }
+
+    async function handleVacateMuseumSpot(spotNumber: number) {
+        if (!myUsername) return;
+        museumState = await vacateMuseumSpot(spotNumber, myUsername, museumState);
+        synth.playChipSfx();
+        networkManager?.broadcastMuseumEvent({
+            kind: "spot_vacated",
+            spotNumber,
+            snapshot: museumState
+        });
+        showToast(
+            `📦 Vacated Spot #${spotNumber} — Artwork remains safely in its creator's Personal Art Vault!`,
+            4500
+        );
+    }
+
+    async function handleDeleteArtworkFromVault(artworkId: string) {
+        if (!myUsername) return;
+        museumState = await deleteArtworkFromPersonalVault(artworkId, myUsername, museumState);
+        synth.playChipSfx();
+        networkManager?.broadcastMuseumEvent({
+            kind: "vault_updated",
+            snapshot: museumState
+        });
+    }
+
+    async function handleToggleMuseumLike(artworkId: string) {
+        if (!myUsername) return;
+        const res = await toggleMuseumArtworkLike(artworkId, myUsername, museumState);
+        museumState = res.snapshot;
+        synth.playNatureChimeSfx();
+        const art = museumState.artworksById[artworkId];
+        networkManager?.broadcastMuseumEvent({
+            kind: "exhibit_applauded",
+            user: myUsername,
+            title: art?.title,
+            snapshot: museumState
+        });
     }
 
     function ensureEnoughChips(wager: number): boolean {
@@ -2940,6 +3187,26 @@
                 }
                 pendingInteractionTarget = "dj";
             }
+        } else if (currentZone === "museum") {
+            pendingInteractionTarget = null;
+            const clickedPed = getNearestMuseumPedestal(gridPos.x, gridPos.y, 1.35);
+            if (clickedPed) {
+                if (gridDistance(myX, myY, clickedPed.x, clickedPed.y) <= 3.3) {
+                    openMuseumSpotInspector(clickedPed.spotNumber, "inspect");
+                    return;
+                }
+                pendingInteractionTarget = `museum_spot_${clickedPed.spotNumber}`;
+                activeWaypoints = findPath(
+                    myX,
+                    myY,
+                    clickedPed.x,
+                    Math.min(28.5, clickedPed.y + 0.9),
+                    MUSEUM_COLLISION_MAP,
+                    MAP_SIZE
+                );
+                waypointStuckFrames = 0;
+                return;
+            }
         } else {
             pendingInteractionTarget = null;
             if (gx >= 21 && gx <= 23 && gy >= 22 && gy <= 24) {
@@ -2952,7 +3219,12 @@
             }
         }
 
-        const activeCollision = currentZone === "forest" ? FOREST_COLLISION_MAP : COLLISION_MAP;
+        const activeCollision =
+            currentZone === "forest"
+                ? FOREST_COLLISION_MAP
+                : currentZone === "museum"
+                  ? MUSEUM_COLLISION_MAP
+                  : COLLISION_MAP;
         activeWaypoints = findPath(myX, myY, gridPos.x, gridPos.y, activeCollision, MAP_SIZE);
         waypointStuckFrames = 0;
     }
@@ -3190,7 +3462,8 @@
             !showGuideModal &&
             !showLeaderboardModal &&
             !showFireflyCatcherModal &&
-            !showLanternModal
+            !showLanternModal &&
+            !showMuseumModal
         ) {
             if (keysPressed["KeyW"] || keysPressed["ArrowUp"] || keysPressed["w"]) {
                 moveX -= 1;
@@ -3236,6 +3509,10 @@
                     else if (pendingInteractionTarget === "dj") showDJModal = true;
                     else if (pendingInteractionTarget === "catch_firefly") openFireflyCatcher(activeWildFireflyId);
                     else if (pendingInteractionTarget === "lantern_shrine") openLanternSanctuary();
+                    else if (pendingInteractionTarget.startsWith("museum_spot_")) {
+                        const sNum = parseInt(pendingInteractionTarget.replace("museum_spot_", ""), 10) || 1;
+                        openMuseumSpotInspector(sNum, "inspect");
+                    }
                     pendingInteractionTarget = null;
                 }
             } else {
@@ -3278,12 +3555,18 @@
             }
         }
 
-        // Seamless East/West Portal Edge Walking Transition between Casino & Whispering Woods
+        // Seamless East/West Portal Edge Walking Transition between Casino, Whispering Woods & Grand Art Museum
         if (currentZone === "casino" && myX >= 30.2 && myY >= 13.8 && myY <= 18.0) {
             switchWorldZone("forest", 2.4, 16.0);
             return;
+        } else if (currentZone === "casino" && myX <= 1.6 && myY >= 13.8 && myY <= 18.0) {
+            switchWorldZone("museum", 29.4, 16.0);
+            return;
         } else if (currentZone === "forest" && myX <= 1.6 && myY >= 13.8 && myY <= 18.0) {
             switchWorldZone("casino", 29.4, 16.0);
+            return;
+        } else if (currentZone === "museum" && myX >= 30.2 && myY >= 13.8 && myY <= 18.0) {
+            switchWorldZone("casino", 2.4, 16.0);
             return;
         }
 
@@ -3352,6 +3635,8 @@
                 rouletteAngleState = rouletteManager.currentAngle;
                 rouletteSpinningState = true;
             }
+        } else if (currentZone === "museum") {
+            activeStation = "none";
         } else {
             // Animate Fireflies clustered near the Firefly Lantern Shrine (22, 23)
             const nowMs = Date.now();
@@ -3390,7 +3675,9 @@
             ? zone.name
             : currentZone === "forest"
               ? "🌲 Whispering Woods Sanctuary"
-              : "🎲 High Roller Casino Lounge";
+              : currentZone === "museum"
+                ? "🏛️ UwU Grand Art Museum"
+                : "🎲 High Roller Casino Lounge";
 
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
@@ -3417,6 +3704,10 @@
             grad.addColorStop(0, "#061814");
             grad.addColorStop(0.5, "#0c2922");
             grad.addColorStop(1, "#14382c");
+        } else if (currentZone === "museum") {
+            grad.addColorStop(0, "#100e1c");
+            grad.addColorStop(0.5, "#19152b");
+            grad.addColorStop(1, "#241e3c");
         } else {
             grad.addColorStop(0, "#050510");
             grad.addColorStop(0.5, "#0d061c");
@@ -3425,7 +3716,12 @@
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        const activeFloor = currentZone === "forest" ? forestFloorCache : floorCache;
+        const activeFloor =
+            currentZone === "forest"
+                ? forestFloorCache
+                : currentZone === "museum"
+                  ? museumFloorCache
+                  : floorCache;
         if (activeFloor.canvas) {
             const mapOriginScreenX = canvasWidth / 2 - cameraX;
             const mapOriginScreenY = canvasHeight / 2 - cameraY;
@@ -3434,7 +3730,12 @@
             ctx.drawImage(activeFloor.canvas, drawX, drawY);
         }
 
-        const animCoords = currentZone === "forest" ? FOREST_ANIMATED_TILE_COORDS : ANIMATED_TILE_COORDS;
+        const animCoords =
+            currentZone === "forest"
+                ? FOREST_ANIMATED_TILE_COORDS
+                : currentZone === "museum"
+                  ? MUSEUM_ANIMATED_TILE_COORDS
+                  : ANIMATED_TILE_COORDS;
         for (let i = 0; i < animCoords.length; i++) {
             const t = animCoords[i];
             const screen = gridToScreen(t.x + 0.5, t.y + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
@@ -3449,7 +3750,12 @@
             drawRichIsometricTile(ctx, screen.x, screen.y, t.type, t.x, t.y, timeMs);
         }
 
-        const activeCollision = currentZone === "forest" ? FOREST_COLLISION_MAP : COLLISION_MAP;
+        const activeCollision =
+            currentZone === "forest"
+                ? FOREST_COLLISION_MAP
+                : currentZone === "museum"
+                  ? MUSEUM_COLLISION_MAP
+                  : COLLISION_MAP;
 
         if (hoveredTile) {
             const hx = hoveredTile.x;
@@ -3516,7 +3822,12 @@
         // 3. Collect & Depth-Sort 3D World Objects, Standing Transparent Unicorn House Dealers & Players
         renderEntities.length = 0;
 
-        const objectsList = currentZone === "forest" ? FOREST_OBJECTS : WORLD_OBJECTS;
+        const objectsList =
+            currentZone === "forest"
+                ? FOREST_OBJECTS
+                : currentZone === "museum"
+                  ? MUSEUM_OBJECTS
+                  : WORLD_OBJECTS;
         for (let i = 0; i < objectsList.length; i++) {
             const obj = objectsList[i];
             renderEntities.push({
@@ -4360,6 +4671,130 @@
             ctx.font = "bold 8px monospace";
             ctx.fillStyle = "#00ff88";
             ctx.fillText("CYBER MINES 5x5", 0, -40);
+        } else if (obj.type === "museum_pedestal") {
+            const spotNum = obj.data?.spotNumber || 1;
+            const art = museumState.spots[spotNum] || null;
+            const isNear = gridDistance(myX, myY, obj.x, obj.y) <= 2.9;
+
+            // Ground shadow
+            ctx.fillStyle = "rgba(0, 0, 0, 0.42)";
+            ctx.beginPath();
+            ctx.ellipse(0, 5, 28, 14, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Golden Spotlight Cone on Floor
+            const spotGlow = ctx.createRadialGradient(0, -10, 4, 0, -10, 42);
+            spotGlow.addColorStop(
+                0,
+                art
+                    ? "rgba(255, 224, 130, 0.34)"
+                    : isNear
+                      ? "rgba(0, 229, 255, 0.32)"
+                      : "rgba(180, 160, 255, 0.16)"
+            );
+            spotGlow.addColorStop(1, "rgba(255, 215, 0, 0)");
+            ctx.fillStyle = spotGlow;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 36, 18, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 3D Marble Plinth Base + Stepped Column
+            drawIsoPrism(
+                ctx,
+                22,
+                11,
+                8,
+                "#e2dfd7",
+                "#c5c0b4",
+                "#9e988c",
+                art ? "#d4af37" : "rgba(255,255,255,0.45)"
+            );
+            ctx.save();
+            ctx.translate(0, -8);
+            drawIsoPrism(
+                ctx,
+                17,
+                8.5,
+                18,
+                "#f5f2eb",
+                "#d8d3c8",
+                "#b5afa2",
+                art ? "#ffd700" : "rgba(180,220,255,0.5)"
+            );
+            ctx.restore();
+
+            // Velvet Rope Brass Posts on Left & Right
+            [-23, 23].forEach((rx) => {
+                ctx.fillStyle = "#d4af37";
+                ctx.fillRect(rx - 1.5, -14, 3, 15);
+                ctx.beginPath();
+                ctx.arc(rx, -15, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.strokeStyle = "#b71c1c";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-23, -11);
+            ctx.quadraticCurveTo(0, -3, 23, -11);
+            ctx.stroke();
+
+            // Front Brass Number Plaque on Plinth
+            ctx.fillStyle = "#2b1d03";
+            ctx.fillRect(-13, -19, 26, 10);
+            ctx.strokeStyle = "#ffd700";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(-13, -19, 26, 10);
+            ctx.fillStyle = "#ffd700";
+            ctx.font = 'bold 8px "MS Sans Serif", Tahoma, monospace';
+            ctx.textAlign = "center";
+            ctx.fillText(`#${spotNum}`, 0, -11.5);
+
+            if (art) {
+                const cachedArtCanvas = getCachedPedestalArtworkCanvas(art);
+                const hoverBob = Math.sin(timeMs / 420 + spotNum) * 2;
+                if (cachedArtCanvas) {
+                    ctx.drawImage(cachedArtCanvas, -40, -104 + hoverBob, 80, 80);
+                }
+
+                // Floating Museum Exhibit Title & Artist Pill above Artwork
+                const badgeText = `${art.artType === "3d" ? "🧱" : "🎨"} @${art.artistUsername}${art.likes.length > 0 ? ` ❤️${art.likes.length}` : ""}`;
+                ctx.font = 'bold 9px "MS Sans Serif", Tahoma, sans-serif';
+                const bw = Math.max(58, ctx.measureText(badgeText).width + 12);
+                const by = -114 + hoverBob;
+                ctx.fillStyle = isNear ? "rgba(26, 15, 54, 0.95)" : "rgba(12, 10, 24, 0.86)";
+                ctx.fillRect(-bw / 2, by, bw, 15);
+                ctx.strokeStyle = isNear ? "#00e5ff" : "#ffd700";
+                ctx.lineWidth = isNear ? 1.5 : 1;
+                ctx.strokeRect(-bw / 2, by, bw, 15);
+                ctx.fillStyle = "#ffffff";
+                ctx.fillText(badgeText, 0, by + 10.5);
+            } else {
+                // Open Pedestal Holographic Invitation Crystal
+                const bob = Math.sin(timeMs / 280 + spotNum) * 3.5;
+                ctx.save();
+                ctx.translate(0, -44 + bob);
+                ctx.fillStyle = isNear ? "rgba(0, 229, 255, 0.85)" : "rgba(255, 215, 0, 0.65)";
+                ctx.beginPath();
+                ctx.moveTo(0, -11);
+                ctx.lineTo(9, 0);
+                ctx.lineTo(0, 11);
+                ctx.lineTo(-9, 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.restore();
+
+                ctx.font = "bold 8px monospace";
+                ctx.fillStyle = isNear ? "#00ffff" : "#ffe082";
+                ctx.textAlign = "center";
+                ctx.fillText(
+                    isNear ? `✨ SPOT #${spotNum} [CLICK/E]` : `SPOT #${spotNum} [OPEN]`,
+                    0,
+                    -64 + bob
+                );
+            }
         }
 
         ctx.restore();
@@ -4388,6 +4823,22 @@
                 promptText = "🎨 Graffiti Wall [Press E / Click]";
             } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
                 promptText = "🌲 Walk East → Whispering Woods";
+            } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
+                promptText = "🏛️ Walk West → Grand Art Museum";
+            }
+        } else if (currentZone === "museum") {
+            const nearPed = getNearestMuseumPedestal(myX, myY, 3.1);
+            if (nearPed) {
+                const art = museumState.spots[nearPed.spotNumber];
+                if (art) {
+                    promptText = `🏛️ Spot #${nearPed.spotNumber}: "${art.title}" by @${art.artistUsername} [Press E / Click to Inspect]`;
+                } else {
+                    promptText = `✨ Open Spot #${nearPed.spotNumber} (${nearPed.wingName}) [Press E / Click to Exhibit 2D or 3D Art]`;
+                }
+            } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
+                promptText = "🎲 Walk East → Casino Lounge";
+            } else {
+                promptText = "🎨 Press [E] or Click Any Pedestal to Open 2D/3D Art Studio & Vault";
             }
         } else {
             if (activeStation === "campfire") {
@@ -4446,6 +4897,17 @@
             } else if ((hx === 15 || hx === 16) && hy === 2) hoverLabel = "🪩 DJ Booth";
             else if ((hx === 27 || hx === 28) && hy === 15) hoverLabel = "🎨 Graffiti Wall";
             else if (hx >= 30 && hy >= 14 && hy <= 17) hoverLabel = "🌲 Whispering Woods";
+            else if (hx <= 1 && hy >= 14 && hy <= 17) hoverLabel = "🏛️ Grand Art Museum";
+        } else if (currentZone === "museum") {
+            const ped = getNearestMuseumPedestal(hx + 0.5, hy + 0.5, 1.25);
+            if (ped) {
+                const art = museumState.spots[ped.spotNumber];
+                hoverLabel = art
+                    ? `🏛️ Spot #${ped.spotNumber}: "${art.title}" (@${art.artistUsername})`
+                    : `✨ Spot #${ped.spotNumber} — Open Pedestal (Click to Exhibit)`;
+            } else if (hx >= 30 && hy >= 14 && hy <= 17) {
+                hoverLabel = "🎲 Casino Lounge";
+            }
         } else {
             if (hx >= 14 && hx <= 17 && hy >= 14 && hy <= 17) hoverLabel = "🔥 Campfire Circle";
             else if (
@@ -4540,9 +5002,20 @@
                         <button class="travel-item woods-item" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>
                             🌲 Whispering Woods
                         </button>
+                        <button class="travel-item museum-item" onclick={() => teleportTo(16.0, 15.5, "Grand Art Museum", "museum")}>
+                            🏛️ Grand Art Museum
+                        </button>
                     </div>
                 {/if}
             </div>
+
+            <button
+                class="win98-btn museum-open-btn"
+                onclick={() => openMuseumSpotInspector(activeMuseumSpot || 1, currentZone === "museum" ? "inspect" : "studio")}
+                title="Open 2D & 3D IsoBrick Art Studio, Personal Vault & Museum Exhibits"
+            >
+                🏛️ Art Studio
+            </button>
 
             <button class="win98-btn arcade-open-btn" onclick={() => openArcadeModal("brick")}>
                 🕹️ Arcade
@@ -5841,6 +6314,11 @@
                             <p>Lush forest hangout with Campfire Trivia, Picnic, Koi Pond & Fireflies.</p>
                             <button class="win98-btn" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>Teleport</button>
                         </div>
+                        <div class="guide-card">
+                            <div class="guide-card-title">🏛️ Grand Art Museum</div>
+                            <p>25 Exhibition Pedestals, 2D Gallery Easel, 3D IsoBrick Lego Builder & Personal Art Vault.</p>
+                            <button class="win98-btn" onclick={() => teleportTo(16.0, 15.5, "Grand Art Museum", "museum")}>Teleport</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -6639,6 +7117,33 @@
         </div>
     {/if}
 
+    <!-- Modal 7: 🏛️ UWU GRAND ART MUSEUM — 2D GALLERY EASEL, 3D ISOBRICK BUILDER, PERSONAL ART VAULT & @0XSHA3 CURATOR DESK -->
+    {#if showMuseumModal}
+        <MuseumStudioModal
+            {museumState}
+            initialTab={museumModalTab}
+            initialSpotNumber={activeMuseumSpot}
+            myUserId={myId}
+            myUsername={myUsername}
+            myDisplayName={$userProfile?.x_display_name || myUsername}
+            myAvatarUrl={$userProfile?.avatar_url || "/unicorn.png"}
+            myChips={chips}
+            onClose={() => (showMuseumModal = false)}
+            onSaveToVault={handleSaveArtworkToVault}
+            onExhibitOnSpot={handleExhibitArtworkOnSpot}
+            onSubmitToQueue={handleSubmitArtworkToQueue}
+            onCuratorApproveToSpot={handleCuratorApproveToSpot}
+            onRemoveFromQueue={handleRemoveFromCuratorQueue}
+            onVacateSpot={handleVacateMuseumSpot}
+            onDeleteFromVault={handleDeleteArtworkFromVault}
+            onToggleLike={handleToggleMuseumLike}
+            onTipArtist={(artistUsername) => {
+                showMuseumModal = false;
+                openSendUwuModal(artistUsername);
+            }}
+        />
+    {/if}
+
     <!-- Full-Game 𝕏 Authentication Gate Overlay (Prevents anon joins, DB spam & graffiti resets) -->
     {#if !$userProfile}
         <div class="world-auth-gate-overlay" onclick={(e) => e.stopPropagation()}>
@@ -6922,6 +7427,18 @@
         color: #000000;
         font-weight: bold;
         padding: 2px 7px;
+    }
+
+    .museum-open-btn {
+        background: #4a148c;
+        color: #ffd700;
+        font-weight: bold;
+        padding: 2px 7px;
+    }
+
+    .museum-item {
+        color: #4a148c;
+        font-weight: bold;
     }
 
     .send-uwu-btn {

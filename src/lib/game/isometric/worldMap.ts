@@ -12,10 +12,11 @@
 
 import { TILE_WIDTH, TILE_HEIGHT, clamp } from './isoMath';
 import { drawIsoTileSprite, drawIsoDetailSprite } from './isoAssetLoader';
+import { MUSEUM_PEDESTAL_LOCATIONS } from '../activities/museumArt';
 
 export const MAP_SIZE = 32;
 
-export type WorldZone = 'casino' | 'forest';
+export type WorldZone = 'casino' | 'forest' | 'museum';
 
 export enum TileType {
     EMPTY = 0,
@@ -38,7 +39,8 @@ export enum TileType {
     GRASS_MEADOW = 17,
     FLOWER_PATCH = 18,
     STONE_PATH = 19,
-    FOREST_PORTAL = 20
+    FOREST_PORTAL = 20,
+    MUSEUM_PORTAL = 21
 }
 
 export interface WorldObject {
@@ -71,7 +73,8 @@ export interface WorldObject {
         | 'canoe_prop'
         | 'club_speaker'
         | 'arcade_cabinet'
-        | 'mines_table';
+        | 'mines_table'
+        | 'museum_pedestal';
     x: number;
     y: number;
     z?: number;
@@ -92,7 +95,7 @@ export interface ZoneTrigger {
     maxX: number;
     minY: number;
     maxY: number;
-    type: 'casino' | 'nightclub' | 'plaza' | 'vault' | 'arcade' | 'forest';
+    type: 'casino' | 'nightclub' | 'plaza' | 'vault' | 'arcade' | 'forest' | 'museum';
 }
 
 export const WORLD_TILES: number[][] = [];
@@ -103,6 +106,12 @@ for (let y = 0; y < MAP_SIZE; y++) {
     WORLD_TILES[y] = [];
     COLLISION_MAP[y] = [];
     for (let x = 0; x < MAP_SIZE; x++) {
+        // Walkable West Museum Portal Gateway at x === 0, y in 14..17
+        if (x === 0 && y >= 14 && y <= 17) {
+            WORLD_TILES[y][x] = TileType.MUSEUM_PORTAL;
+            COLLISION_MAP[y][x] = false;
+            continue;
+        }
         // Walkable East Forest Portal Gateway at x === 31, y in 14..17
         if (x === MAP_SIZE - 1 && y >= 14 && y <= 17) {
             WORLD_TILES[y][x] = TileType.FOREST_PORTAL;
@@ -213,7 +222,8 @@ for (let y = 0; y < MAP_SIZE; y++) {
             t === TileType.CHECKER_DARK ||
             t === TileType.WATER ||
             t === TileType.DICE_SEAT ||
-            t === TileType.FOREST_PORTAL
+            t === TileType.FOREST_PORTAL ||
+            t === TileType.MUSEUM_PORTAL
         ) {
             ANIMATED_TILE_COORDS.push({ x, y, type: t });
         }
@@ -253,12 +263,12 @@ export const WORLD_OBJECTS: WorldObject[] = [
         type: 'banner_sign',
         x: 5.5,
         y: 10.2,
-        width: 4.0,
+        width: 4.2,
         height: 0.6,
         depthOffset: -120,
-        title: 'VIP LOUNGE',
-        subtitle: 'CHILL & VOICE HANGOUT',
-        badgeColor: '#00ffff',
+        title: '← GRAND MUSEUM & VIP',
+        subtitle: '← MUSEUM GATE • 2D EASELS & 3D LEGO',
+        badgeColor: '#e0b0ff',
         solidTiles: []
     },
     {
@@ -547,6 +557,8 @@ const interactiveWalkableTiles = [
     { x: 18, y: 14 }, { x: 19, y: 14 }, { x: 20, y: 14 }, // Roulette Mats Row 1
     { x: 18, y: 15 }, { x: 19, y: 15 }, { x: 20, y: 15 }, // Roulette Mats Row 2
     { x: 15, y: 16 }, { x: 16, y: 16 },                   // Central Spawn
+    { x: 0, y: 14 }, { x: 0, y: 15 }, { x: 0, y: 16 }, { x: 0, y: 17 },
+    { x: 1, y: 14 }, { x: 1, y: 15 }, { x: 1, y: 16 }, { x: 1, y: 17 },     // West Museum Portal Trail
     { x: 30, y: 14 }, { x: 30, y: 15 }, { x: 30, y: 16 }, { x: 30, y: 17 },
     { x: 31, y: 14 }, { x: 31, y: 15 }, { x: 31, y: 16 }, { x: 31, y: 17 }  // East Forest Portal Trail
 ];
@@ -936,14 +948,261 @@ export const FOREST_ZONES: ZoneTrigger[] = [
     }
 ];
 
+// ============================================================================
+// CONNECTED SOCIAL & CREATIVE ZONE: 🏛️ UWU GRAND ART MUSEUM (25 PEDESTAL SPOTS)
+// ============================================================================
+export const MUSEUM_TILES: number[][] = [];
+export const MUSEUM_COLLISION_MAP: boolean[][] = [];
+export const MUSEUM_ANIMATED_TILE_COORDS: Array<{ x: number; y: number; type: TileType }> = [];
+
+const museumPedestalTileSet = new Set(
+    MUSEUM_PEDESTAL_LOCATIONS.map((p) => `${Math.floor(p.x)},${Math.floor(p.y)}`)
+);
+
+for (let y = 0; y < MAP_SIZE; y++) {
+    MUSEUM_TILES[y] = [];
+    MUSEUM_COLLISION_MAP[y] = [];
+    for (let x = 0; x < MAP_SIZE; x++) {
+        // Walkable East Return Portal back to Casino West VIP Lounge (x === 31, y in 14..17)
+        if (x === MAP_SIZE - 1 && y >= 14 && y <= 17) {
+            MUSEUM_TILES[y][x] = TileType.MUSEUM_PORTAL;
+            MUSEUM_COLLISION_MAP[y][x] = false;
+            continue;
+        }
+        // Museum Perimeter Architecture Walls
+        if (x === 0 || x === MAP_SIZE - 1 || y === 0 || y === MAP_SIZE - 1) {
+            MUSEUM_TILES[y][x] = TileType.WALL_BRICK;
+            MUSEUM_COLLISION_MAP[y][x] = true;
+            continue;
+        }
+
+        // Gold-Trimmed Spotlight Mat directly under each of the 25 Exhibit Pedestals
+        if (museumPedestalTileSet.has(`${x},${y}`)) {
+            MUSEUM_TILES[y][x] = TileType.GOLD_BORDER;
+            MUSEUM_COLLISION_MAP[y][x] = false;
+            continue;
+        }
+
+        // Royal Velvet Gallery Carpet Grand Cross-Walkways (x = 15..16 or y = 15..16)
+        if (
+            ((x === 15 || x === 16) && y >= 2 && y <= 29) ||
+            ((y === 15 || y === 16) && x >= 2 && x <= 30)
+        ) {
+            MUSEUM_TILES[y][x] = TileType.VIP_WALKWAY;
+            MUSEUM_COLLISION_MAP[y][x] = false;
+            continue;
+        }
+
+        // Central Grand Rotunda Reflecting Fountain (x: 15..16, y: 15..16 is walkway, surround 13..18 is Gold/Marble)
+        if (x >= 13 && x <= 18 && y >= 13 && y <= 18) {
+            MUSEUM_TILES[y][x] = (x + y) % 2 === 0 ? TileType.GOLD_BORDER : TileType.MARBLE_WHITE;
+            MUSEUM_COLLISION_MAP[y][x] = false;
+            continue;
+        }
+
+        // Gallery Wing Warm Parquet Courts (NW, NE, SW, SE)
+        if (
+            (x >= 4 && x <= 14 && y >= 4 && y <= 11) ||
+            (x >= 17 && x <= 27 && y >= 4 && y <= 11) ||
+            (x >= 4 && x <= 14 && y >= 20 && y <= 27) ||
+            (x >= 17 && x <= 27 && y >= 20 && y <= 27)
+        ) {
+            MUSEUM_TILES[y][x] = TileType.WOOD_PARQUET;
+            MUSEUM_COLLISION_MAP[y][x] = false;
+            continue;
+        }
+
+        // Polished Carrara Marble Gallery Floors
+        MUSEUM_TILES[y][x] = TileType.MARBLE_WHITE;
+        MUSEUM_COLLISION_MAP[y][x] = false;
+    }
+}
+
+for (let y = 0; y < MAP_SIZE; y++) {
+    for (let x = 0; x < MAP_SIZE; x++) {
+        const t = MUSEUM_TILES[y][x];
+        if (t === TileType.WATER || t === TileType.MUSEUM_PORTAL) {
+            MUSEUM_ANIMATED_TILE_COORDS.push({ x, y, type: t });
+        }
+    }
+}
+
+export const MUSEUM_OBJECTS: WorldObject[] = [
+    // --- 5 GRAND GALLERY WING ARCHWAYS ---
+    {
+        id: 'museum-banner-rotunda',
+        type: 'banner_sign',
+        x: 16.0,
+        y: 9.8,
+        width: 4.6,
+        height: 0.6,
+        depthOffset: -120,
+        title: '🏛️ UWU GRAND ART MUSEUM',
+        subtitle: '25 EXHIBITS • 2D EASELS & 3D ISOLEGO • CURATOR @0XSHA3',
+        badgeColor: '#ffd700',
+        solidTiles: []
+    },
+    {
+        id: 'museum-banner-nw',
+        type: 'banner_sign',
+        x: 9.5,
+        y: 3.2,
+        width: 4.0,
+        height: 0.6,
+        depthOffset: -120,
+        title: 'NW RENAISSANCE HALL',
+        subtitle: 'EXHIBITION SPOTS #1 – #5',
+        badgeColor: '#ff99cc',
+        solidTiles: []
+    },
+    {
+        id: 'museum-banner-ne',
+        type: 'banner_sign',
+        x: 22.5,
+        y: 3.2,
+        width: 4.0,
+        height: 0.6,
+        depthOffset: -120,
+        title: 'NE VOXEL PAVILION',
+        subtitle: 'EXHIBITION SPOTS #6 – #10',
+        badgeColor: '#00ffff',
+        solidTiles: []
+    },
+    {
+        id: 'museum-banner-sw',
+        type: 'banner_sign',
+        x: 9.5,
+        y: 19.6,
+        width: 4.0,
+        height: 0.6,
+        depthOffset: -120,
+        title: 'SW CONTEMPORARY WING',
+        subtitle: 'EXHIBITION SPOTS #16 – #20',
+        badgeColor: '#00ff88',
+        solidTiles: []
+    },
+    {
+        id: 'museum-banner-se',
+        type: 'banner_sign',
+        x: 22.5,
+        y: 19.6,
+        width: 4.0,
+        height: 0.6,
+        depthOffset: -120,
+        title: 'SE DIGITAL & HOLO WING',
+        subtitle: 'EXHIBITION SPOTS #21 – #25 • CASINO →',
+        badgeColor: '#e0b0ff',
+        solidTiles: []
+    },
+
+    // --- 25 INTERACTIVE MUSEUM PEDESTALS (SPOTS #1 - #25) ---
+    ...MUSEUM_PEDESTAL_LOCATIONS.map((loc) => ({
+        id: `museum-spot-${loc.spotNumber}`,
+        type: 'museum_pedestal' as const,
+        x: loc.x,
+        y: loc.y,
+        width: 0.9,
+        height: 0.9,
+        solidTiles: [{ x: Math.floor(loc.x), y: Math.floor(loc.y) }],
+        data: {
+            spotNumber: loc.spotNumber,
+            wingName: loc.wingName
+        }
+    })),
+
+    // --- CLASSICAL FLUTED MARBLE COLUMNS & VELVET GALLERY BENCHES ---
+    { id: 'm-pillar-1', type: 'vip_pillar', x: 14.5, y: 12.5, width: 0.6, height: 0.6, solidTiles: [{ x: 14, y: 12 }] },
+    { id: 'm-pillar-2', type: 'vip_pillar', x: 17.5, y: 12.5, width: 0.6, height: 0.6, solidTiles: [{ x: 17, y: 12 }] },
+    { id: 'm-pillar-3', type: 'vip_pillar', x: 14.5, y: 19.5, width: 0.6, height: 0.6, solidTiles: [{ x: 14, y: 19 }] },
+    { id: 'm-pillar-4', type: 'vip_pillar', x: 17.5, y: 19.5, width: 0.6, height: 0.6, solidTiles: [{ x: 17, y: 19 }] },
+    { id: 'm-sofa-1', type: 'sofa', x: 13.5, y: 16.0, width: 1.0, height: 1.0, solidTiles: [{ x: 13, y: 16 }] },
+    { id: 'm-sofa-2', type: 'sofa', x: 18.5, y: 16.0, width: 1.0, height: 1.0, solidTiles: [{ x: 18, y: 16 }] },
+    { id: 'm-lamp-1', type: 'street_lamp', x: 3.5, y: 14.5, width: 0.5, height: 0.5, solidTiles: [{ x: 3, y: 14 }] },
+    { id: 'm-lamp-2', type: 'street_lamp', x: 28.5, y: 14.5, width: 0.5, height: 0.5, solidTiles: [{ x: 28, y: 14 }] },
+    { id: 'm-lamp-3', type: 'street_lamp', x: 3.5, y: 17.5, width: 0.5, height: 0.5, solidTiles: [{ x: 3, y: 17 }] },
+    { id: 'm-lamp-4', type: 'street_lamp', x: 28.5, y: 17.5, width: 0.5, height: 0.5, solidTiles: [{ x: 28, y: 17 }] }
+];
+
+MUSEUM_OBJECTS.forEach((obj) => {
+    if (obj.solidTiles) {
+        obj.solidTiles.forEach((t) => {
+            if (t.y >= 0 && t.y < MAP_SIZE && t.x >= 0 && t.x < MAP_SIZE) {
+                MUSEUM_COLLISION_MAP[t.y][t.x] = true;
+            }
+        });
+    }
+});
+
+// Ensure East Return Portal corridor in Museum is 100% walkable
+for (let y = 14; y <= 17; y++) {
+    MUSEUM_COLLISION_MAP[y][30] = false;
+    MUSEUM_COLLISION_MAP[y][31] = false;
+}
+
+export const MUSEUM_ZONES: ZoneTrigger[] = [
+    {
+        id: 'museum-rotunda',
+        name: '🏛️ Grand Museum Rotunda (Spots #11–#15)',
+        minX: 11,
+        maxX: 21,
+        minY: 11,
+        maxY: 19,
+        type: 'museum'
+    },
+    {
+        id: 'museum-nw',
+        name: '🖼️ NW Renaissance Hall (Spots #1–#5)',
+        minX: 3,
+        maxX: 14,
+        minY: 3,
+        maxY: 11,
+        type: 'museum'
+    },
+    {
+        id: 'museum-ne',
+        name: '🧱 NE Voxel Pavilion (Spots #6–#10)',
+        minX: 17,
+        maxX: 28,
+        minY: 3,
+        maxY: 11,
+        type: 'museum'
+    },
+    {
+        id: 'museum-sw',
+        name: '🎨 SW Contemporary Wing (Spots #16–#20)',
+        minX: 3,
+        maxX: 14,
+        minY: 20,
+        maxY: 28,
+        type: 'museum'
+    },
+    {
+        id: 'museum-se',
+        name: '✨ SE Digital & Holo Wing (Spots #21–#25)',
+        minX: 17,
+        maxX: 30,
+        minY: 20,
+        maxY: 28,
+        type: 'museum'
+    }
+];
+
 export function isWalkable(gx: number, gy: number, radius = 0.2, zone: WorldZone = 'casino'): boolean {
-    const colMap = zone === 'forest' ? FOREST_COLLISION_MAP : COLLISION_MAP;
+    const colMap =
+        zone === 'forest'
+            ? FOREST_COLLISION_MAP
+            : zone === 'museum'
+              ? MUSEUM_COLLISION_MAP
+              : COLLISION_MAP;
 
     // Allow stepping onto East/West portal tiles at y in 14..17
-    if (zone === 'casino' && gx >= MAP_SIZE - 2 && gy >= 14 && gy <= 18) {
+    if (zone === 'casino' && (gx >= MAP_SIZE - 2 || gx <= 2) && gy >= 14 && gy <= 18) {
         return true;
     }
     if (zone === 'forest' && gx <= 2 && gy >= 14 && gy <= 18) {
+        return true;
+    }
+    if (zone === 'museum' && gx >= MAP_SIZE - 2 && gy >= 14 && gy <= 18) {
         return true;
     }
 
@@ -980,15 +1239,21 @@ export function resolveMoveWithSliding(
     radius = 0.22,
     zone: WorldZone = 'casino'
 ): { x: number; y: number; moved: boolean } {
-    const colMap = zone === 'forest' ? FOREST_COLLISION_MAP : COLLISION_MAP;
+    const colMap =
+        zone === 'forest'
+            ? FOREST_COLLISION_MAP
+            : zone === 'museum'
+              ? MUSEUM_COLLISION_MAP
+              : COLLISION_MAP;
     let px = curX;
     let py = curY;
 
     const curTx = Math.floor(px);
     const curTy = Math.floor(py);
     const inPortalCorridor =
-        (zone === 'casino' && curTx >= MAP_SIZE - 2 && curTy >= 14 && curTy <= 17) ||
-        (zone === 'forest' && curTx <= 1 && curTy >= 14 && curTy <= 17);
+        (zone === 'casino' && (curTx >= MAP_SIZE - 2 || curTx <= 1) && curTy >= 14 && curTy <= 17) ||
+        (zone === 'forest' && curTx <= 1 && curTy >= 14 && curTy <= 17) ||
+        (zone === 'museum' && curTx >= MAP_SIZE - 2 && curTy >= 14 && curTy <= 17);
 
     if (
         !inPortalCorridor &&
@@ -1020,8 +1285,12 @@ export function resolveMoveWithSliding(
     const stepY = deltaY / subSteps;
 
     for (let s = 0; s < subSteps; s++) {
-        const minXBound = zone === 'forest' && py >= 14 && py <= 18 ? 0.2 : 1 + radius;
-        const maxXBound = zone === 'casino' && py >= 14 && py <= 18 ? MAP_SIZE - 0.2 : MAP_SIZE - 1 - radius;
+        const minXBound =
+            (zone === 'forest' || zone === 'casino') && py >= 14 && py <= 18 ? 0.2 : 1 + radius;
+        const maxXBound =
+            (zone === 'casino' || zone === 'museum') && py >= 14 && py <= 18
+                ? MAP_SIZE - 0.2
+                : MAP_SIZE - 1 - radius;
         px = clamp(px + stepX, minXBound, maxXBound);
         py = clamp(py + stepY, 1 + radius, MAP_SIZE - 1 - radius);
 
@@ -1067,7 +1336,8 @@ export function resolveMoveWithSliding(
 }
 
 export function getCurrentZone(gx: number, gy: number, zone: WorldZone = 'casino'): ZoneTrigger | null {
-    const list = zone === 'forest' ? FOREST_ZONES : ZONES;
+    const list =
+        zone === 'forest' ? FOREST_ZONES : zone === 'museum' ? MUSEUM_ZONES : ZONES;
     for (const z of list) {
         if (gx >= z.minX && gx <= z.maxX && gy >= z.minY && gy <= z.maxY) {
             return z;
@@ -1560,6 +1830,37 @@ export function drawRichIsometricTile(
             break;
         }
 
+        case TileType.MUSEUM_PORTAL: {
+            const pulse = 0.65 + 0.35 * Math.sin(timeMs / 220);
+            ctx.fillStyle = '#24123b';
+            ctx.fill();
+
+            ctx.save();
+            ctx.clip();
+            drawIsoTileSprite(ctx, 'marble_tile', sx, sy, 0.55, 1.04);
+            ctx.restore();
+
+            ctx.strokeStyle = `rgba(255, 215, 0, ${0.92 * pulse})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = `rgba(224, 176, 255, ${0.28 * pulse})`;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - TILE_HEIGHT / 2 + 3);
+            ctx.lineTo(sx + TILE_WIDTH / 2 - 6, sy);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2 - 3);
+            ctx.lineTo(sx - TILE_WIDTH / 2 + 6, sy);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.font = 'bold 9px monospace';
+            ctx.fillStyle = '#ffe57f';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(gx === 0 ? '← MUSEUM' : 'CASINO →', sx, sy);
+            break;
+        }
+
         default:
             ctx.fillStyle = '#111111';
             ctx.fill();
@@ -1589,7 +1890,12 @@ export class StaticFloorCache {
     public build(zone: WorldZone = 'casino') {
         if (typeof document === 'undefined') return;
 
-        const tiles = zone === 'forest' ? FOREST_TILES : WORLD_TILES;
+        const tiles =
+            zone === 'forest'
+                ? FOREST_TILES
+                : zone === 'museum'
+                  ? MUSEUM_TILES
+                  : WORLD_TILES;
         const padX = TILE_WIDTH * 2;
         const padY = TILE_HEIGHT * 3;
         this.width = MAP_SIZE * TILE_WIDTH + padX * 2;

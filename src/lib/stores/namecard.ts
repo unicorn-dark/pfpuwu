@@ -476,7 +476,25 @@ export async function saveNamecardConfig(config: NamecardConfig): Promise<void> 
  * Ensures we always have a 100% transparent character PNG (never an opaque square image like /unicorn.png).
  */
 let cachedDefaultTransparentAvatar: string | null = null;
-export async function ensureTransparentAvatarUrl(profile: UserProfile | null): Promise<string> {
+export async function ensureTransparentAvatarUrl(
+    profileOrUrl: UserProfile | string | null
+): Promise<string> {
+    if (typeof profileOrUrl === 'string') {
+        if (
+            profileOrUrl &&
+            profileOrUrl !== '/unicorn.png' &&
+            !profileOrUrl.includes('twimg.com')
+        ) {
+            return profileOrUrl;
+        }
+        if (cachedDefaultTransparentAvatar) {
+            return cachedDefaultTransparentAvatar;
+        }
+        const { dataUrl } = await renderTransparentAvatar(getDefaultAvatarTraits(), 256);
+        cachedDefaultTransparentAvatar = dataUrl;
+        return dataUrl;
+    }
+    const profile = profileOrUrl;
     if (
         profile?.avatar_url &&
         profile.avatar_url !== '/unicorn.png' &&

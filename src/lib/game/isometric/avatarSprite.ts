@@ -35,7 +35,7 @@ export interface PlayerAvatarState {
     wins?: number;
     losses?: number;
     isHouseDealer?: boolean;
-    zone?: 'casino' | 'forest';
+    zone?: 'casino' | 'forest' | 'museum';
 }
 
 const avatarDrawableCache = new Map<string, HTMLCanvasElement | HTMLImageElement>();

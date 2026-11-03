@@ -23,7 +23,7 @@ export interface RemotePlayer extends PlayerAvatarState {
     targetX: number;
     targetY: number;
     lastNetworkTs: number;
-    zone: 'casino' | 'forest';
+    zone: 'casino' | 'forest' | 'museum';
 }
 
 export class WorldNetworkManager {
@@ -52,6 +52,7 @@ export class WorldNetworkManager {
     public onOnlineCountChanged: (count: number) => void = () => {};
     public onCasinoJackpot: (username: string, game: string, amount: number) => void = () => {};
     public onForestEventReceived: (payload: any) => void = () => {};
+    public onMuseumEventReceived: (payload: any) => void = () => {};
 
     // Economy & P2P Transfer Callbacks
     public onStatsUpdated: (stats: PlayerEconomyStats) => void = () => {};
@@ -234,6 +235,10 @@ export class WorldNetworkManager {
                 if (!payload) return;
                 this.onForestEventReceived(payload);
             })
+            .on('broadcast', { event: 'museum_event' }, ({ payload }: any) => {
+                if (!payload) return;
+                this.onMuseumEventReceived(payload);
+            })
             .on('broadcast', { event: 'dice_state_sync' }, ({ payload }: any) => {
                 if (!payload || !payload.snapshot) return;
                 this.onDiceStateSync(payload.snapshot);
@@ -315,6 +320,10 @@ export class WorldNetworkManager {
                     { event: '*', schema: 'public', table: 'uwu_graffiti_wall' },
                     (payload: any) => {
                         const row = payload?.new;
+                        if (row?.id === 'museum_exhibits_v1' && row?.pixels) {
+                            this.onMuseumEventReceived({ kind: 'db_sync', snapshot: row.pixels });
+                            return;
+                        }
                         const dataUrl = row?.pixels?.data_url || row?.pixels?.dataUrl;
                         if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
                             this.onGraffitiSnapshot(dataUrl);
@@ -334,7 +343,7 @@ export class WorldNetworkManager {
         isSpeaking: boolean,
         danceMove: DanceMoveType = 'disco',
         force = false,
-        zone: 'casino' | 'forest' = 'casino'
+        zone: 'casino' | 'forest' | 'museum' = 'casino'
     ) {
         this.localPlayerState.x = x;
         this.localPlayerState.y = y;
@@ -468,6 +477,15 @@ export class WorldNetworkManager {
         });
     }
 
+    public broadcastMuseumEvent(payload: any) {
+        if (!this.channel || !payload) return;
+        this.channel.send({
+            type: 'broadcast',
+            event: 'museum_event',
+            payload
+        });
+    }
+
     public broadcastDiceState(snapshot: DiceDuelSnapshot) {
         if (!this.channel || !snapshot) return;
         this.channel.send({
@@ -548,20 +566,26 @@ export class WorldNetworkManager {
         });
     }
 
-    public getRemotePlayers(zoneFilter?: 'casino' | 'forest'): RemotePlayer[] {
+    public getRemotePlayers(zoneFilter?: 'casino' | 'forest' | 'museum'): RemotePlayer[] {
         const all = Array.from(this.remotePlayers.values());
         if (!zoneFilter) return all;
         return all.filter((p) => (p.zone || 'casino') === zoneFilter);
     }
 
-    public getZonePlayerCounts(myZone: 'casino' | 'forest'): { casino: number; forest: number } {
+    public getZonePlayerCounts(myZone: 'casino' | 'forest' | 'museum'): {
+        casino: number;
+        forest: number;
+        museum: number;
+    } {
         let casino = myZone === 'casino' ? 1 : 0;
         let forest = myZone === 'forest' ? 1 : 0;
+        let museum = myZone === 'museum' ? 1 : 0;
         this.remotePlayers.forEach((p) => {
             if ((p.zone || 'casino') === 'forest') forest++;
+            else if (p.zone === 'museum') museum++;
             else casino++;
         });
-        return { casino, forest };
+        return { casino, forest, museum };
     }
 
     public getOnlinePeerEconomyStats(): PlayerEconomyStats[] {
@@ -587,7 +611,7 @@ export class WorldNetworkManager {
         return list;
     }
 
-    public getRemotePositions(zoneFilter?: 'casino' | 'forest'): Map<string, { x: number; y: number }> {
+    public getRemotePositions(zoneFilter?: 'casino' | 'forest' | 'museum'): Map<string, { x: number; y: number }> {
         const map = new Map<string, { x: number; y: number }>();
         this.remotePlayers.forEach((p, id) => {
             if (!zoneFilter || (p.zone || 'casino') === zoneFilter) {
