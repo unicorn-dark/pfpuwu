@@ -260,6 +260,7 @@ export function saveLocalPlayerStats(stats: PlayerEconomyStats) {
         localStorage.setItem(LOCAL_STATS_KEY, JSON.stringify(stats));
         localStorage.setItem('pfpuwu_world_chips_v1', String(stats.chips));
         upsertPlayerInLocalLeaderboardCache(stats);
+        window.dispatchEvent(new CustomEvent('uwu-stats-updated', { detail: stats }));
     } catch {}
 }
 

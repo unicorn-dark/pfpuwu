@@ -325,3 +325,48 @@ export async function savePersonaAvatar(
 
     return { ok: true, avatarUrl: finalAvatarUrl };
 }
+
+/**
+ * Updates the logged-in user's Display Name across the auth store, localStorage,
+ * Supabase `public.profiles`, and `public.uwu_world_players`.
+ */
+export async function updateUserDisplayName(newDisplayName: string): Promise<boolean> {
+    const current = get(userProfile);
+    if (!current) return false;
+    const cleaned = newDisplayName.trim().slice(0, 28) || current.x_username;
+
+    const updatedProfile: UserProfile = {
+        ...current,
+        x_display_name: cleaned,
+        updated_at: new Date().toISOString()
+    };
+
+    userProfile.set(updatedProfile);
+    if (typeof window !== 'undefined') {
+        try {
+            localStorage.setItem(LOCAL_PROFILE_STORAGE_KEY, JSON.stringify(updatedProfile));
+        } catch {}
+    }
+
+    try {
+        await supabase
+            .from('profiles')
+            .update({
+                x_display_name: cleaned,
+                updated_at: updatedProfile.updated_at
+            })
+            .eq('id', current.id);
+    } catch {}
+
+    try {
+        await supabase
+            .from('uwu_world_players')
+            .update({
+                display_name: cleaned,
+                updated_at: updatedProfile.updated_at
+            })
+            .eq('user_id', current.id);
+    } catch {}
+
+    return true;
+}

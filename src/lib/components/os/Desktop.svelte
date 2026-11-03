@@ -19,6 +19,7 @@
     import SoundManager from "./SoundManager.svelte";
     import XAuthModal from "./XAuthModal.svelte";
     import AvatarCustomizerModal from "./AvatarCustomizerModal.svelte";
+    import DesktopNamecard from "./DesktopNamecard.svelte";
     import {
         userProfile,
         showAuthModal,
@@ -138,6 +139,9 @@
                 </button>
             {/each}
         </div>
+
+        <!-- Perma-Pinned Top-Right Y2K Netizen Namecard -->
+        <DesktopNamecard />
 
         {#each $activeWindows as win (win.id)}
             {#if win.isOpen}
