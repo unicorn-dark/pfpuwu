@@ -154,6 +154,7 @@
     let artTitle = $state('Untitled UwU Masterpiece');
     let frameStyle = $state<FrameStyle>('gold');
     let targetExhibitSpot = $state<number>(initialSpotNumber || firstOpenSpot || 1);
+    let mobileToolTab = $state<'tools' | 'colors' | 'presets' | 'publish'>('tools');
 
     // --- 3D ISOLEGO BUILDER STATE ---
     let voxelCanvas: HTMLCanvasElement | null = $state(null);
@@ -166,6 +167,8 @@
     let voxelPanY = $state(14);
     let isVoxelPanning = $state(false);
     let voxelPanStart = { x: 0, y: 0, panX: 0, panY: 0 };
+    let voxelPinchStartDist = 0;
+    let voxelPinchStartZoom = 1.08;
 
     type VoxelToolId =
         | 'place'
@@ -175,7 +178,8 @@
         | 'dome'
         | 'heart'
         | 'paint'
-        | 'erase';
+        | 'erase'
+        | 'pan';
     let voxelTool = $state<VoxelToolId>('place');
     let legoPiece = $state<LegoPieceType>('1x1');
     let pieceOrientation = $state<0 | 1 | 2 | 3>(0);
@@ -189,8 +193,12 @@
     let hitCandidates: VoxelHitCandidate[] = [];
     let ghostPreviewBricks = $state<VoxelBrick[]>([]);
     let hoveredHit: VoxelHitCandidate | null = null;
+    let lastHoverKey = '';
     let isVoxelDragging = false;
     let lastDraggedCoordKey = '';
+    let dragLockedZ: number | null = null;
+    let dragStrokePlacedKeys = new Set<string>();
+    let voxelRafId: number | null = null;
 
     const STUDIO_PALETTE_24 = [
         '#ff0055', '#ff3366', '#ff66b2', '#ffb6c1',
@@ -252,10 +260,10 @@
         redrawVoxelStudio();
     }
 
-    function computePlacementBricksFromHit(hit: VoxelHitCandidate): VoxelBrick[] {
+    function computePlacementBricksFromHit(hit: VoxelHitCandidate, overrideZ: number | null = null): VoxelBrick[] {
         const targetX = hit.isBaseplate ? hit.x : hit.x + hit.normal.dx;
         const targetY = hit.isBaseplate ? hit.y : hit.y + hit.normal.dy;
-        const targetZ = hit.isBaseplate ? hit.z : hit.z + hit.normal.dz;
+        const targetZ = overrideZ !== null ? overrideZ : hit.isBaseplate ? hit.z : hit.z + hit.normal.dz;
 
         if (
             targetX < 0 ||
@@ -323,11 +331,11 @@
     }
 
     function updateGhostPreviewFromHit(hit: VoxelHitCandidate | null) {
-        if (!hit || voxelTool === 'erase' || voxelTool === 'paint') {
+        if (!hit || voxelTool === 'erase' || voxelTool === 'paint' || voxelTool === 'pan') {
             ghostPreviewBricks = [];
             return;
         }
-        ghostPreviewBricks = computePlacementBricksFromHit(hit);
+        ghostPreviewBricks = computePlacementBricksFromHit(hit, dragLockedZ);
     }
 
     function applyVoxelActionAtHit(hit: VoxelHitCandidate, isRightClickErase = false) {
@@ -335,8 +343,9 @@
             if (hit.isBaseplate) return;
             const symTargets = getSymmetryCoords3D(hit.x, hit.y, hit.z, voxelSymmetry, VOXEL_GRID_SIZE);
             const removeSet = new Set(symTargets.map((p) => `${p.x},${p.y},${p.z}`));
+            for (const rk of removeSet) dragStrokePlacedKeys.add(rk);
             voxels = voxels.filter((v) => !removeSet.has(`${v.x},${v.y},${v.z}`));
-            redrawVoxelStudio();
+            scheduleVoxelRedraw();
             return;
         }
 
@@ -344,16 +353,17 @@
             if (hit.isBaseplate) return;
             const symTargets = getSymmetryCoords3D(hit.x, hit.y, hit.z, voxelSymmetry, VOXEL_GRID_SIZE);
             const paintSet = new Set(symTargets.map((p) => `${p.x},${p.y},${p.z}`));
+            for (const pk of paintSet) dragStrokePlacedKeys.add(pk);
             voxels = voxels.map((v) =>
                 paintSet.has(`${v.x},${v.y},${v.z}`)
                     ? { ...v, color: brickColor, material: brickMaterial }
                     : v
             );
-            redrawVoxelStudio();
+            scheduleVoxelRedraw();
             return;
         }
 
-        const newBricks = computePlacementBricksFromHit(hit);
+        const newBricks = computePlacementBricksFromHit(hit, dragLockedZ);
         if (newBricks.length === 0) return;
 
         const byKey = new Map<string, VoxelBrick>();
@@ -361,13 +371,19 @@
             byKey.set(`${v.x},${v.y},${v.z}`, v);
         }
         for (const nb of newBricks) {
-            byKey.set(`${nb.x},${nb.y},${nb.z}`, nb);
+            const k = `${nb.x},${nb.y},${nb.z}`;
+            byKey.set(k, nb);
+            dragStrokePlacedKeys.add(k);
         }
         voxels = Array.from(byKey.values());
-        redrawVoxelStudio();
+        scheduleVoxelRedraw();
     }
 
     function redrawVoxelStudio() {
+        if (voxelRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+            cancelAnimationFrame(voxelRafId);
+            voxelRafId = null;
+        }
         if (!voxelCanvas) return;
         const ctx = voxelCanvas.getContext('2d');
         if (!ctx) return;
@@ -391,11 +407,48 @@
         );
     }
 
+    function scheduleVoxelRedraw() {
+        if (typeof requestAnimationFrame === 'undefined') {
+            redrawVoxelStudio();
+            return;
+        }
+        if (voxelRafId !== null) return;
+        voxelRafId = requestAnimationFrame(() => {
+            voxelRafId = null;
+            redrawVoxelStudio();
+        });
+    }
+
+    function getPointerClientXY(e: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
+        if ('touches' in e && e.touches.length > 0) {
+            return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+        }
+        if ('changedTouches' in e && e.changedTouches.length > 0) {
+            return { clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY };
+        }
+        return {
+            clientX: (e as MouseEvent).clientX || 0,
+            clientY: (e as MouseEvent).clientY || 0
+        };
+    }
+
+    function getTouchPinchInfo(e: TouchEvent): { dist: number; midX: number; midY: number } | null {
+        if (e.touches.length < 2) return null;
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const dx = t1.clientX - t0.clientX;
+        const dy = t1.clientY - t0.clientY;
+        return {
+            dist: Math.hypot(dx, dy),
+            midX: (t0.clientX + t1.clientX) / 2,
+            midY: (t0.clientY + t1.clientY) / 2
+        };
+    }
+
     function getVoxelCanvasCoords(e: MouseEvent | TouchEvent): { x: number; y: number } {
         if (!voxelCanvas) return { x: 0, y: 0 };
         const rect = voxelCanvas.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const { clientX, clientY } = getPointerClientXY(e);
         return {
             x: ((clientX - rect.left) / rect.width) * voxelCanvas.width,
             y: ((clientY - rect.top) / rect.height) * voxelCanvas.height
@@ -404,39 +457,95 @@
 
     function handleVoxelPointerMove(e: MouseEvent | TouchEvent) {
         if (!voxelCanvas) return;
-        if (isVoxelPanning && 'clientX' in e) {
-            voxelPanX = voxelPanStart.panX + (e.clientX - voxelPanStart.x);
-            voxelPanY = voxelPanStart.panY + (e.clientY - voxelPanStart.y);
-            redrawVoxelStudio();
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
+
+        // 2-Finger Pinch-to-Zoom & Pan on Mobile
+        if ('touches' in e && e.touches.length >= 2) {
+            const pinch = getTouchPinchInfo(e);
+            if (pinch && voxelPinchStartDist > 0) {
+                const scaleRatio = pinch.dist / voxelPinchStartDist;
+                voxelZoom = Math.max(0.6, Math.min(2.6, voxelPinchStartZoom * scaleRatio));
+                voxelPanX = voxelPanStart.panX + (pinch.midX - voxelPanStart.x);
+                voxelPanY = voxelPanStart.panY + (pinch.midY - voxelPanStart.y);
+                scheduleVoxelRedraw();
+            }
+            return;
+        }
+
+        if (isVoxelPanning) {
+            const { clientX, clientY } = getPointerClientXY(e);
+            voxelPanX = voxelPanStart.panX + (clientX - voxelPanStart.x);
+            voxelPanY = voxelPanStart.panY + (clientY - voxelPanStart.y);
+            scheduleVoxelRedraw();
             return;
         }
 
         const pt = getVoxelCanvasCoords(e);
         const hit = pickVoxelAtScreenCoord(pt.x, pt.y, hitCandidates);
-        hoveredHit = hit;
-        updateGhostPreviewFromHit(hit);
 
         if (isVoxelDragging && hit) {
-            const key = `${hit.x},${hit.y},${hit.z},${hit.isBaseplate}`;
+            // Stamps & extrude are single-tap on pointerdown so finger jitter doesn't spam 10 spheres
+            if (['sphere', 'pyramid', 'dome', 'heart', 'extrude'].includes(voxelTool)) {
+                return;
+            }
+            // Prevent stacking onto bricks created during the same drag stroke!
+            if (!hit.isBaseplate && dragStrokePlacedKeys.has(`${hit.x},${hit.y},${hit.z}`)) {
+                return;
+            }
+            const targetX = hit.isBaseplate ? hit.x : hit.x + hit.normal.dx;
+            const targetY = hit.isBaseplate ? hit.y : hit.y + hit.normal.dy;
+            const effectiveZ = dragLockedZ !== null ? dragLockedZ : hit.isBaseplate ? hit.z : hit.z + hit.normal.dz;
+            const key = `${targetX},${targetY},${effectiveZ},${voxelTool}`;
             if (key !== lastDraggedCoordKey) {
                 lastDraggedCoordKey = key;
+                hoveredHit = hit;
+                updateGhostPreviewFromHit(hit);
                 applyVoxelActionAtHit(hit, false);
             }
-        } else {
-            redrawVoxelStudio();
+            return;
+        }
+
+        // Hover preview on desktop — only redraw when the hovered voxel face actually changes!
+        const newHoverKey = hit
+            ? `${hit.x},${hit.y},${hit.z},${hit.normal.dx},${hit.normal.dy},${hit.normal.dz},${hit.isBaseplate}`
+            : 'none';
+        if (newHoverKey !== lastHoverKey) {
+            lastHoverKey = newHoverKey;
+            hoveredHit = hit;
+            updateGhostPreviewFromHit(hit);
+            scheduleVoxelRedraw();
         }
     }
 
     function handleVoxelPointerDown(e: MouseEvent | TouchEvent) {
         if (!voxelCanvas) return;
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
+
+        // Check for 2-finger pinch/pan gesture on mobile
+        if ('touches' in e && e.touches.length >= 2) {
+            const pinch = getTouchPinchInfo(e);
+            if (pinch) {
+                isVoxelDragging = false;
+                isVoxelPanning = true;
+                voxelPinchStartDist = pinch.dist;
+                voxelPinchStartZoom = voxelZoom;
+                voxelPanStart = { x: pinch.midX, y: pinch.midY, panX: voxelPanX, panY: voxelPanY };
+            }
+            return;
+        }
+
         const isRightClick = 'button' in e && e.button === 2;
         const isMiddleClick = 'button' in e && e.button === 1;
 
-        if (isMiddleClick || ('shiftKey' in e && e.shiftKey)) {
-            if ('clientX' in e) {
-                isVoxelPanning = true;
-                voxelPanStart = { x: e.clientX, y: e.clientY, panX: voxelPanX, panY: voxelPanY };
-            }
+        if (voxelTool === 'pan' || isMiddleClick || ('shiftKey' in e && e.shiftKey)) {
+            const { clientX, clientY } = getPointerClientXY(e);
+            isVoxelPanning = true;
+            voxelPinchStartDist = 0;
+            voxelPanStart = { x: clientX, y: clientY, panX: voxelPanX, panY: voxelPanY };
             return;
         }
 
@@ -446,14 +555,35 @@
 
         pushVoxelUndo();
         isVoxelDragging = true;
-        lastDraggedCoordKey = `${hit.x},${hit.y},${hit.z},${hit.isBaseplate}`;
+        dragStrokePlacedKeys = new Set<string>();
+
+        if (!isRightClick && voxelTool === 'place') {
+            dragLockedZ = hit.isBaseplate ? hit.z : hit.z + hit.normal.dz;
+        } else {
+            dragLockedZ = null;
+        }
+
+        const targetX = hit.isBaseplate ? hit.x : hit.x + hit.normal.dx;
+        const targetY = hit.isBaseplate ? hit.y : hit.y + hit.normal.dy;
+        const effectiveZ = dragLockedZ !== null ? dragLockedZ : hit.isBaseplate ? hit.z : hit.z + hit.normal.dz;
+        lastDraggedCoordKey = `${targetX},${targetY},${effectiveZ},${voxelTool}`;
+        hoveredHit = hit;
+        updateGhostPreviewFromHit(hit);
         applyVoxelActionAtHit(hit, isRightClick);
     }
 
     function handleVoxelPointerUp() {
         isVoxelDragging = false;
         isVoxelPanning = false;
+        voxelPinchStartDist = 0;
+        dragLockedZ = null;
+        dragStrokePlacedKeys.clear();
         lastDraggedCoordKey = '';
+        if ('ontouchstart' in window) {
+            // Clear ghost preview after finger lift on mobile so view stays clean
+            ghostPreviewBricks = [];
+            scheduleVoxelRedraw();
+        }
     }
 
     // ============================================================================
@@ -475,7 +605,8 @@
         | 'circle'
         | 'fill'
         | 'eyedropper'
-        | 'eraser';
+        | 'eraser'
+        | 'pan';
     let easelTool = $state<EaselToolId>('pen');
     let easelColor = $state('#00ffff');
     let easelSize = $state(8);
@@ -485,6 +616,10 @@
     let easelZoom = $state(1);
     let easelPanX = $state(0);
     let easelPanY = $state(0);
+    let isEaselPanning = $state(false);
+    let easelPanStart = { x: 0, y: 0, panX: 0, panY: 0 };
+    let easelPinchStartDist = 0;
+    let easelPinchStartZoom = 1;
     let easelUndoStack = $state<string[]>([]);
     let easelRedoStack = $state<string[]>([]);
 
@@ -575,8 +710,7 @@
     function getEaselCoords(e: MouseEvent | TouchEvent): { x: number; y: number } {
         if (!easelCanvas) return { x: 0, y: 0 };
         const rect = easelCanvas.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const { clientX, clientY } = getPointerClientXY(e);
         return {
             x: ((clientX - rect.left) / rect.width) * easelCanvas.width,
             y: ((clientY - rect.top) / rect.height) * easelCanvas.height
@@ -661,6 +795,32 @@
 
     function handleEaselPointerDown(e: MouseEvent | TouchEvent) {
         if (!easelCanvas) return;
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
+
+        // 2-finger pinch/pan on mobile
+        if ('touches' in e && e.touches.length >= 2) {
+            const pinch = getTouchPinchInfo(e);
+            if (pinch) {
+                isEaselDrawing = false;
+                isEaselPanning = true;
+                easelPinchStartDist = pinch.dist;
+                easelPinchStartZoom = easelZoom;
+                easelPanStart = { x: pinch.midX, y: pinch.midY, panX: easelPanX, panY: easelPanY };
+            }
+            return;
+        }
+
+        const isMiddleClick = 'button' in e && e.button === 1;
+        if (easelTool === 'pan' || isMiddleClick || ('shiftKey' in e && e.shiftKey)) {
+            const { clientX, clientY } = getPointerClientXY(e);
+            isEaselPanning = true;
+            easelPinchStartDist = 0;
+            easelPanStart = { x: clientX, y: clientY, panX: easelPanX, panY: easelPanY };
+            return;
+        }
+
         const ctx = easelCanvas.getContext('2d');
         if (!ctx) return;
 
@@ -692,7 +852,30 @@
     }
 
     function handleEaselPointerMove(e: MouseEvent | TouchEvent) {
-        if (!isEaselDrawing || !easelCanvas) return;
+        if (!easelCanvas) return;
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
+
+        if ('touches' in e && e.touches.length >= 2) {
+            const pinch = getTouchPinchInfo(e);
+            if (pinch && easelPinchStartDist > 0) {
+                const ratio = pinch.dist / easelPinchStartDist;
+                easelZoom = Math.max(1, Math.min(3.5, easelPinchStartZoom * ratio));
+                easelPanX = easelPanStart.panX + (pinch.midX - easelPanStart.x) / easelZoom;
+                easelPanY = easelPanStart.panY + (pinch.midY - easelPanStart.y) / easelZoom;
+            }
+            return;
+        }
+
+        if (isEaselPanning) {
+            const { clientX, clientY } = getPointerClientXY(e);
+            easelPanX = easelPanStart.panX + (clientX - easelPanStart.x) / easelZoom;
+            easelPanY = easelPanStart.panY + (clientY - easelPanStart.y) / easelZoom;
+            return;
+        }
+
+        if (!isEaselDrawing) return;
         const ctx = easelCanvas.getContext('2d');
         if (!ctx) return;
 
@@ -743,6 +926,8 @@
     }
 
     function handleEaselPointerUp() {
+        isEaselPanning = false;
+        easelPinchStartDist = 0;
         if (!isEaselDrawing) return;
         isEaselDrawing = false;
         easelShapeSnapshot = null;
@@ -880,10 +1065,12 @@
 
     function handleSigPointerDown(e: MouseEvent | TouchEvent) {
         if (!sigCanvas) return;
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
         isSigning = true;
         const rect = sigCanvas.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const { clientX, clientY } = getPointerClientXY(e);
         sigLastPt = {
             x: ((clientX - rect.left) / rect.width) * sigCanvas.width,
             y: ((clientY - rect.top) / rect.height) * sigCanvas.height
@@ -893,11 +1080,13 @@
 
     function handleSigPointerMove(e: MouseEvent | TouchEvent) {
         if (!isSigning || !sigCanvas) return;
+        if ('touches' in e && e.cancelable) {
+            e.preventDefault();
+        }
         const ctx = sigCanvas.getContext('2d');
         if (!ctx) return;
         const rect = sigCanvas.getBoundingClientRect();
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const { clientX, clientY } = getPointerClientXY(e);
         const pt = {
             x: ((clientX - rect.left) / rect.width) * sigCanvas.width,
             y: ((clientY - rect.top) / rect.height) * sigCanvas.height
@@ -1477,7 +1666,23 @@
                                 oncontextmenu={(e) => e.preventDefault()}
                             ></canvas>
 
-                            <div class="viewport-overlay-top">
+                             <div class="viewport-overlay-top">
+                                <button
+                                    class="win98-btn mini-btn"
+                                    class:active-toggle={voxelTool === 'pan'}
+                                    onclick={() => (voxelTool = voxelTool === 'pan' ? 'place' : 'pan')}
+                                    title="1-Finger Pan / Move Camera"
+                                >
+                                    🖐️ Pan
+                                </button>
+                                <button
+                                    class="win98-btn mini-btn"
+                                    class:active-toggle={voxelTool === 'erase'}
+                                    onclick={() => (voxelTool = voxelTool === 'erase' ? 'place' : 'erase')}
+                                    title="Toggle Brick Eraser"
+                                >
+                                    🧽 Erase
+                                </button>
                                 <button
                                     class="win98-btn mini-btn"
                                     onclick={() => {
@@ -1516,7 +1721,7 @@
                                         redrawVoxelStudio();
                                     }}
                                 >
-                                    Reset View
+                                    Reset
                                 </button>
                                 <button
                                     class="win98-btn mini-btn"
@@ -1532,22 +1737,22 @@
                                     disabled={voxelUndoStack.length === 0}
                                     onclick={undoVoxel}
                                 >
-                                    ↩ Undo
+                                    ↩
                                 </button>
                                 <button
                                     class="win98-btn mini-btn"
                                     disabled={voxelRedoStack.length === 0}
                                     onclick={redoVoxel}
                                 >
-                                    ↪ Redo
+                                    ↪
                                 </button>
                                 <button class="win98-btn mini-btn warn-btn" onclick={clearVoxelBaseplate}>
-                                    🗑️ Clear
+                                    🗑️
                                 </button>
                             </div>
 
                             <div class="viewport-hint-bar">
-                                💡 <strong>Click/Drag</strong> any stud or brick face to stack • <strong>Right-Click</strong> to erase • <strong>Shift+Drag</strong> to pan • <strong>R</strong> to rotate Lego piece
+                                💡 <strong>Tap/Drag</strong> to build flat • <strong>2-Finger Pinch</strong> or <strong>🖐️ Pan</strong> to move view • <strong>↻ Rotate</strong> for piece angle
                             </div>
                         </div>
                     {:else}
@@ -1575,7 +1780,20 @@
                             <div class="viewport-overlay-top">
                                 <button
                                     class="win98-btn mini-btn"
-                                    onclick={() => (easelZoom = Math.max(1, easelZoom - 0.5))}
+                                    class:active-toggle={easelTool === 'pan'}
+                                    onclick={() => (easelTool = easelTool === 'pan' ? 'pen' : 'pan')}
+                                >
+                                    🖐️ Pan
+                                </button>
+                                <button
+                                    class="win98-btn mini-btn"
+                                    onclick={() => {
+                                        easelZoom = Math.max(1, easelZoom - 0.5);
+                                        if (easelZoom === 1) {
+                                            easelPanX = 0;
+                                            easelPanY = 0;
+                                        }
+                                    }}
                                 >
                                     🔍-
                                 </button>
@@ -1591,24 +1809,76 @@
                                     disabled={easelUndoStack.length <= 1}
                                     onclick={undoEasel}
                                 >
-                                    ↩ Undo
+                                    ↩
                                 </button>
                                 <button
                                     class="win98-btn mini-btn"
                                     disabled={easelRedoStack.length === 0}
                                     onclick={redoEasel}
                                 >
-                                    ↪ Redo
+                                    ↪
                                 </button>
                                 <button class="win98-btn mini-btn warn-btn" onclick={clearEaselCanvas}>
-                                    🗑️ Clear
+                                    🗑️
                                 </button>
                             </div>
                         </div>
                     {/if}
 
+                    <!-- Mobile Quick Color Strip & Sub-Tab Bar (Visible on Mobile <= 780px) -->
+                    <div class="mobile-studio-dock win98-inset">
+                        <div class="mobile-quick-colors">
+                            {#each STUDIO_PALETTE_24.slice(0, 12) as qc}
+                                <button
+                                    class="mobile-swatch-dot"
+                                    class:active-dot={(artMedium === '3d' ? brickColor : easelColor).toLowerCase() ===
+                                        qc.toLowerCase()}
+                                    style="background: {qc};"
+                                    onclick={() => {
+                                        if (artMedium === '3d') brickColor = qc;
+                                        else easelColor = qc;
+                                    }}
+                                    aria-label={qc}
+                                ></button>
+                            {/each}
+                        </div>
+                        <div class="mobile-subtabs-row">
+                            <button
+                                class="win98-btn mobile-subtab-btn"
+                                class:active-subtab={mobileToolTab === 'tools'}
+                                onclick={() => (mobileToolTab = 'tools')}
+                            >
+                                🛠️ Tools
+                            </button>
+                            <button
+                                class="win98-btn mobile-subtab-btn"
+                                class:active-subtab={mobileToolTab === 'colors'}
+                                onclick={() => (mobileToolTab = 'colors')}
+                            >
+                                🎨 Colors
+                            </button>
+                            <button
+                                class="win98-btn mobile-subtab-btn"
+                                class:active-subtab={mobileToolTab === 'presets'}
+                                onclick={() => (mobileToolTab = 'presets')}
+                            >
+                                🎁 {artMedium === '3d' ? 'Blueprints' : 'Frames'}
+                            </button>
+                            <button
+                                class="win98-btn mobile-subtab-btn"
+                                class:active-subtab={mobileToolTab === 'publish'}
+                                onclick={() => (mobileToolTab = 'publish')}
+                            >
+                                🏷️ Sign & Post
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Bottom Attribution & Signature Row -->
-                    <div class="studio-attribution-bar win98-inset">
+                    <div
+                        class="studio-attribution-bar win98-inset"
+                        class:mobile-hide-section={mobileToolTab !== 'publish'}
+                    >
                         <div class="attr-left-col">
                             <label class="studio-label">
                                 Artwork Title:
@@ -1679,7 +1949,10 @@
                     </div>
 
                     <!-- Save to Vault / Exhibit / Submit to Curator Queue Buttons -->
-                    <div class="studio-publish-footer">
+                    <div
+                        class="studio-publish-footer"
+                        class:mobile-hide-section={mobileToolTab !== 'publish'}
+                    >
                         <button
                             class="win98-btn save-vault-btn"
                             disabled={isBusy}
@@ -1711,10 +1984,13 @@
                 </div>
 
                 <!-- Right Column: Toolbars for 3D IsoLego OR 2D Easel (Overflow-X Locked!) -->
-                <div class="studio-tools-col win98-inset">
+                <div
+                    class="studio-tools-col win98-inset"
+                    class:mobile-hide-section={mobileToolTab === 'publish'}
+                >
                     {#if artMedium === '3d'}
                         <!-- 1. 8 Starter 3D Blueprints -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'presets'}>
                             <div class="section-heading">🎁 1-Click 3D Starter Blueprints</div>
                             <div class="blueprint-grid">
                                 {#each STARTER_3D_BLUEPRINTS as bp}
@@ -1731,7 +2007,7 @@
                         </div>
 
                         <!-- 2. Lego Brick Piece Selector -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'tools'}>
                             <div class="section-heading-row">
                                 <span class="section-heading">🧱 Lego Brick Piece</span>
                                 <button
@@ -1769,18 +2045,19 @@
                         </div>
 
                         <!-- 3. 3D Sculpting & Stamp Tools -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'tools'}>
                             <div class="section-heading">🛠️ 3D Build & Stamp Tools</div>
-                            <div class="tools-grid-2">
+                            <div class="tools-grid-3">
                                 {#each [
-                                    { id: 'place', label: '🧱 Stack Brick' },
-                                    { id: 'extrude', label: '📏 3-Tall Column' },
-                                    { id: 'sphere', label: '⚪ 3D Sphere' },
-                                    { id: 'pyramid', label: '🔺 3D Pyramid' },
-                                    { id: 'dome', label: '🏛️ 3D Dome' },
-                                    { id: 'heart', label: '❤️ 3D Heart' },
-                                    { id: 'paint', label: '🪣 Paint Brick' },
-                                    { id: 'erase', label: '🧽 Chisel / Erase' }
+                                    { id: 'place', label: '🧱 Stack' },
+                                    { id: 'extrude', label: '📏 Column' },
+                                    { id: 'sphere', label: '⚪ Sphere' },
+                                    { id: 'pyramid', label: '🔺 Pyramid' },
+                                    { id: 'dome', label: '🏛️ Dome' },
+                                    { id: 'heart', label: '❤️ Heart' },
+                                    { id: 'paint', label: '🪣 Paint' },
+                                    { id: 'erase', label: '🧽 Erase' },
+                                    { id: 'pan', label: '🖐️ Pan View' }
                                 ] as t}
                                     <button
                                         class="win98-btn tool-chip"
@@ -1794,7 +2071,7 @@
                         </div>
 
                         <!-- 4. 5 Surface Materials -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'colors'}>
                             <div class="section-heading">✨ Brick Material</div>
                             <div class="tools-grid-3">
                                 {#each [
@@ -1816,8 +2093,8 @@
                         </div>
 
                         <!-- 5. 24-Color Palette + Custom Picker -->
-                        <div class="tool-section">
-                            <div class="section-heading">🎨 Brick Color</div>
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'colors'}>
+                            <div class="section-heading">🎨 Brick Color (24 Swatches + Custom)</div>
                             <div class="palette-grid">
                                 {#each STUDIO_PALETTE_24 as c}
                                     <button
@@ -1838,7 +2115,7 @@
                         </div>
 
                         <!-- 6. 3D Mirror Symmetry & Height Slicer -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'tools'}>
                             <div class="section-heading">🪞 Live 3D Mirror Symmetry</div>
                             <div class="tools-grid-4">
                                 {#each [
@@ -1900,7 +2177,7 @@
                         </div>
                     {:else}
                         <!-- 2D GALLERY EASEL TOOLS -->
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'tools'}>
                             <div class="section-heading">🖌️ 2D Gallery Brushes & Tools</div>
                             <div class="tools-grid-3">
                                 {#each [
@@ -1917,7 +2194,8 @@
                                     { id: 'circle', label: '◯ Circle' },
                                     { id: 'fill', label: '🪣 Fill' },
                                     { id: 'eyedropper', label: '🧪 Pick' },
-                                    { id: 'eraser', label: '🧽 Eraser' }
+                                    { id: 'eraser', label: '🧽 Eraser' },
+                                    { id: 'pan', label: '🖐️ Pan View' }
                                 ] as t}
                                     <button
                                         class="win98-btn tool-chip"
@@ -1930,7 +2208,7 @@
                             </div>
                         </div>
 
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'colors'}>
                             <div class="section-heading">🎨 Paint Color</div>
                             <div class="palette-grid">
                                 {#each STUDIO_PALETTE_24 as c}
@@ -1946,7 +2224,10 @@
                             </div>
                         </div>
 
-                        <div class="tool-section">
+                        <div
+                            class="tool-section"
+                            class:mobile-hide-section={mobileToolTab !== 'tools' && mobileToolTab !== 'colors'}
+                        >
                             <div class="section-heading">⚙️ Brush Dynamics</div>
                             <div class="stacked-sliders">
                                 <div class="slider-row">
@@ -1964,7 +2245,7 @@
                             </div>
                         </div>
 
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'tools'}>
                             <div class="section-heading">🪞 Mirror Symmetry</div>
                             <div class="tools-grid-4">
                                 {#each [
@@ -1985,7 +2266,7 @@
                             </div>
                         </div>
 
-                        <div class="tool-section">
+                        <div class="tool-section" class:mobile-hide-section={mobileToolTab !== 'presets'}>
                             <div class="section-heading">🖼️ Museum Frame Style</div>
                             <div class="tools-grid-2">
                                 {#each [
@@ -2765,6 +3046,9 @@
         height: auto;
         cursor: crosshair;
         display: block;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
     }
 
     .easel-zoom-stage {
@@ -2775,6 +3059,13 @@
         display: block;
         cursor: crosshair;
         background: #111827;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .mobile-studio-dock {
+        display: none;
     }
 
     .viewport-overlay-top {
@@ -2869,6 +3160,9 @@
         background: #181826;
         border: 1px solid #ffd700;
         cursor: crosshair;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
     }
 
     .studio-publish-footer {
@@ -3181,12 +3475,96 @@
     }
 
     @media (max-width: 780px) {
+        .museum-modal-backdrop {
+            padding: 2px;
+        }
+        .museum-window {
+            width: 99vw;
+            max-height: 97vh;
+        }
+        .museum-tab-body {
+            padding: 6px;
+        }
         .inspect-layout,
         .studio-layout {
             grid-template-columns: 1fr;
+            gap: 6px;
         }
         .studio-attribution-bar {
             grid-template-columns: 1fr;
+        }
+        .voxel-viewport-wrap,
+        .easel-viewport-wrap {
+            min-height: 255px;
+            max-height: 285px;
+        }
+        .voxel-studio-canvas,
+        .easel-studio-canvas {
+            max-height: 250px;
+            width: auto;
+            max-width: 100%;
+        }
+        .viewport-hint-bar {
+            font-size: 9px;
+            padding: 3px 6px;
+        }
+        .mobile-studio-dock {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 5px 6px;
+        }
+        .mobile-quick-colors {
+            display: grid;
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            gap: 4px;
+            align-items: center;
+        }
+        .mobile-swatch-dot {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            border: 1.5px solid #222222;
+            padding: 0;
+            cursor: pointer;
+        }
+        .mobile-swatch-dot.active-dot {
+            border: 2px solid #ffffff;
+            outline: 2px solid #000080;
+            transform: scale(1.12);
+        }
+        .mobile-subtabs-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 4px;
+        }
+        .mobile-subtab-btn {
+            padding: 6px 4px;
+            font-size: 10.5px;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mobile-subtab-btn.active-subtab {
+            background: #000080;
+            color: #ffd700;
+        }
+        .mobile-hide-section {
+            display: none !important;
+        }
+        .studio-tools-col {
+            max-height: none;
+            overflow: visible;
+            padding: 6px;
+        }
+        .tool-chip {
+            padding: 7px 5px;
+            font-size: 10.5px;
+        }
+        .palette-grid {
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            gap: 5px;
         }
     }
 </style>

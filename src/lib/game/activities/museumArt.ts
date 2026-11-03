@@ -117,14 +117,23 @@ export function isMuseumCuratorAdmin(username?: string | null): boolean {
 // COLOR SHADING & LEGO PIECE GEOMETRY HELPERS
 // ============================================================================
 
+const shadeColorCache = new Map<string, string>();
+
 export function shadeHexColor(hex: string, percent: number): string {
+    const key = `${hex}_${percent}`;
+    const cached = shadeColorCache.get(key);
+    if (cached) return cached;
+
     const clean = (hex || '#ffffff').replace('#', '');
     const num = parseInt(clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean, 16);
     if (isNaN(num)) return hex;
     const r = Math.min(255, Math.max(0, ((num >> 16) & 0xff) + Math.round(2.55 * percent)));
     const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + Math.round(2.55 * percent)));
     const b = Math.min(255, Math.max(0, (num & 0xff) + Math.round(2.55 * percent)));
-    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    const out = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    if (shadeColorCache.size > 2000) shadeColorCache.clear();
+    shadeColorCache.set(key, out);
+    return out;
 }
 
 /**
@@ -372,37 +381,34 @@ function drawSingleVoxelBrick(
         ctx.globalAlpha = 0.68;
     }
 
-    if (mat === 'neon' && !isGhost) {
-        ctx.shadowColor = baseColor;
-        ctx.shadowBlur = 9;
-    }
-
     const topColor =
         mat === 'gold'
             ? shadeHexColor(baseColor, 26)
             : mat === 'neon'
-              ? shadeHexColor(baseColor, 22)
+              ? shadeHexColor(baseColor, 24)
               : shadeHexColor(baseColor, 10);
     const leftColor =
         mat === 'gold'
             ? shadeHexColor(baseColor, -8)
             : mat === 'neon'
-              ? baseColor
+              ? shadeHexColor(baseColor, 6)
               : shadeHexColor(baseColor, -14);
     const rightColor =
         mat === 'gold'
             ? shadeHexColor(baseColor, -26)
             : mat === 'neon'
-              ? shadeHexColor(baseColor, -12)
+              ? shadeHexColor(baseColor, -8)
               : shadeHexColor(baseColor, -30);
 
     const strokeStyle = isGhost
         ? '#00ffff'
-        : mat === 'glass'
-          ? 'rgba(255,255,255,0.65)'
-          : mat === 'gold'
-            ? 'rgba(255,245,190,0.65)'
-            : 'rgba(0,0,0,0.28)';
+        : mat === 'neon'
+          ? shadeHexColor(baseColor, 48)
+          : mat === 'glass'
+            ? 'rgba(255,255,255,0.65)'
+            : mat === 'gold'
+              ? 'rgba(255,245,190,0.65)'
+              : 'rgba(0,0,0,0.28)';
 
     // Bottom diamond vertices:
     // Top: (sx, sy - hh), Right: (sx + hw, sy), Bottom: (sx, sy + hh), Left: (sx - hw, sy)
@@ -583,6 +589,11 @@ function drawSingleVoxelBrick(
     ctx.restore();
 }
 
+// Offscreen Baseplate Cache (eliminates 768 path draw calls per frame during 60fps mobile touch!)
+let cachedBaseplateCanvas: HTMLCanvasElement | null = null;
+let cachedBaseplateKey = '';
+let cachedBaseplateHits: VoxelHitCandidate[] = [];
+
 /**
  * Renders a 3D IsoLego / Voxel sculpture onto any 2D canvas and optionally returns hit-test polygons
  */
@@ -606,10 +617,7 @@ export function renderVoxelSculptureToCanvas(
     ctx.clearRect(0, 0, width, height);
 
     if (!options.transparentBg) {
-        const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
-        bgGrad.addColorStop(0, options.bgColor || '#131629');
-        bgGrad.addColorStop(1, '#090b16');
-        ctx.fillStyle = bgGrad;
+        ctx.fillStyle = options.bgColor || '#101426';
         ctx.fillRect(0, 0, width, height);
     }
 
@@ -625,88 +633,119 @@ export function renderVoxelSculptureToCanvas(
 
     const hitCandidates: VoxelHitCandidate[] = [];
 
-    // 1. Optional Studded Lego Baseplate (for the interactive 3D Studio)
+    // 1. Optional Studded Lego Baseplate (Cached on offscreen canvas for 60fps mobile touch)
     if (showBaseplate) {
-        // Baseplate outer bevel platform
-        const pTop = projectIsoVoxel(0, 0, 0, originX, originY, tileW, tileH, voxelH);
-        const pRight = projectIsoVoxel(gridSize - 1, 0, 0, originX, originY, tileW, tileH, voxelH);
-        const pBot = projectIsoVoxel(gridSize - 1, gridSize - 1, 0, originX, originY, tileW, tileH, voxelH);
-        const pLeft = projectIsoVoxel(0, gridSize - 1, 0, originX, originY, tileW, tileH, voxelH);
+        const bpKey = `${width}_${height}_${rot}_${zoom.toFixed(3)}_${Math.round(panX)}_${Math.round(panY)}_${gridSize}`;
+        if (typeof document !== 'undefined' && (cachedBaseplateKey !== bpKey || !cachedBaseplateCanvas)) {
+            if (!cachedBaseplateCanvas) {
+                cachedBaseplateCanvas = document.createElement('canvas');
+            }
+            cachedBaseplateCanvas.width = width;
+            cachedBaseplateCanvas.height = height;
+            const bCtx = cachedBaseplateCanvas.getContext('2d');
+            const newBpHits: VoxelHitCandidate[] = [];
 
-        const plateDepth = Math.max(6, voxelH * 0.45);
-        ctx.fillStyle = '#1e293b';
-        ctx.beginPath();
-        ctx.moveTo(pLeft.sx - hw, pLeft.sy);
-        ctx.lineTo(pBot.sx, pBot.sy + hh);
-        ctx.lineTo(pBot.sx, pBot.sy + hh + plateDepth);
-        ctx.lineTo(pLeft.sx - hw, pLeft.sy + plateDepth);
-        ctx.closePath();
-        ctx.fill();
+            if (bCtx) {
+                bCtx.clearRect(0, 0, width, height);
+                const pRight = projectIsoVoxel(gridSize - 1, 0, 0, originX, originY, tileW, tileH, voxelH);
+                const pBot = projectIsoVoxel(gridSize - 1, gridSize - 1, 0, originX, originY, tileW, tileH, voxelH);
+                const pLeft = projectIsoVoxel(0, gridSize - 1, 0, originX, originY, tileW, tileH, voxelH);
 
-        ctx.fillStyle = '#0f172a';
-        ctx.beginPath();
-        ctx.moveTo(pRight.sx + hw, pRight.sy);
-        ctx.lineTo(pBot.sx, pBot.sy + hh);
-        ctx.lineTo(pBot.sx, pBot.sy + hh + plateDepth);
-        ctx.lineTo(pRight.sx + hw, pRight.sy + plateDepth);
-        ctx.closePath();
-        ctx.fill();
+                const plateDepth = Math.max(6, voxelH * 0.45);
+                bCtx.fillStyle = '#1e293b';
+                bCtx.beginPath();
+                bCtx.moveTo(pLeft.sx - hw, pLeft.sy);
+                bCtx.lineTo(pBot.sx, pBot.sy + hh);
+                bCtx.lineTo(pBot.sx, pBot.sy + hh + plateDepth);
+                bCtx.lineTo(pLeft.sx - hw, pLeft.sy + plateDepth);
+                bCtx.closePath();
+                bCtx.fill();
 
-        for (let x = 0; x < gridSize; x++) {
-            for (let y = 0; y < gridSize; y++) {
-                const { rx, ry } = rotateGridCoord(x, y, rot, gridSize);
-                const { sx, sy } = projectIsoVoxel(rx, ry, 0, originX, originY, tileW, tileH, voxelH);
-                const isAlt = (x + y) % 2 === 0;
+                bCtx.fillStyle = '#0f172a';
+                bCtx.beginPath();
+                bCtx.moveTo(pRight.sx + hw, pRight.sy);
+                bCtx.lineTo(pBot.sx, pBot.sy + hh);
+                bCtx.lineTo(pBot.sx, pBot.sy + hh + plateDepth);
+                bCtx.lineTo(pRight.sx + hw, pRight.sy + plateDepth);
+                bCtx.closePath();
+                bCtx.fill();
 
-                const poly = [
-                    { x: sx, y: sy - hh },
-                    { x: sx + hw, y: sy },
-                    { x: sx, y: sy + hh },
-                    { x: sx - hw, y: sy }
-                ];
+                for (let x = 0; x < gridSize; x++) {
+                    for (let y = 0; y < gridSize; y++) {
+                        const { rx, ry } = rotateGridCoord(x, y, rot, gridSize);
+                        const { sx, sy } = projectIsoVoxel(rx, ry, 0, originX, originY, tileW, tileH, voxelH);
+                        const isAlt = (x + y) % 2 === 0;
 
-                ctx.fillStyle = isAlt ? '#283548' : '#222e40';
-                ctx.beginPath();
-                ctx.moveTo(poly[0].x, poly[0].y);
-                ctx.lineTo(poly[1].x, poly[1].y);
-                ctx.lineTo(poly[2].x, poly[2].y);
-                ctx.lineTo(poly[3].x, poly[3].y);
-                ctx.closePath();
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
-                ctx.lineWidth = 0.7;
-                ctx.stroke();
+                        const poly = [
+                            { x: sx, y: sy - hh },
+                            { x: sx + hw, y: sy },
+                            { x: sx, y: sy + hh },
+                            { x: sx - hw, y: sy }
+                        ];
 
-                // Subtle Lego baseplate stud ring
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-                ctx.beginPath();
-                ctx.ellipse(sx, sy, hw * 0.34, hh * 0.34, 0, 0, Math.PI * 2);
-                ctx.stroke();
+                        bCtx.fillStyle = isAlt ? '#283548' : '#222e40';
+                        bCtx.beginPath();
+                        bCtx.moveTo(poly[0].x, poly[0].y);
+                        bCtx.lineTo(poly[1].x, poly[1].y);
+                        bCtx.lineTo(poly[2].x, poly[2].y);
+                        bCtx.lineTo(poly[3].x, poly[3].y);
+                        bCtx.closePath();
+                        bCtx.fill();
+                        bCtx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+                        bCtx.lineWidth = 0.7;
+                        bCtx.stroke();
 
-                if (collectHitCandidates && (sliceZ === null || sliceZ === 0)) {
-                    hitCandidates.push({
-                        x,
-                        y,
-                        z: 0,
-                        normal: { dx: 0, dy: 0, dz: 0 },
-                        isBaseplate: true,
-                        poly
-                    });
+                        bCtx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+                        bCtx.beginPath();
+                        bCtx.ellipse(sx, sy, hw * 0.34, hh * 0.34, 0, 0, Math.PI * 2);
+                        bCtx.stroke();
+
+                        newBpHits.push({
+                            x,
+                            y,
+                            z: 0,
+                            normal: { dx: 0, dy: 0, dz: 0 },
+                            isBaseplate: true,
+                            poly
+                        });
+                    }
                 }
+            }
+            cachedBaseplateKey = bpKey;
+            cachedBaseplateHits = newBpHits;
+        }
+
+        if (cachedBaseplateCanvas) {
+            ctx.drawImage(cachedBaseplateCanvas, 0, 0);
+        }
+        if (collectHitCandidates && (sliceZ === null || sliceZ === 0)) {
+            for (let i = 0; i < cachedBaseplateHits.length; i++) {
+                hitCandidates.push(cachedBaseplateHits[i]);
             }
         }
     }
 
-    // Fast lookup set for occupied coordinates (so we only draw studs on exposed top faces)
+    // Fast lookup set for occupied coordinates (so we only draw studs and hit-test exposed faces)
     const occupiedSet = new Set<string>();
     for (const v of voxels) {
+        if (sliceZ !== null && v.z > sliceZ) continue;
         occupiedSet.add(`${v.x},${v.y},${v.z}`);
     }
+
+    // Map screen-space normal directions back to world (dx, dy) based on rotation
+    const unrotateDelta = (drx: number, dry: number): { dx: number; dy: number } => {
+        if (rot === 1) return { dx: dry, dy: -drx };
+        if (rot === 2) return { dx: -drx, dy: -dry };
+        if (rot === 3) return { dx: -dry, dy: drx };
+        return { dx: drx, dy: dry };
+    };
+    const leftNormal = unrotateDelta(0, 1);
+    const rightNormal = unrotateDelta(1, 0);
 
     // Combine real bricks + ghost preview bricks and depth-sort back-to-front, bottom-to-top
     const combined: Array<{ brick: VoxelBrick; isGhost: boolean; rx: number; ry: number; sortKey: number }> = [];
     for (const v of voxels) {
-        if (sliceZ !== null && v.z > sliceZ) continue; // Hide layers above sliceZ when slicing!
+        if (sliceZ !== null && v.z > sliceZ) continue;
         const { rx, ry } = rotateGridCoord(v.x, v.y, rot, gridSize);
         combined.push({
             brick: v,
@@ -732,19 +771,20 @@ export function renderVoxelSculptureToCanvas(
 
     combined.sort((a, b) => a.sortKey - b.sortKey);
 
-    // Map screen-space normal directions back to world (dx, dy) based on rotation
-    const unrotateDelta = (drx: number, dry: number): { dx: number; dy: number } => {
-        if (rot === 1) return { dx: dry, dy: -drx };
-        if (rot === 2) return { dx: -drx, dy: -dry };
-        if (rot === 3) return { dx: -dry, dy: drx };
-        return { dx: drx, dy: dry };
-    };
-
     for (const item of combined) {
         const { brick, isGhost, rx, ry } = item;
-        const { sx, sy } = projectIsoVoxel(rx, ry, brick.z, originX, originY, tileW, tileH, voxelH);
         const hasAbove = !isGhost && occupiedSet.has(`${brick.x},${brick.y},${brick.z + 1}`);
+        const hasLeftNeighbor =
+            !isGhost && occupiedSet.has(`${brick.x + leftNormal.dx},${brick.y + leftNormal.dy},${brick.z}`);
+        const hasRightNeighbor =
+            !isGhost && occupiedSet.has(`${brick.x + rightNormal.dx},${brick.y + rightNormal.dy},${brick.z}`);
 
+        // Skip drawing & hit-testing completely buried interior blocks
+        if (!isGhost && hasAbove && hasLeftNeighbor && hasRightNeighbor && brick.material !== 'glass') {
+            continue;
+        }
+
+        const { sx, sy } = projectIsoVoxel(rx, ry, brick.z, originX, originY, tileW, tileH, voxelH);
         drawSingleVoxelBrick(ctx, sx, sy, hw, hh, voxelH, brick, hasAbove, isGhost);
 
         if (collectHitCandidates && !isGhost && sliceZ === null) {
@@ -756,37 +796,41 @@ export function renderVoxelSculptureToCanvas(
             const botS = { x: sx, y: sy + hh };
             const botW = { x: sx - hw, y: sy };
 
-            // Left Face (+ry in screen space)
-            const leftNormal = unrotateDelta(0, 1);
-            hitCandidates.push({
-                x: brick.x,
-                y: brick.y,
-                z: brick.z,
-                normal: { dx: leftNormal.dx, dy: leftNormal.dy, dz: 0 },
-                isBaseplate: false,
-                poly: [topW, topS, botS, botW]
-            });
+            // Left Face (+ry in screen space) — only if exposed
+            if (!hasLeftNeighbor) {
+                hitCandidates.push({
+                    x: brick.x,
+                    y: brick.y,
+                    z: brick.z,
+                    normal: { dx: leftNormal.dx, dy: leftNormal.dy, dz: 0 },
+                    isBaseplate: false,
+                    poly: [topW, topS, botS, botW]
+                });
+            }
 
-            // Right Face (+rx in screen space)
-            const rightNormal = unrotateDelta(1, 0);
-            hitCandidates.push({
-                x: brick.x,
-                y: brick.y,
-                z: brick.z,
-                normal: { dx: rightNormal.dx, dy: rightNormal.dy, dz: 0 },
-                isBaseplate: false,
-                poly: [topE, topS, botS, botE]
-            });
+            // Right Face (+rx in screen space) — only if exposed
+            if (!hasRightNeighbor) {
+                hitCandidates.push({
+                    x: brick.x,
+                    y: brick.y,
+                    z: brick.z,
+                    normal: { dx: rightNormal.dx, dy: rightNormal.dy, dz: 0 },
+                    isBaseplate: false,
+                    poly: [topE, topS, botS, botE]
+                });
+            }
 
-            // Top Face (+z)
-            hitCandidates.push({
-                x: brick.x,
-                y: brick.y,
-                z: brick.z,
-                normal: { dx: 0, dy: 0, dz: 1 },
-                isBaseplate: false,
-                poly: [topN, topE, topS, topW]
-            });
+            // Top Face (+z) — only if exposed
+            if (!hasAbove) {
+                hitCandidates.push({
+                    x: brick.x,
+                    y: brick.y,
+                    z: brick.z,
+                    normal: { dx: 0, dy: 0, dz: 1 },
+                    isBaseplate: false,
+                    poly: [topN, topE, topS, topW]
+                });
+            }
         }
     }
 

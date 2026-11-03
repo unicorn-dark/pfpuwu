@@ -1028,73 +1028,6 @@ for (let y = 0; y < MAP_SIZE; y++) {
 }
 
 export const MUSEUM_OBJECTS: WorldObject[] = [
-    // --- 5 GRAND GALLERY WING ARCHWAYS ---
-    {
-        id: 'museum-banner-rotunda',
-        type: 'banner_sign',
-        x: 16.0,
-        y: 9.8,
-        width: 4.6,
-        height: 0.6,
-        depthOffset: -120,
-        title: '🏛️ UWU GRAND ART MUSEUM',
-        subtitle: '25 EXHIBITS • 2D EASELS & 3D ISOLEGO • CURATOR @0XSHA3',
-        badgeColor: '#ffd700',
-        solidTiles: []
-    },
-    {
-        id: 'museum-banner-nw',
-        type: 'banner_sign',
-        x: 9.5,
-        y: 3.2,
-        width: 4.0,
-        height: 0.6,
-        depthOffset: -120,
-        title: 'NW RENAISSANCE HALL',
-        subtitle: 'EXHIBITION SPOTS #1 – #5',
-        badgeColor: '#ff99cc',
-        solidTiles: []
-    },
-    {
-        id: 'museum-banner-ne',
-        type: 'banner_sign',
-        x: 22.5,
-        y: 3.2,
-        width: 4.0,
-        height: 0.6,
-        depthOffset: -120,
-        title: 'NE VOXEL PAVILION',
-        subtitle: 'EXHIBITION SPOTS #6 – #10',
-        badgeColor: '#00ffff',
-        solidTiles: []
-    },
-    {
-        id: 'museum-banner-sw',
-        type: 'banner_sign',
-        x: 9.5,
-        y: 19.6,
-        width: 4.0,
-        height: 0.6,
-        depthOffset: -120,
-        title: 'SW CONTEMPORARY WING',
-        subtitle: 'EXHIBITION SPOTS #16 – #20',
-        badgeColor: '#00ff88',
-        solidTiles: []
-    },
-    {
-        id: 'museum-banner-se',
-        type: 'banner_sign',
-        x: 22.5,
-        y: 19.6,
-        width: 4.0,
-        height: 0.6,
-        depthOffset: -120,
-        title: 'SE DIGITAL & HOLO WING',
-        subtitle: 'EXHIBITION SPOTS #21 – #25 • CASINO →',
-        badgeColor: '#e0b0ff',
-        solidTiles: []
-    },
-
     // --- 25 INTERACTIVE MUSEUM PEDESTALS (SPOTS #1 - #25) ---
     ...MUSEUM_PEDESTAL_LOCATIONS.map((loc) => ({
         id: `museum-spot-${loc.spotNumber}`,
@@ -1108,19 +1041,7 @@ export const MUSEUM_OBJECTS: WorldObject[] = [
             spotNumber: loc.spotNumber,
             wingName: loc.wingName
         }
-    })),
-
-    // --- CLASSICAL FLUTED MARBLE COLUMNS & VELVET GALLERY BENCHES ---
-    { id: 'm-pillar-1', type: 'vip_pillar', x: 14.5, y: 12.5, width: 0.6, height: 0.6, solidTiles: [{ x: 14, y: 12 }] },
-    { id: 'm-pillar-2', type: 'vip_pillar', x: 17.5, y: 12.5, width: 0.6, height: 0.6, solidTiles: [{ x: 17, y: 12 }] },
-    { id: 'm-pillar-3', type: 'vip_pillar', x: 14.5, y: 19.5, width: 0.6, height: 0.6, solidTiles: [{ x: 14, y: 19 }] },
-    { id: 'm-pillar-4', type: 'vip_pillar', x: 17.5, y: 19.5, width: 0.6, height: 0.6, solidTiles: [{ x: 17, y: 19 }] },
-    { id: 'm-sofa-1', type: 'sofa', x: 13.5, y: 16.0, width: 1.0, height: 1.0, solidTiles: [{ x: 13, y: 16 }] },
-    { id: 'm-sofa-2', type: 'sofa', x: 18.5, y: 16.0, width: 1.0, height: 1.0, solidTiles: [{ x: 18, y: 16 }] },
-    { id: 'm-lamp-1', type: 'street_lamp', x: 3.5, y: 14.5, width: 0.5, height: 0.5, solidTiles: [{ x: 3, y: 14 }] },
-    { id: 'm-lamp-2', type: 'street_lamp', x: 28.5, y: 14.5, width: 0.5, height: 0.5, solidTiles: [{ x: 28, y: 14 }] },
-    { id: 'm-lamp-3', type: 'street_lamp', x: 3.5, y: 17.5, width: 0.5, height: 0.5, solidTiles: [{ x: 3, y: 17 }] },
-    { id: 'm-lamp-4', type: 'street_lamp', x: 28.5, y: 17.5, width: 0.5, height: 0.5, solidTiles: [{ x: 28, y: 17 }] }
+    }))
 ];
 
 MUSEUM_OBJECTS.forEach((obj) => {
