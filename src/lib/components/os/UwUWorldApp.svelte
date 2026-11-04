@@ -4965,8 +4965,8 @@
     <!-- Sleek Single-Row Top HUD Bar -->
     <div class="mmo-toolbar">
         <div class="toolbar-left">
-            <span class="room-pill">
-                {currentZoneName}
+            <span class="room-pill" title={currentZoneName}>
+                <span class="room-name-text">{currentZoneName}</span>
                 <span class="online-inline">🟢 {onlineCount}</span>
             </span>
 
@@ -7377,7 +7377,9 @@
         flex-shrink: 0;
         border-bottom: 2px solid #808080;
         gap: 6px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        min-height: 32px;
+        box-sizing: border-box;
     }
 
     .toolbar-left,
@@ -7386,6 +7388,17 @@
         display: flex;
         align-items: center;
         gap: 5px;
+    }
+
+    .toolbar-left {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+    }
+
+    .toolbar-right {
+        flex-shrink: 0;
+        white-space: nowrap;
     }
 
     .quick-travel-bar {
@@ -7414,6 +7427,26 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .room-pill {
+        width: 195px;
+        max-width: 195px;
+        min-width: 0;
+        flex: 0 1 195px;
+        justify-content: space-between;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .room-name-text {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .chips-pill {
@@ -8714,7 +8747,7 @@
     .travel-popover {
         position: absolute;
         top: calc(100% + 4px);
-        right: 0;
+        left: 0;
         width: 165px;
         padding: 4px;
         display: flex;
@@ -9934,6 +9967,27 @@
     }
 
     @media (max-width: 768px) {
+        .mmo-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+            padding: 4px 6px;
+        }
+        .toolbar-left {
+            width: 100%;
+            justify-content: space-between;
+            flex-wrap: nowrap;
+        }
+        .room-pill {
+            width: 0;
+            max-width: none;
+            flex: 1 1 0;
+        }
+        .toolbar-right {
+            width: 100%;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
         .desktop-ptt-hint {
             display: none;
         }

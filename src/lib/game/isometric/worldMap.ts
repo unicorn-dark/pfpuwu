@@ -1063,7 +1063,7 @@ for (let y = 14; y <= 17; y++) {
 export const MUSEUM_ZONES: ZoneTrigger[] = [
     {
         id: 'museum-rotunda',
-        name: '🏛️ Grand Museum Rotunda (Spots #11–#15)',
+        name: '🏛️ Grand Rotunda (#11–#15)',
         minX: 11,
         maxX: 21,
         minY: 11,
@@ -1072,7 +1072,7 @@ export const MUSEUM_ZONES: ZoneTrigger[] = [
     },
     {
         id: 'museum-nw',
-        name: '🖼️ NW Renaissance Hall (Spots #1–#5)',
+        name: '🖼️ NW Gallery (#1–#5)',
         minX: 3,
         maxX: 14,
         minY: 3,
@@ -1081,7 +1081,7 @@ export const MUSEUM_ZONES: ZoneTrigger[] = [
     },
     {
         id: 'museum-ne',
-        name: '🧱 NE Voxel Pavilion (Spots #6–#10)',
+        name: '🧱 NE Voxel Wing (#6–#10)',
         minX: 17,
         maxX: 28,
         minY: 3,
@@ -1090,7 +1090,7 @@ export const MUSEUM_ZONES: ZoneTrigger[] = [
     },
     {
         id: 'museum-sw',
-        name: '🎨 SW Contemporary Wing (Spots #16–#20)',
+        name: '🎨 SW Modern Wing (#16–#20)',
         minX: 3,
         maxX: 14,
         minY: 20,
@@ -1099,7 +1099,7 @@ export const MUSEUM_ZONES: ZoneTrigger[] = [
     },
     {
         id: 'museum-se',
-        name: '✨ SE Digital & Holo Wing (Spots #21–#25)',
+        name: '✨ SE Holo Wing (#21–#25)',
         minX: 17,
         maxX: 30,
         minY: 20,
