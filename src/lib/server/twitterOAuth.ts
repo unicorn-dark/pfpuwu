@@ -53,15 +53,21 @@ export function getCachedOAuth1TokenSecret(oauthToken: string): string | null {
 }
 
 /**
- * Encodes OAuth 2.0 PKCE codeVerifier inside a self-verifying encrypted state token
+ * Encodes OAuth 2.0 PKCE codeVerifier (and optional @handle hint) inside a self-verifying encrypted state token
  * so OAuth 2.0 callbacks succeed even when third-party / cross-subdomain cookies are blocked.
  */
-export function createStatelessOAuth2State(codeVerifier: string, secretKey: string): string {
+export function createStatelessOAuth2State(
+    codeVerifier: string,
+    secretKey: string,
+    handleHint?: string
+): string {
     const key = crypto.createHash('sha256').update(secretKey).digest();
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const cleanHandle = (handleHint || '').replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const payload = JSON.stringify({
         v: codeVerifier,
+        h: cleanHandle || undefined,
         t: Date.now()
     });
     const encrypted = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
@@ -69,7 +75,10 @@ export function createStatelessOAuth2State(codeVerifier: string, secretKey: stri
     return `${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
 }
 
-export function verifyStatelessOAuth2State(stateToken: string, secretKey: string): string | null {
+export function verifyStatelessOAuth2StatePayload(
+    stateToken: string,
+    secretKey: string
+): { codeVerifier: string; handleHint?: string } | null {
     try {
         const parts = stateToken.split('.');
         if (parts.length !== 3) return null;
@@ -81,13 +90,125 @@ export function verifyStatelessOAuth2State(stateToken: string, secretKey: string
         const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
         decipher.setAuthTag(tag);
         const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
-        const parsed = JSON.parse(decrypted) as { v?: string; t?: number };
+        const parsed = JSON.parse(decrypted) as { v?: string; h?: string; t?: number };
         if (!parsed.v || !parsed.t) return null;
         if (Date.now() - parsed.t > 20 * 60 * 1000) return null; // 20 min expiry
-        return parsed.v;
+        return {
+            codeVerifier: parsed.v,
+            handleHint: parsed.h
+        };
     } catch {
         return null;
     }
+}
+
+export function verifyStatelessOAuth2State(stateToken: string, secretKey: string): string | null {
+    const res = verifyStatelessOAuth2StatePayload(stateToken, secretKey);
+    return res ? res.codeVerifier : null;
+}
+
+/**
+ * Creates a short-lived (15 min) encrypted proof token confirming that X's OAuth 2.0 token endpoint
+ * (`POST https://api.x.com/2/oauth2/token`) cryptographically verified the user's authorization code.
+ */
+export function createOAuth2VerifiedProof(secretKey: string): string {
+    const key = crypto.createHash('sha256').update(`oauth2_proof:${secretKey}`).digest();
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const payload = JSON.stringify({
+        ok: true,
+        t: Date.now(),
+        n: crypto.randomBytes(8).toString('hex')
+    });
+    const encrypted = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+export function verifyOAuth2VerifiedProof(proofToken: string, secretKey: string): boolean {
+    try {
+        const parts = proofToken.split('.');
+        if (parts.length !== 3) return false;
+        const [ivB64, tagB64, dataB64] = parts;
+        const key = crypto.createHash('sha256').update(`oauth2_proof:${secretKey}`).digest();
+        const iv = Buffer.from(ivB64, 'base64url');
+        const tag = Buffer.from(tagB64, 'base64url');
+        const encrypted = Buffer.from(dataB64, 'base64url');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(tag);
+        const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+        const parsed = JSON.parse(decrypted) as { ok?: boolean; t?: number };
+        if (!parsed.ok || !parsed.t) return false;
+        if (Date.now() - parsed.t > 15 * 60 * 1000) return false; // 15 min expiry
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Resolves a public X user's numeric ID, canonical username, and display name from their @handle
+ * when OAuth 2.0 token exchange succeeds (`200 OK`) but `/2/users/me` returns `403 client-not-enrolled`
+ * on Standalone Apps.
+ */
+export async function resolvePublicXUserByHandle(rawHandle: string): Promise<TwitterUser | null> {
+    const clean = rawHandle.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!clean || clean.length > 30) return null;
+
+    // 1. Try fxtwitter API (fast JSON lookup returning exact numeric X ID, screen_name, and display name)
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`https://api.fxtwitter.com/${encodeURIComponent(clean)}`, {
+            headers: {
+                Accept: 'application/json',
+                'User-Agent': 'pfpuwu/1.0 (https://uwu.meme)'
+            },
+            signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        if (res.ok) {
+            const data = await res.json();
+            const u = data?.user;
+            if (u && (u.id || u.screen_name)) {
+                return {
+                    id: String(u.id || `x_${clean}`),
+                    username: String(u.screen_name || clean).toLowerCase().replace(/^@/, ''),
+                    name: String(u.name || u.screen_name || clean),
+                    profileImageUrl: '/unicorn.png'
+                };
+            }
+        }
+    } catch {}
+
+    // 2. Fallback to vxtwitter API
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`https://api.vxtwitter.com/${encodeURIComponent(clean)}`, {
+            headers: {
+                Accept: 'application/json',
+                'User-Agent': 'pfpuwu/1.0 (https://uwu.meme)'
+            },
+            signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data && (data.user_id || data.user_screen_name || data.name)) {
+                return {
+                    id: String(data.user_id || `x_${clean}`),
+                    username: String(data.user_screen_name || clean).toLowerCase().replace(/^@/, ''),
+                    name: String(data.name || data.user_screen_name || clean),
+                    profileImageUrl: '/unicorn.png'
+                };
+            }
+        }
+    } catch {}
+
+    return null;
 }
 
 export function percentEncode(str: string): string {

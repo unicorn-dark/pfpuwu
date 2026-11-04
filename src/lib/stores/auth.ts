@@ -23,6 +23,7 @@ export const authLoading = writable<boolean>(true);
 export const userProfile = writable<UserProfile | null>(null);
 export const showAuthModal = writable<boolean>(false);
 export const authError = writable<string>('');
+export const oauth2VerifiedProof = writable<string>('');
 export const authModalReason = writable<string>(
     'Sign in with X (Twitter) to unlock social features and prevent spam.'
 );
@@ -124,10 +125,14 @@ export async function initAuth() {
             userProfile.set(clean);
             localStorage.setItem(LOCAL_PROFILE_STORAGE_KEY, JSON.stringify(clean));
             authError.set('');
+            oauth2VerifiedProof.set('');
             showAuthModal.set(false);
             if (!clean.avatar_traits || Object.keys(clean.avatar_traits).length === 0) {
                 showAvatarCustomizer.set(true);
             }
+        } else if (ev.data?.type === 'UWU_X_OAUTH2_VERIFIED' && ev.data?.proof) {
+            oauth2VerifiedProof.set(String(ev.data.proof));
+            showAuthModal.set(true);
         }
     });
 
@@ -138,19 +143,40 @@ export async function initAuth() {
                 const clean = await enforceCleanTransparentProfile(parsed);
                 userProfile.set(clean);
                 authError.set('');
+                oauth2VerifiedProof.set('');
                 showAuthModal.set(false);
             } catch {}
         }
     });
 
     try {
-        // 0. Check if redirected back with ?auth_error=...
+        // 0. Check if redirected back with ?oauth2_verified=... or ?auth_error=...
         const urlParams = new URLSearchParams(window.location.search);
+        const verifiedProofFromUrl = urlParams.get('oauth2_verified');
         const errFromUrl = urlParams.get('auth_error');
-        if (errFromUrl) {
-            authError.set(errFromUrl);
+        if (verifiedProofFromUrl || errFromUrl) {
+            if (verifiedProofFromUrl) {
+                oauth2VerifiedProof.set(verifiedProofFromUrl);
+                urlParams.delete('oauth2_verified');
+                if (window.opener && window.opener !== window && window.name === 'uwu_x_oauth_popup') {
+                    try {
+                        window.opener.postMessage(
+                            { type: 'UWU_X_OAUTH2_VERIFIED', proof: verifiedProofFromUrl },
+                            window.location.origin
+                        );
+                        setTimeout(() => {
+                            try {
+                                window.close();
+                            } catch {}
+                        }, 120);
+                    } catch {}
+                }
+            }
+            if (errFromUrl) {
+                authError.set(errFromUrl);
+                urlParams.delete('auth_error');
+            }
             showAuthModal.set(true);
-            urlParams.delete('auth_error');
             const newQuery = urlParams.toString();
             const cleanUrl =
                 window.location.pathname + (newQuery ? `?${newQuery}` : '') + window.location.hash;
@@ -306,15 +332,20 @@ export function requireSocialAccess(
 
 export async function loginWithX(
     flow: 'oauth1' | 'authorize' | 'force' | 'twitter' | 'oauth2' = 'oauth1',
-    usePopup = false
+    usePopup = false,
+    handleHint = ''
 ): Promise<{ ok: boolean; error?: string }> {
     try {
         authError.set('');
         if (typeof window !== 'undefined') {
+            const cleanHandle = handleHint.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
             const params = new URLSearchParams({
                 _t: String(Date.now()),
                 flow
             });
+            if (cleanHandle) {
+                params.set('handle', cleanHandle);
+            }
             const targetUrl = `/api/auth/x/login?${params.toString()}`;
 
             if (usePopup && window.innerWidth >= 700) {
@@ -342,6 +373,20 @@ export async function loginWithX(
             error: err?.message || 'Failed to initiate X login'
         };
     }
+}
+
+export function completeOAuth2WithHandle(handle: string, proofOverride?: string): void {
+    if (typeof window === 'undefined') return;
+    const cleanHandle = handle.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const proof = proofOverride || get(oauth2VerifiedProof);
+    if (!cleanHandle || !proof) return;
+
+    const params = new URLSearchParams({
+        oauth2_proof: proof,
+        handle: cleanHandle,
+        _t: String(Date.now())
+    });
+    window.location.href = `/api/auth/x/callback?${params.toString()}`;
 }
 
 export async function logoutX() {

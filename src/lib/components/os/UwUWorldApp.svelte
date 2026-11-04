@@ -7202,10 +7202,10 @@
                             <button
                                 type="button"
                                 class="win98-btn gate-secondary-btn"
-                                onclick={() => handleWorldXLogin("force")}
+                                onclick={() => handleWorldXLogin("oauth2")}
                                 disabled={isLoggingInWithX}
                             >
-                                🔄 Force Fresh 𝕏 Login (Fix Token / Session Error)
+                                ⚡ Sign In via 𝕏 OAuth 2.0 (Fixes "No request token")
                             </button>
 
                             <button

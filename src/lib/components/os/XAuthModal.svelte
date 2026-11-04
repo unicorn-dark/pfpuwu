@@ -3,7 +3,9 @@
         showAuthModal,
         authModalReason,
         authError,
+        oauth2VerifiedProof,
         loginWithX,
+        completeOAuth2WithHandle,
         userProfile,
         logoutX,
         showAvatarCustomizer
@@ -13,6 +15,7 @@
     let isSubmitting = $state(false);
     let showDevMode = $state(false);
     let devHandle = $state("");
+    let oauth2Handle = $state("");
 
     function closeModal() {
         showAuthModal.set(false);
@@ -27,13 +30,24 @@
     ) {
         isSubmitting = true;
         statusMessage = "";
-        const res = await loginWithX(flow, usePopup);
+        const res = await loginWithX(flow, usePopup, oauth2Handle);
         isSubmitting = false;
         if (!res.ok) {
             statusMessage =
                 res.error ||
                 "X OAuth is not yet enabled in your Supabase Dashboard (Auth -> Providers -> Twitter).";
         }
+    }
+
+    function handleOAuth2HandleSubmit(e: Event) {
+        e.preventDefault();
+        const cleaned = oauth2Handle.replace(/^@/, "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+        if (!cleaned) {
+            statusMessage = "Please enter your @handle (e.g. Shesho3) to finish connecting.";
+            return;
+        }
+        isSubmitting = true;
+        completeOAuth2WithHandle(cleaned);
     }
 
     // Dev sandbox bypass: only shown when OAuth fails or explicitly toggled for offline testing
@@ -105,6 +119,25 @@
                         <button class="win98-btn" onclick={logoutX}>Log Off</button>
                         <button class="win98-btn primary" onclick={closeModal}>OK</button>
                     </div>
+                {:else if $oauth2VerifiedProof}
+                    <fieldset class="win98-fieldset oauth2-verified-fieldset">
+                        <legend>✅ 𝕏 OAuth 2.0 Authorized!</legend>
+                        <p class="dialog-note" style="margin-bottom: 8px;">
+                            𝕏 verified your authorization! Enter your <strong>@handle</strong> below to link your profile and enter UwU World:
+                        </p>
+                        <form onsubmit={handleOAuth2HandleSubmit} class="dev-form">
+                            <input
+                                type="text"
+                                class="win98-input"
+                                placeholder="@your_x_handle"
+                                bind:value={oauth2Handle}
+                                required
+                            />
+                            <button type="submit" class="win98-btn primary" disabled={isSubmitting}>
+                                {isSubmitting ? "Linking..." : "Finish Sign-In →"}
+                            </button>
+                        </form>
+                    </fieldset>
                 {:else}
                     <div class="info-row">
                         <div class="key-icon">🔐</div>
@@ -129,14 +162,28 @@
                             <span>{isSubmitting ? "Connecting to 𝕏..." : "Sign In with 𝕏"}</span>
                         </button>
 
-                        <button
-                            type="button"
-                            class="win98-btn oauth-alt-btn"
-                            onclick={() => handleOAuthClick("authorize", true)}
-                            disabled={isSubmitting}
-                        >
-                            🪟 Popup / Instant Re-Connect (Fixes "No request token")
-                        </button>
+                        <fieldset class="win98-fieldset oauth2-alt-box">
+                            <legend>⚡ Seeing "There is no request token"?</legend>
+                            <p class="oauth2-alt-note">
+                                Use <strong>OAuth 2.0</strong> (bypasses legacy request tokens completely). Optional: enter your <code>@handle</code> for 1-step login:
+                            </p>
+                            <div class="oauth2-alt-row">
+                                <input
+                                    type="text"
+                                    class="win98-input"
+                                    placeholder="@handle (optional)"
+                                    bind:value={oauth2Handle}
+                                />
+                                <button
+                                    type="button"
+                                    class="win98-btn oauth-alt-btn"
+                                    onclick={() => handleOAuthClick("oauth2", false)}
+                                    disabled={isSubmitting}
+                                >
+                                    ⚡ Sign In (OAuth 2.0)
+                                </button>
+                            </div>
+                        </fieldset>
                     </div>
 
                     {#if statusMessage || $authError}
@@ -300,10 +347,35 @@
     }
 
     .oauth-alt-btn {
-        font-size: 10px !important;
-        padding: 5px 8px !important;
+        font-size: 11px !important;
+        padding: 5px 10px !important;
         color: #000080 !important;
         font-weight: bold !important;
+        white-space: nowrap;
+    }
+
+    .oauth2-alt-box {
+        background: #eef4ff;
+        text-align: left;
+        margin-top: 2px;
+    }
+
+    .oauth2-alt-note {
+        margin: 0 0 6px;
+        font-size: 10px;
+        line-height: 1.35;
+        color: #222;
+    }
+
+    .oauth2-alt-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .oauth2-verified-fieldset {
+        background: #e6ffe6;
+        border-color: #008000 #ffffff #ffffff #008000;
     }
 
     .win98-fieldset {

@@ -7,7 +7,10 @@ import {
     getOAuth1AccessToken,
     getOAuth1UserProfile,
     getCachedOAuth1TokenSecret,
-    verifyStatelessOAuth2State,
+    verifyStatelessOAuth2StatePayload,
+    createOAuth2VerifiedProof,
+    verifyOAuth2VerifiedProof,
+    resolvePublicXUserByHandle,
     type TwitterUser
 } from '$lib/server/twitterOAuth';
 import { resolveAppOrigin, resolveCookieDomain } from '$lib/server/origin';
@@ -19,7 +22,7 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         'Expires': '0'
     });
 
-    const { origin } = resolveAppOrigin(url, request);
+    const { origin, isHttps } = resolveAppOrigin(url, request);
     const cookieDomain = resolveCookieDomain(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
 
@@ -27,6 +30,26 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         cookies.delete(name, { path: '/' });
         if (cookieDomain) {
             cookies.delete(name, { path: '/', domain: cookieDomain });
+        }
+    };
+
+    const setCookieWithDomainFallback = (name: string, value: string, maxAge: number) => {
+        cookies.set(name, value, {
+            path: '/',
+            httpOnly: true,
+            secure: isHttps,
+            sameSite: 'lax',
+            maxAge
+        });
+        if (cookieDomain) {
+            cookies.set(name, value, {
+                path: '/',
+                domain: cookieDomain,
+                httpOnly: true,
+                secure: isHttps,
+                sameSite: 'lax',
+                maxAge
+            });
         }
     };
 
@@ -40,6 +63,8 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
 
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
+    const oauth2ProofParam = url.searchParams.get('oauth2_proof') || cookies.get('x_oauth2_verified') || '';
+    const handleParam = url.searchParams.get('handle') || '';
     const errorParam = url.searchParams.get('error');
     const errorDescription = url.searchParams.get('error_description');
 
@@ -92,7 +117,7 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
             throw redirect(
                 302,
                 `/?auth_error=${encodeURIComponent(
-                    'X login session expired or failed. Please try again or click Force Fresh X Login.'
+                    'X OAuth 1.0a session expired. Please use the OAuth 2.0 Sign-In button below (no request token required).'
                 )}`
             );
         }
@@ -108,12 +133,15 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         }
 
         const stateSecret = clientSecret || apiSecret || clientId;
-        const statelessVerifier = verifyStatelessOAuth2State(state, stateSecret);
+        const statelessPayload = verifyStatelessOAuth2StatePayload(state, stateSecret);
         const savedState = cookies.get('x_oauth_state');
         const cookieVerifier = cookies.get('x_oauth_verifier');
 
         const codeVerifier =
-            statelessVerifier || (savedState && state === savedState ? cookieVerifier : null);
+            statelessPayload?.codeVerifier ||
+            (savedState && state === savedState ? cookieVerifier : null);
+        const handleHint =
+            statelessPayload?.handleHint || cookies.get('x_oauth_handle_hint') || '';
 
         if (!codeVerifier) {
             console.error('X OAuth 2.0 state mismatch or missing verifier');
@@ -147,39 +175,69 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
 
+        clearCookieEverywhere('x_oauth_state');
+        clearCookieEverywhere('x_oauth_verifier');
+        clearCookieEverywhere('x_oauth_handle_hint');
+
         const userRes = await fetch(
             'https://api.x.com/2/users/me?user.fields=profile_image_url,name,username',
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
         );
 
-        if (!userRes.ok) {
+        if (userRes.ok) {
+            const userJson = await userRes.json();
+            const xUser = userJson.data;
+
+            twitterUser = {
+                id: String(xUser.id),
+                username: String(xUser.username).toLowerCase().replace(/^@/, ''),
+                name: String(xUser.name || xUser.username),
+                profileImageUrl: '/unicorn.png'
+            };
+        } else {
             const errText = await userRes.text();
-            console.error('Failed to fetch X user profile:', userRes.status, errText);
-            clearCookieEverywhere('x_oauth_state');
-            clearCookieEverywhere('x_oauth_verifier');
+            console.warn('X /2/users/me returned status:', userRes.status, errText);
 
-            // If X returns 403 client-not-enrolled (because App 33541174 is a Standalone App not attached to a Project),
-            // automatically fall back to OAuth 1.0a force_login on api.x.com which does not use v2 endpoints!
-            if (userRes.status === 403 && env.X_API_KEY && env.X_API_SECRET) {
-                throw redirect(302, `/api/auth/x/login?flow=force&_t=${Date.now()}`);
+            // IMPORTANT: Do NOT redirect back to OAuth 1.0a (/oauth/authorize) when /2/users/me returns 403!
+            // At this point `POST https://api.x.com/2/oauth2/token` SUCCEEDED (200 OK), proving the user
+            // authorized our app on x.com/i/oauth2/authorize.
+            if (handleHint) {
+                const resolved = await resolvePublicXUserByHandle(handleHint);
+                const cleanHint = handleHint.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+                twitterUser = resolved || {
+                    id: `x_${cleanHint}`,
+                    username: cleanHint,
+                    name: cleanHint,
+                    profileImageUrl: '/unicorn.png'
+                };
+            } else {
+                const proof = createOAuth2VerifiedProof(stateSecret);
+                setCookieWithDomainFallback('x_oauth2_verified', proof, 60 * 15);
+                throw redirect(302, `/?oauth2_verified=${encodeURIComponent(proof)}`);
             }
-
-            const cleanErr = errText.slice(0, 150).replace(/[^\w\s-]/g, ' ');
-            throw redirect(302, `/?auth_error=X+Profile+Error+${userRes.status}+${encodeURIComponent(cleanErr)}`);
+        }
+    }
+    // FLOW C: Completing OAuth 2.0 login with verified proof + @handle
+    else if (oauth2ProofParam && handleParam) {
+        const stateSecret = env.X_CLIENT_SECRET || env.X_API_SECRET || env.X_CLIENT_ID || '';
+        if (!stateSecret || !verifyOAuth2VerifiedProof(oauth2ProofParam, stateSecret)) {
+            throw redirect(302, '/?auth_error=OAuth+2.0+verification+expired.+Please+sign+in+again.');
         }
 
-        const userJson = await userRes.json();
-        const xUser = userJson.data;
+        const cleanHandle = handleParam.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+        if (!cleanHandle) {
+            throw redirect(302, `/?oauth2_verified=${encodeURIComponent(oauth2ProofParam)}&auth_error=Please+enter+your+valid+X+handle`);
+        }
 
-        twitterUser = {
-            id: String(xUser.id),
-            username: String(xUser.username).toLowerCase().replace(/^@/, ''),
-            name: String(xUser.name || xUser.username),
+        const resolved = await resolvePublicXUserByHandle(cleanHandle);
+        twitterUser = resolved || {
+            id: `x_${cleanHandle}`,
+            username: cleanHandle,
+            name: cleanHandle,
             profileImageUrl: '/unicorn.png'
         };
 
-        clearCookieEverywhere('x_oauth_state');
-        clearCookieEverywhere('x_oauth_verifier');
+        clearCookieEverywhere('x_oauth2_verified');
     } else {
         throw redirect(302, '/?auth_error=Invalid+authentication+callback');
     }

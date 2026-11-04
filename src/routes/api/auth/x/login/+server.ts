@@ -18,10 +18,14 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
     const cookieDomain = resolveCookieDomain(url, request);
     const redirectUri = `${origin}/api/auth/x/callback`;
     const isProd = isHttps;
-    const requestedFlow = url.searchParams.get('flow'); // 'oauth1' | 'authorize' | 'force' | 'oauth2'
+    const requestedFlow = url.searchParams.get('flow'); // 'oauth1' | 'oauth2' | 'authorize' | 'force' | 'twitter'
+    const rawHandleHint = url.searchParams.get('handle') || '';
+    const cleanHandleHint = rawHandleHint.replace(/^@/, '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
 
     const apiKey = env.X_API_KEY;
     const apiSecret = env.X_API_SECRET;
+    const clientId = env.X_CLIENT_ID;
+    const clientSecret = env.X_CLIENT_SECRET;
 
     const setCookieWithDomainFallback = (name: string, value: string, maxAge: number) => {
         cookies.set(name, value, {
@@ -43,9 +47,20 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         }
     };
 
-    // 1. Prefer OAuth 1.0a on api.x.com (works with Standalone App 33541174 without requiring an X v2 Project)
+    if (cleanHandleHint) {
+        setCookieWithDomainFallback('x_oauth_handle_hint', cleanHandleHint, 60 * 20);
+    }
+
+    // Use OAuth 2.0 PKCE (https://x.com/i/oauth2/authorize) whenever 'oauth2', 'authorize', or 'force'
+    // is requested and X_CLIENT_ID is available. OAuth 2.0 PKCE uses X's modern React consent screen
+    // and never touches the legacy 2010 /oauth/authorize POST form ("There is no request token for this page").
+    const preferOAuth2 =
+        Boolean(clientId) &&
+        (requestedFlow === 'oauth2' || requestedFlow === 'authorize' || requestedFlow === 'force');
+
+    // 1. OAuth 1.0a flow (same-origin on https://x.com/oauth/authenticate so Step 2 POST to https://x.com/oauth/authorize is same-origin)
     let oauth1Url: string | null = null;
-    if (requestedFlow !== 'oauth2' && apiKey && apiSecret) {
+    if (!preferOAuth2 && apiKey && apiSecret) {
         try {
             const { oauthToken, oauthTokenSecret } = await getOAuth1RequestToken(
                 apiKey,
@@ -57,18 +72,12 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
             setCookieWithDomainFallback(`x_secret_${oauthToken}`, oauthTokenSecret, 60 * 15);
             setCookieWithDomainFallback('x_oauth1_secret', oauthTokenSecret, 60 * 15);
 
-            // IMPORTANT: Always redirect OAuth 1.0a to https://api.x.com/oauth/... (NOT https://x.com/oauth/...)!
-            // Why:
-            // 1. X's session cookies (auth_token, twid) are scoped to Domain=.x.com, so api.x.com receives the user's active login!
-            // 2. Root https://x.com registers X's PWA Service Worker (sw.js), which intercepts POST /oauth/authenticate form submissions
-            //    and turns them into GET /oauth/authenticate without the POST body — causing "There is no request token for this page"!
-            // 3. api.x.com is outside https://x.com's Service Worker scope, so POST form submissions always preserve oauth_token.
             if (requestedFlow === 'twitter') {
                 oauth1Url = `https://api.twitter.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
-            } else if (requestedFlow === 'authorize' || requestedFlow === 'force') {
-                oauth1Url = `https://api.x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}`;
+            } else if (requestedFlow === 'oauth1_authorize') {
+                oauth1Url = `https://x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}`;
             } else {
-                oauth1Url = `https://api.x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
+                oauth1Url = `https://x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
             }
         } catch (err: any) {
             console.error('OAuth 1.0a initiation failed, falling back to OAuth 2.0:', err);
@@ -82,16 +91,14 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
         throw redirect(302, oauth1Url);
     }
 
-    // 2. OAuth 2.0 PKCE flow (native x.com/i/oauth2/authorize without legacy request tokens)
-    const clientId = env.X_CLIENT_ID;
-    const clientSecret = env.X_CLIENT_SECRET;
+    // 2. OAuth 2.0 PKCE flow (native https://x.com/i/oauth2/authorize without legacy request tokens)
     if (!clientId) {
         return json({ error: 'X credentials (API Key or Client ID) not configured' }, { status: 500 });
     }
 
     const codeVerifier = crypto.randomBytes(32).toString('base64url');
     const stateSecret = clientSecret || apiSecret || clientId;
-    const state = createStatelessOAuth2State(codeVerifier, stateSecret);
+    const state = createStatelessOAuth2State(codeVerifier, stateSecret, cleanHandleHint);
     const codeChallenge = crypto
         .createHash('sha256')
         .update(codeVerifier)
