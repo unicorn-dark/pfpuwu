@@ -57,13 +57,18 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
             setCookieWithDomainFallback(`x_secret_${oauthToken}`, oauthTokenSecret, 60 * 15);
             setCookieWithDomainFallback('x_oauth1_secret', oauthTokenSecret, 60 * 15);
 
-            // IMPORTANT: Always redirect the browser to https://x.com/oauth/... (NOT api.twitter.com or api.x.com)
-            // so the browser sends the user's active x.com session cookies directly.
-            // Never pass force_login=true because X's /i/flow/login router drops redirect_after_login and dumps users on x.com/home.
-            if (requestedFlow === 'authorize' || requestedFlow === 'force') {
-                oauth1Url = `https://x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}`;
+            // IMPORTANT: Always redirect OAuth 1.0a to https://api.x.com/oauth/... (NOT https://x.com/oauth/...)!
+            // Why:
+            // 1. X's session cookies (auth_token, twid) are scoped to Domain=.x.com, so api.x.com receives the user's active login!
+            // 2. Root https://x.com registers X's PWA Service Worker (sw.js), which intercepts POST /oauth/authenticate form submissions
+            //    and turns them into GET /oauth/authenticate without the POST body — causing "There is no request token for this page"!
+            // 3. api.x.com is outside https://x.com's Service Worker scope, so POST form submissions always preserve oauth_token.
+            if (requestedFlow === 'twitter') {
+                oauth1Url = `https://api.twitter.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
+            } else if (requestedFlow === 'authorize' || requestedFlow === 'force') {
+                oauth1Url = `https://api.x.com/oauth/authorize?oauth_token=${encodeURIComponent(oauthToken)}`;
             } else {
-                oauth1Url = `https://x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
+                oauth1Url = `https://api.x.com/oauth/authenticate?oauth_token=${encodeURIComponent(oauthToken)}`;
             }
         } catch (err: any) {
             console.error('OAuth 1.0a initiation failed, falling back to OAuth 2.0:', err);

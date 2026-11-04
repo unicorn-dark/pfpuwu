@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
+import { toCompactAvatarUrl } from '$lib/utils/avatar';
 
 export const DAILY_REWARD_AMOUNT = 1000;
 export const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -214,16 +215,18 @@ export async function loadOrInitPlayerStats(
     try {
         const { data: existing, error } = await supabase
             .from('uwu_world_players')
-            .select('*')
+            .select('user_id, x_username, display_name, avatar_url, chips, wins, losses, net_profit, high_score, last_daily_claim, updated_at')
             .eq('user_id', userId)
             .maybeSingle();
+
+        const compactAvatar = toCompactAvatarUrl(avatarUrl || existing?.avatar_url);
 
         if (!error && existing) {
             stats = {
                 user_id: userId,
                 x_username: cleanUser,
                 display_name: displayName || existing.display_name || cleanUser,
-                avatar_url: avatarUrl || existing.avatar_url || '/unicorn.png',
+                avatar_url: avatarUrl && !avatarUrl.startsWith('data:image/') ? avatarUrl : compactAvatar,
                 chips: Number(existing.chips ?? stats.chips),
                 wins: Number(existing.wins ?? stats.wins),
                 losses: Number(existing.losses ?? stats.losses),
@@ -232,12 +235,19 @@ export async function loadOrInitPlayerStats(
                 last_daily_claim: existing.last_daily_claim || stats.last_daily_claim,
                 updated_at: nowIso
             };
+            // Scrub legacy base64 avatar_url in DB if present
+            if (existing.avatar_url && existing.avatar_url.startsWith('data:image/')) {
+                await supabase
+                    .from('uwu_world_players')
+                    .update({ avatar_url: compactAvatar, updated_at: nowIso })
+                    .eq('user_id', userId);
+            }
         } else if (!error && !existing) {
             await supabase.from('uwu_world_players').upsert({
                 user_id: stats.user_id,
                 x_username: stats.x_username,
                 display_name: stats.display_name,
-                avatar_url: stats.avatar_url,
+                avatar_url: compactAvatar,
                 chips: stats.chips,
                 wins: stats.wins,
                 losses: stats.losses,
@@ -273,7 +283,7 @@ export async function syncPlayerStatsToSupabase(stats: PlayerEconomyStats): Prom
                 user_id: stats.user_id,
                 x_username: stats.x_username,
                 display_name: stats.display_name || stats.x_username,
-                avatar_url: stats.avatar_url,
+                avatar_url: toCompactAvatarUrl(stats.avatar_url),
                 chips: Math.round(stats.chips),
                 wins: stats.wins,
                 losses: stats.losses,
@@ -327,9 +337,9 @@ export async function fetchLeaderboard(
     try {
         const { data, error } = await supabase
             .from('uwu_world_players')
-            .select('*')
+            .select('user_id, x_username, display_name, avatar_url, chips, wins, losses, net_profit, high_score, last_daily_claim, updated_at')
             .order('chips', { ascending: false })
-            .limit(80);
+            .limit(60);
 
         if (!error && Array.isArray(data)) {
             for (const row of data) {
@@ -339,7 +349,7 @@ export async function fetchLeaderboard(
                     user_id: row.user_id,
                     x_username: key,
                     display_name: row.display_name || key,
-                    avatar_url: row.avatar_url || '/unicorn.png',
+                    avatar_url: toCompactAvatarUrl(row.avatar_url),
                     chips: Number(row.chips ?? 0),
                     wins: Number(row.wins ?? 0),
                     losses: Number(row.losses ?? 0),
@@ -356,20 +366,21 @@ export async function fetchLeaderboard(
     try {
         const { data: profiles } = await supabase
             .from('profiles')
-            .select('id, x_username, x_display_name, avatar_url')
+            .select('id, x_username, x_display_name, avatar_url, avatar_traits')
             .limit(30);
 
         if (Array.isArray(profiles)) {
             for (const prof of profiles) {
                 const key = (prof.x_username || '').replace(/^@/, '').toLowerCase();
                 if (!isAuthenticatedWorldUser(prof.id, key)) continue;
+                const compactProfAvatar = toCompactAvatarUrl(prof.avatar_url, prof.avatar_traits);
                 const existing = merged.get(key);
                 if (!existing) {
                     merged.set(key, {
                         user_id: prof.id,
                         x_username: key,
                         display_name: prof.x_display_name || key,
-                        avatar_url: prof.avatar_url || '/unicorn.png',
+                        avatar_url: compactProfAvatar,
                         chips: 2500,
                         wins: 0,
                         losses: 0,
@@ -379,8 +390,8 @@ export async function fetchLeaderboard(
                         updated_at: new Date().toISOString(),
                         isOnline: false
                     });
-                } else if (prof.avatar_url && prof.avatar_url !== '/unicorn.png' && !prof.avatar_url.includes('twimg.com')) {
-                    existing.avatar_url = prof.avatar_url;
+                } else if (compactProfAvatar !== '/unicorn.png') {
+                    existing.avatar_url = compactProfAvatar;
                 }
             }
         }

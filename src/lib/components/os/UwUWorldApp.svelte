@@ -9,6 +9,7 @@
         authModalReason,
         type UserProfile
     } from "$lib/stores/auth";
+    import { toCompactAvatarUrl } from "$lib/utils/avatar";
     import { openChatDrawer } from "$lib/stores/os";
     import {
         gridToScreen,
@@ -57,6 +58,8 @@
         deleteArtworkFromPersonalVault,
         toggleMuseumArtworkLike,
         mergeMuseumSnapshots,
+        compactMuseumSnapshotForNetwork,
+        loadLocalPersonalVault,
         getCachedPedestalArtworkCanvas,
         findPlayerActiveSpot,
         type ArtworkItem,
@@ -672,7 +675,7 @@
             user_id: myId,
             x_username: myUsername.replace(/^@/, "").toLowerCase(),
             display_name: $userProfile?.x_display_name || myUsername,
-            avatar_url: $userProfile?.avatar_url || "/unicorn.png",
+            avatar_url: toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits),
             chips,
             wins: myWins,
             losses: myLosses,
@@ -812,6 +815,49 @@
         networkManager = null;
     }
 
+    let hasLoadedInitialWorldData = false;
+
+    function ensureInitialWorldDataLoaded(username = "") {
+        if (hasLoadedInitialWorldData) {
+            if (username) {
+                const personalVault = loadLocalPersonalVault(username);
+                if (Object.keys(personalVault).length > 0) {
+                    museumState = mergeMuseumSnapshots(museumState, {
+                        spots: {},
+                        pendingQueue: [],
+                        artworksById: personalVault
+                    });
+                }
+            }
+            return;
+        }
+        hasLoadedInitialWorldData = true;
+
+        loadSavedGraffitiWall().then((savedDataUrl) => {
+            if (savedDataUrl) {
+                applyGraffitiDataUrl(savedDataUrl);
+            }
+        });
+        loadActiveWishLanterns().then((lanterns) => {
+            wishLanterns = lanterns;
+        });
+        loadMuseumState(username).then((mState) => {
+            museumState = mState;
+        });
+        loadArcadeLeaderboards().then((boards) => {
+            arcadeLeaderboards = boards;
+            const myClean = (username || myUsername).replace(/^@/, "").toLowerCase();
+            if (myClean) {
+                for (const gKey of ["brick", "snake", "coin", "whack"] as const) {
+                    const mine = boards[gKey]?.find((e) => e.username.toLowerCase() === myClean);
+                    if (mine && mine.score > arcadeBestScores[gKey]) {
+                        arcadeBestScores = { ...arcadeBestScores, [gKey]: mine.score };
+                    }
+                }
+            }
+        });
+    }
+
     function startAuthenticatedWorldSession(profile: UserProfile) {
         if (!profile?.id || !profile?.x_username) return;
         if (activeSessionUserId === profile.id && networkManager) return;
@@ -823,32 +869,9 @@
         activeSessionUserId = profile.id;
         myId = profile.id;
         myUsername = profile.x_username.replace(/^@/, "");
-        const avatarUrl = profile.avatar_url || "/unicorn.png";
+        const avatarUrl = toCompactAvatarUrl(profile.avatar_url, profile.avatar_traits);
 
-        // Load persistent Graffiti Wall from Supabase (source of truth)
-        loadSavedGraffitiWall().then((savedDataUrl) => {
-            if (savedDataUrl) {
-                applyGraffitiDataUrl(savedDataUrl);
-            }
-        });
-
-        // Load persistent 24h Sky Wish Lanterns, Arcade Leaderboards & Museum Exhibits
-        loadActiveWishLanterns().then((lanterns) => {
-            wishLanterns = lanterns;
-        });
-        loadMuseumState(myUsername).then((mState) => {
-            museumState = mState;
-        });
-        loadArcadeLeaderboards().then((boards) => {
-            arcadeLeaderboards = boards;
-            const myClean = myUsername.replace(/^@/, "").toLowerCase();
-            for (const gKey of ["brick", "snake", "coin", "whack"] as const) {
-                const mine = boards[gKey]?.find((e) => e.username.toLowerCase() === myClean);
-                if (mine && mine.score > arcadeBestScores[gKey]) {
-                    arcadeBestScores = { ...arcadeBestScores, [gKey]: mine.score };
-                }
-            }
-        });
+        ensureInitialWorldDataLoaded(myUsername);
         try {
             const savedJar = localStorage.getItem(`pfpuwu_firefly_jar_${myUsername.toLowerCase()}`);
             if (savedJar !== null) {
@@ -1132,21 +1155,8 @@
         initPersistentGraffitiCanvas();
         dealerAvatarSrc = getTransparentDealerDataUrl();
 
-        // Load persistent Graffiti Wall from Supabase / localStorage so it NEVER resets on join!
-        loadSavedGraffitiWall().then((savedDataUrl) => {
-            if (savedDataUrl) {
-                applyGraffitiDataUrl(savedDataUrl);
-            }
-        });
-        loadActiveWishLanterns().then((lanterns) => {
-            wishLanterns = lanterns;
-        });
-        loadMuseumState(myUsername).then((mState) => {
-            museumState = mState;
-        });
-        loadArcadeLeaderboards().then((boards) => {
-            arcadeLeaderboards = boards;
-        });
+        // Load persistent world state once on mount (deduplicated with startAuthenticatedWorldSession)
+        ensureInitialWorldDataLoaded(myUsername);
 
         diceManager.onStateChanged = () => {
             diceTick++;
@@ -1639,7 +1649,7 @@
             user: myUsername,
             spotNumber,
             title: artwork.title,
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
         showToast(
             `🏛️ "${artwork.title}" is now exhibited on Museum Pedestal Spot #${spotNumber}!`,
@@ -1655,7 +1665,7 @@
             kind: "queue_submitted",
             user: myUsername,
             title: artwork.title,
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
         showToast(
             `⏳ Submitted "${artwork.title}" to the Undecided Queue for Curator @0xsha3!`,
@@ -1684,7 +1694,7 @@
             user: approvedArt?.artistUsername || myUsername,
             spotNumber,
             title: approvedArt?.title || "Artwork",
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
         showToast(
             `👑 Approved & placed "${approvedArt?.title || "Artwork"}" onto Spot #${spotNumber}!`,
@@ -1697,7 +1707,7 @@
         museumState = await removeArtworkFromCuratorQueue(artworkId, myUsername, museumState);
         networkManager?.broadcastMuseumEvent({
             kind: "queue_updated",
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
     }
 
@@ -1708,7 +1718,7 @@
         networkManager?.broadcastMuseumEvent({
             kind: "spot_vacated",
             spotNumber,
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
         showToast(
             `📦 Vacated Spot #${spotNumber} — Artwork remains safely in its creator's Personal Art Vault!`,
@@ -1722,7 +1732,7 @@
         synth.playChipSfx();
         networkManager?.broadcastMuseumEvent({
             kind: "vault_updated",
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
     }
 
@@ -1736,7 +1746,7 @@
             kind: "exhibit_applauded",
             user: myUsername,
             title: art?.title,
-            snapshot: museumState
+            snapshot: compactMuseumSnapshotForNetwork(museumState)
         });
     }
 
@@ -1753,11 +1763,15 @@
 
     // --- 1. TURN-BASED 3-ROUND DICE DUEL ACTIONS (2-4 Player Party PvP & Solo vs House) ---
     function syncLocalPlayerIntoDiceRoster() {
+        const myCompactAvatar = toCompactAvatarUrl(
+            $userProfile?.avatar_url,
+            $userProfile?.avatar_traits
+        );
         const allPlayers = [
             {
                 id: myId,
                 username: myUsername,
-                avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
+                avatarUrl: myCompactAvatar,
                 x: myX,
                 y: myY
             },
@@ -1790,7 +1804,7 @@
             {
                 id: myId,
                 username: myUsername,
-                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+                avatarUrl: toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits)
             },
             seatIndex,
             selectedWager
@@ -1828,7 +1842,7 @@
             {
                 id: myId,
                 username: myUsername,
-                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+                avatarUrl: toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits)
             },
             activeDiceWager
         );
@@ -1840,6 +1854,10 @@
 
     function toggleDicePvPReady() {
         if (diceManager.phase !== "idle" && diceManager.phase !== "finished") return;
+        const myCompactAvatar = toCompactAvatarUrl(
+            $userProfile?.avatar_url,
+            $userProfile?.avatar_traits
+        );
 
         // Auto-seat player onto first available seat if not seated yet
         if (!diceManager.isPlayerSeated(myId)) {
@@ -1856,7 +1874,7 @@
                 {
                     id: myId,
                     username: myUsername,
-                    avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+                    avatarUrl: myCompactAvatar
                 },
                 firstOpenIdx,
                 selectedWager
@@ -1880,7 +1898,7 @@
             myId,
             {
                 username: myUsername,
-                avatarUrl: $userProfile?.avatar_url || "/unicorn.png"
+                avatarUrl: myCompactAvatar
             },
             activeDiceWager
         );

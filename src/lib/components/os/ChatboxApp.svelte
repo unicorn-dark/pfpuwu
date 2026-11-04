@@ -7,6 +7,7 @@
         hasAvatarChosen,
         showAvatarCustomizer
     } from "$lib/stores/auth";
+    import { toCompactAvatarUrl, hydrateTraitAvatar } from "$lib/utils/avatar";
     import {
         activeWindows,
         isChatDrawerOpen,
@@ -98,13 +99,13 @@
         try {
             const { data, error } = await supabase
                 .from("chat_messages")
-                .select("*")
+                .select("id, user_id, x_username, x_display_name, avatar_url, content, created_at")
                 .gt("created_at", cutoffIso)
-                .order("created_at", { ascending: true })
-                .limit(120);
+                .order("created_at", { ascending: false })
+                .limit(45);
 
             if (!error && data && data.length > 0) {
-                messages = filterLast24Hours(data as ChatMessage[]);
+                messages = filterLast24Hours([...(data as ChatMessage[])].reverse());
                 saveLocalMessages(messages);
             } else {
                 messages = loadLocalMessages();
@@ -182,7 +183,10 @@
                         id: $userProfile.id,
                         x_username: $userProfile.x_username,
                         x_display_name: $userProfile.x_display_name,
-                        avatar_url: $userProfile.avatar_url,
+                        avatar_url: toCompactAvatarUrl(
+                            $userProfile.avatar_url,
+                            $userProfile.avatar_traits
+                        ),
                         online_at: new Date().toISOString()
                     });
                 }
@@ -196,7 +200,10 @@
                 id: $userProfile.id,
                 x_username: $userProfile.x_username,
                 x_display_name: $userProfile.x_display_name,
-                avatar_url: $userProfile.avatar_url,
+                avatar_url: toCompactAvatarUrl(
+                    $userProfile.avatar_url,
+                    $userProfile.avatar_traits
+                ),
                 online_at: new Date().toISOString()
             });
         }
@@ -263,7 +270,10 @@
                 user_id: newMsg.user_id,
                 x_username: newMsg.x_username,
                 x_display_name: newMsg.x_display_name,
-                avatar_url: newMsg.avatar_url,
+                avatar_url: toCompactAvatarUrl(
+                    $userProfile.avatar_url,
+                    $userProfile.avatar_traits
+                ),
                 content: newMsg.content
             });
         } catch {}
@@ -415,6 +425,7 @@
                         <div class="online-user-chip" title="@{user.x_username} is active">
                             <img
                                 src={user.avatar_url || "/unicorn.png"}
+                                use:hydrateTraitAvatar={user.avatar_url}
                                 alt={user.x_username}
                                 class="online-chip-avatar"
                                 onerror={(e: any) => (e.currentTarget.src = "/unicorn.png")}
@@ -438,6 +449,7 @@
                         <div class="avatar-box" title="@{msg.x_username}">
                             <img
                                 src={msg.avatar_url || "/unicorn.png"}
+                                use:hydrateTraitAvatar={msg.avatar_url}
                                 alt={msg.x_username}
                                 class="chat-avatar"
                                 onerror={(e: any) => (e.currentTarget.src = "/unicorn.png")}

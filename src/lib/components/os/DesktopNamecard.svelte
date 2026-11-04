@@ -302,7 +302,7 @@
         cardConfig.displayName = cleanName;
         await Promise.all([
             updateUserDisplayName(cleanName),
-            saveNamecardConfig(cardConfig)
+            saveNamecardConfig(cardConfig, true)
         ]);
         isSaving = false;
         triggerToast("✨ Saved Namecard!");

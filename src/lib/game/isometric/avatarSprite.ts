@@ -5,6 +5,7 @@
  */
 
 import { gridToScreen, type IsoDirection } from './isoMath';
+import { decodeAvatarTraitsUrl, getTraitLayerPaths } from '$lib/utils/avatar';
 
 export type DanceMoveType = 'disco' | 'spin' | 'robot' | 'wave' | 'windmill' | 'headbang';
 
@@ -185,6 +186,20 @@ export function getCachedAvatarImage(url: string): HTMLCanvasElement | HTMLImage
         if (cached) return cached;
         buildTransparentCompositeCanvas(DEALER_TRAIT_LAYERS, 'dealer_unicorn', true);
         return null;
+    }
+
+    // Check if URL is a compact 28-byte trait URL (`/unicorn.png?t=0.1.2.1.0.1.1`)
+    const decodedTraits = decodeAvatarTraitsUrl(url);
+    if (decodedTraits) {
+        const cached = avatarDrawableCache.get(url);
+        if (cached) return cached;
+        const layerPaths = getTraitLayerPaths(decodedTraits);
+        if (layerPaths.length > 0) {
+            buildTransparentCompositeCanvas(layerPaths, url, false);
+        } else {
+            buildTransparentCompositeCanvas(DEFAULT_UNICORN_TRAIT_LAYERS, url, false);
+        }
+        return avatarDrawableCache.get('default_unicorn') || null;
     }
 
     // Never render external X/Twitter PFPs (which have rings/backgrounds) or raw /unicorn.png

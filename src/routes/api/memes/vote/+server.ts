@@ -1,5 +1,6 @@
 import { json } from "@sveltejs/kit";
 import { supabase } from "$lib/supabaseClient";
+import { invalidateMemeInCache } from "$lib/server/memeCache";
 
 export async function POST({ request }) {
   try {
@@ -26,6 +27,8 @@ export async function POST({ request }) {
         );
       if (error) throw error;
     }
+
+    invalidateMemeInCache(meme_id);
 
     return json({ success: true });
   } catch (err: any) {

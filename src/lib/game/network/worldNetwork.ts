@@ -12,6 +12,7 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
+import { toCompactAvatarUrl } from '$lib/utils/avatar';
 import type { PlayerAvatarState, DanceMoveType } from '../isometric/avatarSprite';
 import type { IsoDirection } from '../isometric/isoMath';
 import { lerp } from '../isometric/isoMath';
@@ -36,7 +37,7 @@ export class WorldNetworkManager {
     private peerEconomyStats = new Map<string, PlayerEconomyStats>();
 
     private lastBroadcastTime = 0;
-    private broadcastIntervalMs = 60;
+    private broadcastIntervalMs = 100; // 10Hz network tick (interpolated at 60FPS on clients)
     private hasInitialPresenceSynced = false;
 
     // Event callbacks
@@ -67,7 +68,11 @@ export class WorldNetworkManager {
 
     constructor(localUserId: string, initialPlayer: PlayerAvatarState) {
         this.localUserId = localUserId;
-        this.localPlayerState = { zone: 'casino', ...initialPlayer };
+        this.localPlayerState = {
+            zone: 'casino',
+            ...initialPlayer,
+            avatarUrl: toCompactAvatarUrl(initialPlayer.avatarUrl)
+        };
     }
 
     public init() {
@@ -293,7 +298,7 @@ export class WorldNetworkManager {
                     id: this.localUserId,
                     username: this.localPlayerState.username,
                     displayName: this.localPlayerState.displayName,
-                    avatarUrl: this.localPlayerState.avatarUrl,
+                    avatarUrl: toCompactAvatarUrl(this.localPlayerState.avatarUrl),
                     x: this.localPlayerState.x,
                     y: this.localPlayerState.y,
                     dir: this.localPlayerState.dir,
@@ -310,28 +315,6 @@ export class WorldNetworkManager {
                 });
             }
         });
-
-        // Also subscribe to Postgres changes on public.uwu_graffiti_wall so any DB save syncs across tabs
-        try {
-            this.dbChannel = supabase
-                .channel('uwu_graffiti_db_sync')
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: 'uwu_graffiti_wall' },
-                    (payload: any) => {
-                        const row = payload?.new;
-                        if (row?.id === 'museum_exhibits_v1' && row?.pixels) {
-                            this.onMuseumEventReceived({ kind: 'db_sync', snapshot: row.pixels });
-                            return;
-                        }
-                        const dataUrl = row?.pixels?.data_url || row?.pixels?.dataUrl;
-                        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
-                            this.onGraffitiSnapshot(dataUrl);
-                        }
-                    }
-                )
-                .subscribe();
-        } catch {}
     }
 
     public broadcastPosition(
@@ -361,25 +344,29 @@ export class WorldNetworkManager {
         this.lastBroadcastTime = now;
 
         if (this.channel) {
+            const payload: Record<string, any> = {
+                id: this.localUserId,
+                username: this.localPlayerState.username,
+                x: Math.round(x * 100) / 100,
+                y: Math.round(y * 100) / 100,
+                dir,
+                isWalking,
+                isDancing,
+                danceMove,
+                isSpeaking,
+                zone
+            };
+            // Only attach compact avatar & stats on forced state transitions (never send base64 in 10Hz movement packets!)
+            if (force) {
+                payload.avatarUrl = toCompactAvatarUrl(this.localPlayerState.avatarUrl);
+                payload.chips = this.localPlayerState.chips;
+                payload.wins = this.localPlayerState.wins;
+                payload.losses = this.localPlayerState.losses;
+            }
             this.channel.send({
                 type: 'broadcast',
                 event: 'pos',
-                payload: {
-                    id: this.localUserId,
-                    username: this.localPlayerState.username,
-                    avatarUrl: this.localPlayerState.avatarUrl,
-                    x: Math.round(x * 100) / 100,
-                    y: Math.round(y * 100) / 100,
-                    dir,
-                    isWalking,
-                    isDancing,
-                    danceMove,
-                    isSpeaking,
-                    zone,
-                    chips: this.localPlayerState.chips,
-                    wins: this.localPlayerState.wins,
-                    losses: this.localPlayerState.losses
-                }
+                payload
             });
         }
     }
@@ -393,7 +380,12 @@ export class WorldNetworkManager {
         this.channel.send({
             type: 'broadcast',
             event: 'stats_sync',
-            payload: { stats }
+            payload: {
+                stats: {
+                    ...stats,
+                    avatar_url: toCompactAvatarUrl(stats.avatar_url)
+                }
+            }
         });
     }
 

@@ -11,6 +11,7 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
+import { toCompactAvatarUrl } from '$lib/utils/avatar';
 
 export const MUSEUM_CURATOR_ADMIN = '0xsha3';
 export const MUSEUM_SPOT_COUNT = 25;
@@ -1629,6 +1630,8 @@ export function createEmptyMuseumState(): MuseumStateSnapshot {
     };
 }
 
+const voxelPreviewDataUrlCache = new Map<string, string>();
+
 export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
     const out = createEmptyMuseumState();
     if (!raw || typeof raw !== 'object') return out;
@@ -1644,15 +1647,17 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
     if (raw.spots && typeof raw.spots === 'object') {
         for (const [spotStr, item] of Object.entries(raw.spots)) {
             const spotNum = Number(spotStr);
-            if (
-                spotNum >= 1 &&
-                spotNum <= MUSEUM_SPOT_COUNT &&
-                item &&
-                typeof item === 'object' &&
-                (item as any).id
-            ) {
+            if (spotNum < 1 || spotNum > MUSEUM_SPOT_COUNT || !item) continue;
+            // Support both compact ID references (`"art_123"` or `{ id: "art_123" }`) and full ArtworkItem objects
+            const refId = typeof item === 'string' ? item : (item as any).id;
+            if (!refId) continue;
+            const hasFullFields = typeof item === 'object' && ('title' in (item as any) || 'artType' in (item as any));
+            const baseItem = hasFullFields
+                ? (item as ArtworkItem)
+                : out.artworksById[refId];
+            if (baseItem) {
                 const norm = normalizeArtworkItem({
-                    ...(item as ArtworkItem),
+                    ...baseItem,
                     submissionStatus: 'exhibited'
                 });
                 out.spots[spotNum] = norm;
@@ -1664,10 +1669,15 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
     if (Array.isArray(raw.pendingQueue)) {
         const seen = new Set<string>();
         for (const item of raw.pendingQueue) {
-            if (item && typeof item === 'object' && item.id && !seen.has(item.id)) {
-                seen.add(item.id);
+            if (!item) continue;
+            const refId = typeof item === 'string' ? item : item.id;
+            if (!refId || seen.has(refId)) continue;
+            seen.add(refId);
+            const hasFullFields = typeof item === 'object' && ('title' in item || 'artType' in item);
+            const baseItem = hasFullFields ? item : out.artworksById[refId];
+            if (baseItem) {
                 const norm = normalizeArtworkItem({
-                    ...item,
+                    ...baseItem,
                     submissionStatus: 'pending_review'
                 });
                 out.pendingQueue.push(norm);
@@ -1682,26 +1692,99 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
 export function normalizeArtworkItem(item: Partial<ArtworkItem>): ArtworkItem {
     const nowIso = new Date().toISOString();
     const cleanUser = cleanMuseumUsername(item.artistUsername) || 'artist';
+    const id = String(item.id || `art_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+    const artType = item.artType === '3d' ? '3d' : '2d';
+    const voxels = Array.isArray(item.voxels) ? item.voxels : undefined;
+    const updatedAt = item.updatedAt || nowIso;
+
+    let imageDataUrl = String(item.imageDataUrl || '');
+    // Reconstruct 3D preview thumbnail client-side on demand if stripped from compact DB storage
+    if (
+        artType === '3d' &&
+        !imageDataUrl &&
+        voxels &&
+        voxels.length > 0 &&
+        typeof document !== 'undefined'
+    ) {
+        const cacheKey = `${id}_${updatedAt}_${voxels.length}`;
+        const cached = voxelPreviewDataUrlCache.get(cacheKey);
+        if (cached) {
+            imageDataUrl = cached;
+        } else {
+            imageDataUrl = exportVoxelSculptureDataUrl(voxels, 0, 220);
+            if (imageDataUrl) {
+                voxelPreviewDataUrlCache.set(cacheKey, imageDataUrl);
+            }
+        }
+    }
+
     return {
-        id: String(item.id || `art_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`),
-        artType: item.artType === '3d' ? '3d' : '2d',
+        id,
+        artType,
         title: String(item.title || 'Untitled Masterpiece').slice(0, 44),
         description: String(item.description || '').slice(0, 140),
         artistId: String(item.artistId || cleanUser),
         artistUsername: cleanUser,
         artistDisplayName: String(item.artistDisplayName || cleanUser),
-        artistAvatarUrl: String(item.artistAvatarUrl || '/unicorn.png'),
+        artistAvatarUrl: toCompactAvatarUrl(item.artistAvatarUrl),
         signatureDataUrl: item.signatureDataUrl || null,
         frameStyle: (['gold', 'obsidian', 'neon', 'frameless'].includes(item.frameStyle as string)
             ? item.frameStyle
             : 'gold') as FrameStyle,
-        imageDataUrl: String(item.imageDataUrl || ''),
-        voxels: Array.isArray(item.voxels) ? item.voxels : undefined,
+        imageDataUrl,
+        voxels,
         gridSize: item.gridSize || VOXEL_GRID_SIZE,
-        likes: Array.from(new Set(Array.isArray(item.likes) ? item.likes.map(cleanMuseumUsername).filter(Boolean) : [])),
+        likes: Array.from(
+            new Set(Array.isArray(item.likes) ? item.likes.map(cleanMuseumUsername).filter(Boolean) : [])
+        ),
         submissionStatus: item.submissionStatus || 'vault',
         createdAt: item.createdAt || nowIso,
-        updatedAt: item.updatedAt || nowIso
+        updatedAt
+    };
+}
+
+/**
+ * Produces a compact JSON payload for Supabase DB & Realtime (shrinks 153KB -> ~3KB by
+ * stripping redundant 3D base64 preview PNGs, compacting avatar URLs, and storing ID references in spots/queue).
+ */
+export function compactMuseumSnapshotForNetwork(snapshot: MuseumStateSnapshot): any {
+    const compactArtworksById: Record<string, any> = {};
+    for (const [id, art] of Object.entries(snapshot.artworksById || {})) {
+        if (!art || !art.id) continue;
+        const is3dWithVoxels = art.artType === '3d' && Array.isArray(art.voxels) && art.voxels.length > 0;
+        compactArtworksById[id] = {
+            ...art,
+            artistAvatarUrl: toCompactAvatarUrl(art.artistAvatarUrl),
+            // 3D sculptures already have `voxels` and render their preview client-side!
+            imageDataUrl: is3dWithVoxels ? '' : art.imageDataUrl
+        };
+    }
+
+    const compactSpots: Record<number, { id: string }> = {};
+    for (const [spotStr, art] of Object.entries(snapshot.spots || {})) {
+        const spotNum = Number(spotStr);
+        if (spotNum >= 1 && spotNum <= MUSEUM_SPOT_COUNT && art?.id) {
+            compactSpots[spotNum] = { id: art.id };
+            if (!compactArtworksById[art.id]) {
+                const is3dWithVoxels =
+                    art.artType === '3d' && Array.isArray(art.voxels) && art.voxels.length > 0;
+                compactArtworksById[art.id] = {
+                    ...art,
+                    artistAvatarUrl: toCompactAvatarUrl(art.artistAvatarUrl),
+                    imageDataUrl: is3dWithVoxels ? '' : art.imageDataUrl
+                };
+            }
+        }
+    }
+
+    const compactQueue = (snapshot.pendingQueue || [])
+        .filter((q) => q && q.id)
+        .map((q) => ({ id: q.id }));
+
+    return {
+        spots: compactSpots,
+        pendingQueue: compactQueue,
+        artworksById: compactArtworksById
     };
 }
 
@@ -1859,10 +1942,11 @@ export async function persistMuseumStateToSupabase(
     persistMuseumStateLocally(snapshot, cleanActor);
 
     try {
+        const compactPayload = compactMuseumSnapshotForNetwork(snapshot);
         await supabase.from('uwu_graffiti_wall').upsert(
             {
                 id: SUPABASE_MUSEUM_ROW_ID,
-                pixels: snapshot,
+                pixels: compactPayload,
                 updated_by: cleanActor,
                 updated_at: new Date().toISOString()
             },

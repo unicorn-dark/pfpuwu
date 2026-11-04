@@ -3,7 +3,11 @@ import { writable } from 'svelte/store';
 import { supabase } from '$lib/supabaseClient';
 import type { UserProfile } from '$lib/stores/auth';
 import type { PlayerEconomyStats } from '$lib/game/economy/worldEconomy';
-import { renderTransparentAvatar, getDefaultAvatarTraits } from '$lib/utils/avatar';
+import {
+    renderTransparentAvatar,
+    getDefaultAvatarTraits,
+    decodeAvatarTraitsUrl
+} from '$lib/utils/avatar';
 
 export type NamecardBgMode = 'liquid' | 'gradient' | 'solid';
 export type NamecardBorderId =
@@ -442,10 +446,32 @@ export async function loadNamecardConfig(
     return fallback;
 }
 
+let namecardRemoteSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingRemoteNamecard: NamecardConfig | null = null;
+
+async function flushNamecardRemoteSync(config: NamecardConfig): Promise<void> {
+    try {
+        await supabase.from('uwu_graffiti_wall').upsert(
+            {
+                id: `namecard_${config.userId}`,
+                pixels: config,
+                updated_by: config.username,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'id' }
+        );
+    } catch {}
+}
+
 /**
- * Saves the user's Namecard configuration to localStorage and Supabase.
+ * Saves the user's Namecard configuration to localStorage immediately,
+ * and syncs to Supabase either immediately (on explicit Save button) or after a 4.5s idle debounce
+ * so continuous brush strokes / preset clicks don't spam base64 upserts.
  */
-export async function saveNamecardConfig(config: NamecardConfig): Promise<void> {
+export async function saveNamecardConfig(
+    config: NamecardConfig,
+    immediateRemote = false
+): Promise<void> {
     if (typeof window === 'undefined' || !config.userId || config.userId === 'guest') return;
 
     const updated: NamecardConfig = {
@@ -459,27 +485,41 @@ export async function saveNamecardConfig(config: NamecardConfig): Promise<void> 
         localStorage.setItem(localKey, JSON.stringify(updated));
     } catch {}
 
-    try {
-        await supabase.from('uwu_graffiti_wall').upsert(
-            {
-                id: `namecard_${config.userId}`,
-                pixels: updated,
-                updated_by: config.username,
-                updated_at: new Date().toISOString()
-            },
-            { onConflict: 'id' }
-        );
-    } catch {}
+    pendingRemoteNamecard = updated;
+    if (namecardRemoteSyncTimer) {
+        clearTimeout(namecardRemoteSyncTimer);
+        namecardRemoteSyncTimer = null;
+    }
+
+    if (immediateRemote) {
+        pendingRemoteNamecard = null;
+        await flushNamecardRemoteSync(updated);
+    } else {
+        namecardRemoteSyncTimer = setTimeout(() => {
+            namecardRemoteSyncTimer = null;
+            if (pendingRemoteNamecard) {
+                const toSync = pendingRemoteNamecard;
+                pendingRemoteNamecard = null;
+                void flushNamecardRemoteSync(toSync);
+            }
+        }, 4500);
+    }
 }
 
 /**
  * Ensures we always have a 100% transparent character PNG (never an opaque square image like /unicorn.png).
+ * Automatically decodes compact trait URLs (/unicorn.png?t=...) into high-res 256x256 transparent cutouts.
  */
 let cachedDefaultTransparentAvatar: string | null = null;
 export async function ensureTransparentAvatarUrl(
     profileOrUrl: UserProfile | string | null
 ): Promise<string> {
     if (typeof profileOrUrl === 'string') {
+        const decoded = decodeAvatarTraitsUrl(profileOrUrl);
+        if (decoded) {
+            const { dataUrl } = await renderTransparentAvatar(decoded, 256);
+            if (dataUrl) return dataUrl;
+        }
         if (
             profileOrUrl &&
             profileOrUrl !== '/unicorn.png' &&
@@ -495,16 +535,22 @@ export async function ensureTransparentAvatarUrl(
         return dataUrl;
     }
     const profile = profileOrUrl;
-    if (
-        profile?.avatar_url &&
-        profile.avatar_url !== '/unicorn.png' &&
-        !profile.avatar_url.includes('twimg.com')
-    ) {
-        return profile.avatar_url;
-    }
     if (profile?.avatar_traits && Object.keys(profile.avatar_traits).length > 0) {
         const { dataUrl } = await renderTransparentAvatar(profile.avatar_traits, 256);
         if (dataUrl) return dataUrl;
+    }
+    if (profile?.avatar_url) {
+        const decoded = decodeAvatarTraitsUrl(profile.avatar_url);
+        if (decoded) {
+            const { dataUrl } = await renderTransparentAvatar(decoded, 256);
+            if (dataUrl) return dataUrl;
+        }
+        if (
+            profile.avatar_url !== '/unicorn.png' &&
+            !profile.avatar_url.includes('twimg.com')
+        ) {
+            return profile.avatar_url;
+        }
     }
     if (cachedDefaultTransparentAvatar) {
         return cachedDefaultTransparentAvatar;

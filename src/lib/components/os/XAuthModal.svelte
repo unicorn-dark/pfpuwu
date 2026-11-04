@@ -21,10 +21,13 @@
         showDevMode = false;
     }
 
-    async function handleOAuthClick(flow: "oauth1" | "authorize" | "force" | "oauth2" = "oauth1") {
+    async function handleOAuthClick(
+        flow: "oauth1" | "authorize" | "force" | "twitter" | "oauth2" = "oauth1",
+        usePopup = false
+    ) {
         isSubmitting = true;
         statusMessage = "";
-        const res = await loginWithX(flow);
+        const res = await loginWithX(flow, usePopup);
         isSubmitting = false;
         if (!res.ok) {
             statusMessage =
@@ -119,7 +122,7 @@
                         <button
                             type="button"
                             class="win98-btn oauth-btn"
-                            onclick={() => handleOAuthClick("oauth1")}
+                            onclick={() => handleOAuthClick("oauth1", false)}
                             disabled={isSubmitting}
                         >
                             <span class="x-logo">𝕏</span>
@@ -129,10 +132,10 @@
                         <button
                             type="button"
                             class="win98-btn oauth-alt-btn"
-                            onclick={() => handleOAuthClick("force")}
+                            onclick={() => handleOAuthClick("authorize", true)}
                             disabled={isSubmitting}
                         >
-                            🔄 Having trouble or seeing "No request token"? Force Fresh 𝕏 Login
+                            🪟 Popup / Instant Re-Connect (Fixes "No request token")
                         </button>
                     </div>
 
