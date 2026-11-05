@@ -300,13 +300,11 @@ export const GET: RequestHandler = async ({ url, cookies, request, setHeaders })
     // Strictly prevent any external X profile image or oversized base64 data URL in the database
     const avatarTraits = existingProfile?.avatar_traits || {};
     const hasCustomTraits = Object.keys(avatarTraits).length > 0;
-    const existingAvatar = existingProfile?.avatar_url || '/unicorn.png';
-    const finalAvatar =
-        !hasCustomTraits ||
-        existingAvatar.includes('twimg.com') ||
-        existingAvatar.startsWith('data:image/')
-            ? '/unicorn.png'
-            : existingAvatar;
+    const layerOrder = ['body', 'face', 'eyes', 'head', 'costume', 'accessory', 'horn'];
+    const encodedTraitUrl = hasCustomTraits
+        ? `/unicorn.png?t=${layerOrder.map((l) => (typeof avatarTraits[l] === 'number' && avatarTraits[l] >= 0 ? Math.floor(avatarTraits[l]) : 0)).join('.')}`
+        : '/unicorn.png';
+    const finalAvatar = encodedTraitUrl;
 
     await supabaseAdmin.from('profiles').upsert(
         {

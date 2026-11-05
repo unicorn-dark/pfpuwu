@@ -242,23 +242,24 @@ async function syncSupabaseUserProfile(user: any) {
 
         if (existing) {
             let profile = existing as UserProfile;
-            const hadLegacyOrBloatedUrl =
-                profile.avatar_url?.includes('twimg.com') ||
-                profile.avatar_url?.startsWith('data:image/');
             const cleanTraits = sanitizeAvatarTraits(profile.avatar_traits);
+            const expectedCompactUrl = encodeAvatarTraitsUrl(cleanTraits);
+            const needsDbCompactSync =
+                profile.avatar_url?.includes('twimg.com') ||
+                profile.avatar_url?.startsWith('data:image/') ||
+                (Object.keys(cleanTraits).length > 0 && profile.avatar_url !== expectedCompactUrl);
 
-            // Scrub any 35KB base64 data:image string from Supabase DB immediately
-            if (hadLegacyOrBloatedUrl) {
-                const compactUrl = encodeAvatarTraitsUrl(cleanTraits);
+            // Keep Supabase DB `avatar_url` strictly synced to the compact 28-byte trait URL
+            if (needsDbCompactSync) {
                 await supabase
                     .from('profiles')
                     .update({
-                        avatar_url: compactUrl,
+                        avatar_url: expectedCompactUrl,
                         avatar_traits: cleanTraits,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', user.id);
-                profile.avatar_url = compactUrl;
+                profile.avatar_url = expectedCompactUrl;
             }
 
             profile = await enforceCleanTransparentProfile(profile);

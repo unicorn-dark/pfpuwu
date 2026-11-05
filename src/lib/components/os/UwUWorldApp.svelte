@@ -62,6 +62,7 @@
         loadLocalPersonalVault,
         getCachedPedestalArtworkCanvas,
         findPlayerActiveSpot,
+        isValidArtworkItem,
         type ArtworkItem,
         type MuseumStateSnapshot
     } from "$lib/game/activities/museumArt";
@@ -69,6 +70,7 @@
     import { preloadIsoAssets, drawIsoObjectSprite } from "$lib/game/isometric/isoAssetLoader";
     import {
         renderPlayerAvatar,
+        getCachedAvatarImage,
         getTransparentDealerDataUrl,
         type PlayerAvatarState,
         type DanceMoveType
@@ -4691,7 +4693,8 @@
             ctx.fillText("CYBER MINES 5x5", 0, -40);
         } else if (obj.type === "museum_pedestal") {
             const spotNum = obj.data?.spotNumber || 1;
-            const art = museumState.spots[spotNum] || null;
+            const rawArt = museumState.spots[spotNum] || null;
+            const art = rawArt && isValidArtworkItem(rawArt) ? rawArt : null;
             const isNear = gridDistance(myX, myY, obj.x, obj.y) <= 2.9;
 
             // Ground shadow
@@ -4774,18 +4777,24 @@
                     ctx.drawImage(cachedArtCanvas, -40, -104 + hoverBob, 80, 80);
                 }
 
-                // Floating Museum Exhibit Title & Artist Pill above Artwork
+                // Floating Museum Exhibit Title & Artist Pill above Artwork (with Artist Avatar!)
+                const artistAvatarImg = getCachedAvatarImage(art.artistAvatarUrl || "/unicorn.png");
                 const badgeText = `${art.artType === "3d" ? "🧱" : "🎨"} @${art.artistUsername}${art.likes.length > 0 ? ` ❤️${art.likes.length}` : ""}`;
                 ctx.font = 'bold 9px "MS Sans Serif", Tahoma, sans-serif';
-                const bw = Math.max(58, ctx.measureText(badgeText).width + 12);
+                const textW = ctx.measureText(badgeText).width;
+                const iconPad = artistAvatarImg ? 15 : 0;
+                const bw = Math.max(62, textW + 12 + iconPad);
                 const by = -114 + hoverBob;
                 ctx.fillStyle = isNear ? "rgba(26, 15, 54, 0.95)" : "rgba(12, 10, 24, 0.86)";
-                ctx.fillRect(-bw / 2, by, bw, 15);
+                ctx.fillRect(-bw / 2, by, bw, 16);
                 ctx.strokeStyle = isNear ? "#00e5ff" : "#ffd700";
                 ctx.lineWidth = isNear ? 1.5 : 1;
-                ctx.strokeRect(-bw / 2, by, bw, 15);
+                ctx.strokeRect(-bw / 2, by, bw, 16);
+                if (artistAvatarImg) {
+                    ctx.drawImage(artistAvatarImg, -bw / 2 + 3, by + 1, 14, 14);
+                }
                 ctx.fillStyle = "#ffffff";
-                ctx.fillText(badgeText, 0, by + 10.5);
+                ctx.fillText(badgeText, iconPad / 2, by + 11);
             } else {
                 // Open Pedestal Holographic Invitation Crystal
                 const bob = Math.sin(timeMs / 280 + spotNum) * 3.5;
@@ -7144,7 +7153,7 @@
             myUserId={myId}
             myUsername={myUsername}
             myDisplayName={$userProfile?.x_display_name || myUsername}
-            myAvatarUrl={$userProfile?.avatar_url || "/unicorn.png"}
+            myAvatarUrl={toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits)}
             myChips={chips}
             onClose={() => (showMuseumModal = false)}
             onSaveToVault={handleSaveArtworkToVault}

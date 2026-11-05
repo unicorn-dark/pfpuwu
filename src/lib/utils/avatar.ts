@@ -186,15 +186,11 @@ export function hydrateTraitAvatar(node: HTMLImageElement, initialUrl?: string |
 
     function update(url?: string | null) {
         currentUrl = url;
-        const decoded = decodeAvatarTraitsUrl(url);
-        if (!decoded) {
-            if (url && !url.includes('twimg.com')) {
-                node.src = url;
-            } else {
-                node.src = '/unicorn.png';
-            }
+        if (url && url.startsWith('data:image/')) {
+            node.src = url;
             return;
         }
+        const decoded = decodeAvatarTraitsUrl(url) || getDefaultAvatarTraits();
         const key = encodeAvatarTraitsUrl(decoded);
         const cached = renderedAvatarCache.get(key) || renderedAvatarCache.get(`${key}@128`);
         if (cached) {

@@ -11,7 +11,7 @@
  */
 
 import { supabase } from '$lib/supabaseClient';
-import { toCompactAvatarUrl } from '$lib/utils/avatar';
+import { toCompactAvatarUrl, encodeAvatarTraitsUrl } from '$lib/utils/avatar';
 
 export const MUSEUM_CURATOR_ADMIN = '0xsha3';
 export const MUSEUM_SPOT_COUNT = 25;
@@ -1198,13 +1198,75 @@ export function exportVoxelSculptureDataUrl(
 // OFFSCREEN PEDESTAL RENDER CACHE (For 60 FPS Isometric Map Rendering)
 // ============================================================================
 
-const pedestalCanvasCache = new Map<string, { updatedAt: string; canvas: HTMLCanvasElement }>();
+const pedestalCanvasCache = new Map<string, { sig: string; canvas: HTMLCanvasElement }>();
+
+/**
+ * Checks whether an artwork object has real content and a real creator (never an empty `@artist` stub).
+ */
+export function isValidArtworkItem(item: any): boolean {
+    if (!item || typeof item !== 'object' || !item.id) return false;
+    const cleanUser = cleanMuseumUsername(item.artistUsername);
+    if (!cleanUser || cleanUser === 'artist') return false;
+    const has3DVoxels =
+        item.artType === '3d' && Array.isArray(item.voxels) && item.voxels.length > 0;
+    const has2DImage =
+        typeof item.imageDataUrl === 'string' &&
+        item.imageDataUrl.startsWith('data:image/') &&
+        item.imageDataUrl.length > 100;
+    return has3DVoxels || has2DImage;
+}
+
+export function isDefaultFallbackAvatarUrl(url?: string | null): boolean {
+    if (!url || typeof url !== 'string') return true;
+    const trimmed = url.trim();
+    return (
+        !trimmed ||
+        trimmed === '/unicorn.png' ||
+        trimmed === '/unicorn.png?t=0.1.1.1.1.1.0' ||
+        trimmed.includes('twimg.com')
+    );
+}
+
+function drawPedestal2DFrameAndImage(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    frameStyle: FrameStyle = 'gold'
+) {
+    ctx.clearRect(0, 0, 160, 160);
+    const pad = frameStyle === 'frameless' ? 8 : 14;
+    const w = 160 - pad * 2;
+    const h = 160 - pad * 2;
+
+    ctx.save();
+    if (frameStyle === 'gold') {
+        ctx.fillStyle = '#3b2806';
+        ctx.fillRect(pad - 6, pad - 6, w + 12, h + 12);
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(pad - 4, pad - 4, w + 8, h + 8);
+    } else if (frameStyle === 'obsidian') {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(pad - 6, pad - 6, w + 12, h + 12);
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 3.5;
+        ctx.strokeRect(pad - 4, pad - 4, w + 8, h + 8);
+    } else if (frameStyle === 'neon') {
+        ctx.fillStyle = '#090418';
+        ctx.fillRect(pad - 5, pad - 5, w + 10, h + 10);
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(pad - 3, pad - 3, w + 6, h + 6);
+    }
+    ctx.drawImage(img, pad, pad, w, h);
+    ctx.restore();
+}
 
 export function getCachedPedestalArtworkCanvas(artwork: ArtworkItem): HTMLCanvasElement | null {
-    if (typeof document === 'undefined' || !artwork) return null;
+    if (typeof document === 'undefined' || !isValidArtworkItem(artwork)) return null;
     const cacheKey = `${artwork.id}_${artwork.frameStyle}`;
+    const sig = `${artwork.updatedAt}_${artwork.voxels?.length || 0}_${artwork.imageDataUrl?.length || 0}`;
     const existing = pedestalCanvasCache.get(cacheKey);
-    if (existing && existing.updatedAt === artwork.updatedAt) {
+    if (existing && existing.sig === sig) {
         return existing.canvas;
     }
 
@@ -1229,7 +1291,7 @@ export function getCachedPedestalArtworkCanvas(artwork: ArtworkItem): HTMLCanvas
             },
             false
         );
-        pedestalCanvasCache.set(cacheKey, { updatedAt: artwork.updatedAt, canvas: c });
+        pedestalCanvasCache.set(cacheKey, { sig, canvas: c });
         return c;
     }
 
@@ -1238,14 +1300,17 @@ export function getCachedPedestalArtworkCanvas(artwork: ArtworkItem): HTMLCanvas
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-            ctx.clearRect(0, 0, 160, 160);
-            ctx.drawImage(img, 0, 0, 160, 160);
+            drawPedestal2DFrameAndImage(ctx, img, artwork.frameStyle);
         };
         img.src = artwork.imageDataUrl;
+        if (img.complete && img.naturalWidth > 0) {
+            drawPedestal2DFrameAndImage(ctx, img, artwork.frameStyle);
+        }
+        pedestalCanvasCache.set(cacheKey, { sig, canvas: c });
+        return c;
     }
 
-    pedestalCanvasCache.set(cacheKey, { updatedAt: artwork.updatedAt, canvas: c });
-    return c;
+    return null;
 }
 
 // ============================================================================
@@ -1631,6 +1696,118 @@ export function createEmptyMuseumState(): MuseumStateSnapshot {
 }
 
 const voxelPreviewDataUrlCache = new Map<string, string>();
+const artistAvatarByUsernameCache = new Map<string, string>();
+let artistProfilesFetchPromise: Promise<void> | null = null;
+
+/**
+ * Resolves an artist's compact trait avatar URL (`/unicorn.png?t=...`) by username from `profiles`,
+ * so artworks whose stored `artistAvatarUrl` was stripped to `/unicorn.png` or `/unicorn.png?t=0.1.1.1.1.1.0`
+ * always render the artist's true custom unicorn traits.
+ */
+export async function resolveMuseumArtistAvatarUrl(
+    artistUsername?: string | null,
+    fallbackUrl?: string | null
+): Promise<string> {
+    const cleanUser = cleanMuseumUsername(artistUsername);
+    if (cleanUser) {
+        const cached = artistAvatarByUsernameCache.get(cleanUser);
+        if (cached && !isDefaultFallbackAvatarUrl(cached)) {
+            return cached;
+        }
+    }
+
+    if (fallbackUrl && !isDefaultFallbackAvatarUrl(fallbackUrl)) {
+        const compact = toCompactAvatarUrl(fallbackUrl);
+        if (cleanUser && !isDefaultFallbackAvatarUrl(compact)) {
+            artistAvatarByUsernameCache.set(cleanUser, compact);
+        }
+        return compact;
+    }
+
+    if (!cleanUser) {
+        return toCompactAvatarUrl(fallbackUrl);
+    }
+
+    if (!artistProfilesFetchPromise) {
+        artistProfilesFetchPromise = (async () => {
+            try {
+                const { data } = await supabase
+                    .from('profiles')
+                    .select('x_username, avatar_url, avatar_traits')
+                    .limit(100);
+                if (Array.isArray(data)) {
+                    for (const row of data) {
+                        const u = cleanMuseumUsername(row.x_username);
+                        if (!u) continue;
+                        const hasTraits =
+                            row.avatar_traits &&
+                            typeof row.avatar_traits === 'object' &&
+                            Object.keys(row.avatar_traits).length > 0;
+                        const compact = hasTraits
+                            ? encodeAvatarTraitsUrl(row.avatar_traits)
+                            : toCompactAvatarUrl(row.avatar_url);
+                        if (compact && !isDefaultFallbackAvatarUrl(compact)) {
+                            artistAvatarByUsernameCache.set(u, compact);
+                        }
+                    }
+                }
+            } catch {}
+        })().finally(() => {
+            artistProfilesFetchPromise = null;
+        });
+    }
+
+    await artistProfilesFetchPromise;
+    return artistAvatarByUsernameCache.get(cleanUser) || toCompactAvatarUrl(fallbackUrl);
+}
+
+/**
+ * Hydrates `artistAvatarUrl` across all artworks in a `MuseumStateSnapshot` from the `profiles` cache.
+ */
+export async function hydrateMuseumArtistAvatars(
+    snapshot: MuseumStateSnapshot
+): Promise<MuseumStateSnapshot> {
+    const artistsToResolve = new Set<string>();
+    for (const art of Object.values(snapshot.artworksById || {})) {
+        if (art?.artistUsername) {
+            artistsToResolve.add(cleanMuseumUsername(art.artistUsername));
+        }
+    }
+    for (const art of Object.values(snapshot.spots || {})) {
+        if (art?.artistUsername) {
+            artistsToResolve.add(cleanMuseumUsername(art.artistUsername));
+        }
+    }
+    if (artistsToResolve.size === 0) return snapshot;
+
+    await resolveMuseumArtistAvatarUrl(Array.from(artistsToResolve)[0]);
+
+    for (const art of Object.values(snapshot.artworksById)) {
+        const cleanU = cleanMuseumUsername(art.artistUsername);
+        const resolved = artistAvatarByUsernameCache.get(cleanU);
+        if (resolved && isDefaultFallbackAvatarUrl(art.artistAvatarUrl)) {
+            art.artistAvatarUrl = resolved;
+        }
+    }
+    for (const [spotStr, art] of Object.entries(snapshot.spots)) {
+        if (!art) continue;
+        const cleanU = cleanMuseumUsername(art.artistUsername);
+        const resolved = artistAvatarByUsernameCache.get(cleanU);
+        if (resolved && isDefaultFallbackAvatarUrl(art.artistAvatarUrl)) {
+            snapshot.spots[Number(spotStr)] = { ...art, artistAvatarUrl: resolved };
+        }
+    }
+    snapshot.pendingQueue = snapshot.pendingQueue.map((art) => {
+        const cleanU = cleanMuseumUsername(art.artistUsername);
+        const resolved = artistAvatarByUsernameCache.get(cleanU);
+        if (resolved && isDefaultFallbackAvatarUrl(art.artistAvatarUrl)) {
+            return { ...art, artistAvatarUrl: resolved };
+        }
+        return art;
+    });
+
+    return snapshot;
+}
 
 export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
     const out = createEmptyMuseumState();
@@ -1639,7 +1816,10 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
     if (raw.artworksById && typeof raw.artworksById === 'object') {
         for (const [id, item] of Object.entries(raw.artworksById)) {
             if (item && typeof item === 'object' && (item as any).id) {
-                out.artworksById[id] = normalizeArtworkItem(item as ArtworkItem);
+                const norm = normalizeArtworkItem(item as ArtworkItem);
+                if (isValidArtworkItem(norm)) {
+                    out.artworksById[id] = norm;
+                }
             }
         }
     }
@@ -1651,17 +1831,26 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
             // Support both compact ID references (`"art_123"` or `{ id: "art_123" }`) and full ArtworkItem objects
             const refId = typeof item === 'string' ? item : (item as any).id;
             if (!refId) continue;
-            const hasFullFields = typeof item === 'object' && ('title' in (item as any) || 'artType' in (item as any));
-            const baseItem = hasFullFields
-                ? (item as ArtworkItem)
-                : out.artworksById[refId];
-            if (baseItem) {
+            const registryItem = out.artworksById[refId];
+            const itemAsObj = typeof item === 'object' ? (item as Partial<ArtworkItem>) : null;
+            const candidate =
+                registryItem && itemAsObj
+                    ? {
+                          ...itemAsObj,
+                          ...registryItem,
+                          voxels: registryItem.voxels?.length ? registryItem.voxels : itemAsObj.voxels,
+                          imageDataUrl: registryItem.imageDataUrl || itemAsObj.imageDataUrl || ''
+                      }
+                    : registryItem || itemAsObj;
+            if (candidate) {
                 const norm = normalizeArtworkItem({
-                    ...baseItem,
+                    ...candidate,
                     submissionStatus: 'exhibited'
                 });
-                out.spots[spotNum] = norm;
-                out.artworksById[norm.id] = norm;
+                if (isValidArtworkItem(norm)) {
+                    out.spots[spotNum] = norm;
+                    out.artworksById[norm.id] = norm;
+                }
             }
         }
     }
@@ -1673,15 +1862,18 @@ export function normalizeMuseumSnapshot(raw: any): MuseumStateSnapshot {
             const refId = typeof item === 'string' ? item : item.id;
             if (!refId || seen.has(refId)) continue;
             seen.add(refId);
-            const hasFullFields = typeof item === 'object' && ('title' in item || 'artType' in item);
-            const baseItem = hasFullFields ? item : out.artworksById[refId];
-            if (baseItem) {
+            const registryItem = out.artworksById[refId];
+            const itemAsObj = typeof item === 'object' ? (item as Partial<ArtworkItem>) : null;
+            const candidate = registryItem || itemAsObj;
+            if (candidate) {
                 const norm = normalizeArtworkItem({
-                    ...baseItem,
+                    ...candidate,
                     submissionStatus: 'pending_review'
                 });
-                out.pendingQueue.push(norm);
-                out.artworksById[norm.id] = norm;
+                if (isValidArtworkItem(norm)) {
+                    out.pendingQueue.push(norm);
+                    out.artworksById[norm.id] = norm;
+                }
             }
         }
     }
@@ -1718,6 +1910,13 @@ export function normalizeArtworkItem(item: Partial<ArtworkItem>): ArtworkItem {
         }
     }
 
+    const cachedArtistAvatar = artistAvatarByUsernameCache.get(cleanUser);
+    const rawAvatar = toCompactAvatarUrl(item.artistAvatarUrl);
+    const finalAvatarUrl =
+        !isDefaultFallbackAvatarUrl(rawAvatar)
+            ? rawAvatar
+            : cachedArtistAvatar || rawAvatar;
+
     return {
         id,
         artType,
@@ -1726,7 +1925,7 @@ export function normalizeArtworkItem(item: Partial<ArtworkItem>): ArtworkItem {
         artistId: String(item.artistId || cleanUser),
         artistUsername: cleanUser,
         artistDisplayName: String(item.artistDisplayName || cleanUser),
-        artistAvatarUrl: toCompactAvatarUrl(item.artistAvatarUrl),
+        artistAvatarUrl: finalAvatarUrl,
         signatureDataUrl: item.signatureDataUrl || null,
         frameStyle: (['gold', 'obsidian', 'neon', 'frameless'].includes(item.frameStyle as string)
             ? item.frameStyle
@@ -1745,40 +1944,50 @@ export function normalizeArtworkItem(item: Partial<ArtworkItem>): ArtworkItem {
 
 /**
  * Produces a compact JSON payload for Supabase DB & Realtime (shrinks 153KB -> ~3KB by
- * stripping redundant 3D base64 preview PNGs, compacting avatar URLs, and storing ID references in spots/queue).
+ * stripping redundant 3D base64 preview PNGs and compacting avatar URLs).
  */
 export function compactMuseumSnapshotForNetwork(snapshot: MuseumStateSnapshot): any {
     const compactArtworksById: Record<string, any> = {};
     for (const [id, art] of Object.entries(snapshot.artworksById || {})) {
-        if (!art || !art.id) continue;
+        if (!isValidArtworkItem(art)) continue;
         const is3dWithVoxels = art.artType === '3d' && Array.isArray(art.voxels) && art.voxels.length > 0;
+        const cleanU = cleanMuseumUsername(art.artistUsername);
+        const bestAvatar = !isDefaultFallbackAvatarUrl(art.artistAvatarUrl)
+            ? toCompactAvatarUrl(art.artistAvatarUrl)
+            : artistAvatarByUsernameCache.get(cleanU) || toCompactAvatarUrl(art.artistAvatarUrl);
         compactArtworksById[id] = {
             ...art,
-            artistAvatarUrl: toCompactAvatarUrl(art.artistAvatarUrl),
+            artistAvatarUrl: bestAvatar,
             // 3D sculptures already have `voxels` and render their preview client-side!
             imageDataUrl: is3dWithVoxels ? '' : art.imageDataUrl
         };
     }
 
-    const compactSpots: Record<number, { id: string }> = {};
+    const compactSpots: Record<number, any> = {};
     for (const [spotStr, art] of Object.entries(snapshot.spots || {})) {
         const spotNum = Number(spotStr);
-        if (spotNum >= 1 && spotNum <= MUSEUM_SPOT_COUNT && art?.id) {
-            compactSpots[spotNum] = { id: art.id };
+        if (spotNum >= 1 && spotNum <= MUSEUM_SPOT_COUNT && isValidArtworkItem(art)) {
+            const is3dWithVoxels =
+                art.artType === '3d' && Array.isArray(art.voxels) && art.voxels.length > 0;
+            const cleanU = cleanMuseumUsername(art.artistUsername);
+            const bestAvatar = !isDefaultFallbackAvatarUrl(art.artistAvatarUrl)
+                ? toCompactAvatarUrl(art.artistAvatarUrl)
+                : artistAvatarByUsernameCache.get(cleanU) || toCompactAvatarUrl(art.artistAvatarUrl);
+            const compactArt = {
+                ...art,
+                artistAvatarUrl: bestAvatar,
+                imageDataUrl: is3dWithVoxels ? '' : art.imageDataUrl
+            };
             if (!compactArtworksById[art.id]) {
-                const is3dWithVoxels =
-                    art.artType === '3d' && Array.isArray(art.voxels) && art.voxels.length > 0;
-                compactArtworksById[art.id] = {
-                    ...art,
-                    artistAvatarUrl: toCompactAvatarUrl(art.artistAvatarUrl),
-                    imageDataUrl: is3dWithVoxels ? '' : art.imageDataUrl
-                };
+                compactArtworksById[art.id] = compactArt;
             }
+            // Store compact metadata on spot as well so no older client tab can ever create an `{ id }` shell
+            compactSpots[spotNum] = { id: art.id };
         }
     }
 
     const compactQueue = (snapshot.pendingQueue || [])
-        .filter((q) => q && q.id)
+        .filter((q) => isValidArtworkItem(q))
         .map((q) => ({ id: q.id }));
 
     return {
@@ -1802,7 +2011,10 @@ export function loadLocalPersonalVault(username: string): Record<string, Artwork
                 const map: Record<string, ArtworkItem> = {};
                 for (const [k, v] of Object.entries(parsed)) {
                     if (v && typeof v === 'object') {
-                        map[k] = normalizeArtworkItem(v as ArtworkItem);
+                        const norm = normalizeArtworkItem(v as ArtworkItem);
+                        if (isValidArtworkItem(norm)) {
+                            map[k] = norm;
+                        }
                     }
                 }
                 return map;
@@ -1821,7 +2033,7 @@ export function saveLocalPersonalVault(username: string, vaultMap: Record<string
 }
 
 /**
- * Merges two MuseumStateSnapshots without ever losing personal artworks
+ * Merges two MuseumStateSnapshots without ever losing personal artworks or overwriting valid art with empty stubs
  */
 export function mergeMuseumSnapshots(
     a: MuseumStateSnapshot | null | undefined,
@@ -1831,32 +2043,48 @@ export function mergeMuseumSnapshots(
     const normB = normalizeMuseumSnapshot(b);
     const out = createEmptyMuseumState();
 
-    // 1. Merge global artworks registry (newest updatedAt wins)
+    // 1. Merge global artworks registry (valid art always beats invalid, newest updatedAt wins)
     const allIds = new Set([...Object.keys(normA.artworksById), ...Object.keys(normB.artworksById)]);
     for (const id of allIds) {
         const itemA = normA.artworksById[id];
         const itemB = normB.artworksById[id];
-        if (itemA && itemB) {
+        const validA = isValidArtworkItem(itemA);
+        const validB = isValidArtworkItem(itemB);
+        if (validA && validB) {
             const tsA = new Date(itemA.updatedAt).getTime() || 0;
             const tsB = new Date(itemB.updatedAt).getTime() || 0;
             const newer = tsA >= tsB ? itemA : itemB;
+            const older = tsA >= tsB ? itemB : itemA;
             const mergedLikes = Array.from(new Set([...itemA.likes, ...itemB.likes]));
-            out.artworksById[id] = { ...newer, likes: mergedLikes };
-        } else {
-            out.artworksById[id] = (itemA || itemB)!;
+            const bestAvatar = !isDefaultFallbackAvatarUrl(newer.artistAvatarUrl)
+                ? newer.artistAvatarUrl
+                : older.artistAvatarUrl;
+            out.artworksById[id] = {
+                ...newer,
+                artistAvatarUrl: bestAvatar,
+                voxels: newer.voxels?.length ? newer.voxels : older.voxels,
+                imageDataUrl: newer.imageDataUrl || older.imageDataUrl,
+                likes: mergedLikes
+            };
+        } else if (validA) {
+            out.artworksById[id] = itemA;
+        } else if (validB) {
+            out.artworksById[id] = itemB;
         }
     }
 
     // 2. Use authoritative spots from primary snapshot (a), falling back to (b)
-    const hasPrimarySpots = a && a.spots && Object.keys(a.spots).length > 0;
+    const hasPrimarySpots = Object.keys(normA.spots).length > 0;
     const spotsSource = hasPrimarySpots ? normA.spots : { ...normB.spots, ...normA.spots };
     for (const [spotStr, item] of Object.entries(spotsSource)) {
         const spotNum = Number(spotStr);
         if (spotNum >= 1 && spotNum <= MUSEUM_SPOT_COUNT && item) {
             const latest = out.artworksById[item.id] || item;
-            const exhibited = { ...latest, submissionStatus: 'exhibited' as const };
-            out.spots[spotNum] = exhibited;
-            out.artworksById[exhibited.id] = exhibited;
+            if (isValidArtworkItem(latest)) {
+                const exhibited = { ...latest, submissionStatus: 'exhibited' as const };
+                out.spots[spotNum] = exhibited;
+                out.artworksById[exhibited.id] = exhibited;
+            }
         }
     }
 
@@ -1867,7 +2095,9 @@ export function mergeMuseumSnapshots(
         if (!qItem || exhibitedIds.has(qItem.id)) continue;
         if (!queueMap.has(qItem.id)) {
             const latest = out.artworksById[qItem.id] || qItem;
-            queueMap.set(qItem.id, { ...latest, submissionStatus: 'pending_review' });
+            if (isValidArtworkItem(latest)) {
+                queueMap.set(qItem.id, { ...latest, submissionStatus: 'pending_review' });
+            }
         }
     }
     out.pendingQueue = Array.from(queueMap.values());
@@ -1892,7 +2122,7 @@ export async function loadMuseumState(currentUsername?: string): Promise<MuseumS
     if (currentUsername) {
         const personalMap = loadLocalPersonalVault(currentUsername);
         for (const [id, art] of Object.entries(personalMap)) {
-            if (!localSnap.artworksById[id]) {
+            if (!localSnap.artworksById[id] && isValidArtworkItem(art)) {
                 localSnap.artworksById[id] = art;
             }
         }
@@ -1907,12 +2137,19 @@ export async function loadMuseumState(currentUsername?: string): Promise<MuseumS
 
         if (!error && data?.pixels) {
             const remoteSnap = normalizeMuseumSnapshot(data.pixels);
-            const merged = mergeMuseumSnapshots(remoteSnap, localSnap);
+            // Authoritative remote spots win; local personal vault artworks are preserved in artworksById
+            const merged = mergeMuseumSnapshots(remoteSnap, {
+                spots: {},
+                pendingQueue: localSnap.pendingQueue,
+                artworksById: localSnap.artworksById
+            });
+            await hydrateMuseumArtistAvatars(merged);
             persistMuseumStateLocally(merged, currentUsername);
             return merged;
         }
     } catch {}
 
+    await hydrateMuseumArtistAvatars(localSnap);
     return localSnap;
 }
 

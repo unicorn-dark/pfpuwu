@@ -19,6 +19,8 @@
         getMyPersonalArtworks,
         findPlayerActiveSpot,
         findFirstOpenSpot,
+        resolveMuseumArtistAvatarUrl,
+        isDefaultFallbackAvatarUrl,
         type BrickMaterial,
         type BrickShape,
         type LegoPieceType,
@@ -29,6 +31,7 @@
         type VoxelHitCandidate
     } from '$lib/game/activities/museumArt';
     import { ensureTransparentAvatarUrl } from '$lib/stores/namecard';
+    import { hydrateTraitAvatar } from '$lib/utils/avatar';
 
     interface Props {
         museumState: MuseumStateSnapshot;
@@ -92,10 +95,29 @@
     // Transparent Artist Avatar URL cache for Brass Plaque
     let plaqueAvatarUrl = $state('/unicorn.png');
     $effect(() => {
-        const rawUrl = inspectedArtwork?.artistAvatarUrl || myAvatarUrl || '/unicorn.png';
-        ensureTransparentAvatarUrl(rawUrl).then((u) => {
-            plaqueAvatarUrl = u;
-        });
+        const art = inspectedArtwork;
+        if (!art) {
+            ensureTransparentAvatarUrl(myAvatarUrl || '/unicorn.png').then((u) => {
+                plaqueAvatarUrl = u;
+            });
+            return;
+        }
+        const artistUser = cleanMuseumUsername(art.artistUsername);
+        const fallback =
+            artistUser === cleanMe && !isDefaultFallbackAvatarUrl(myAvatarUrl)
+                ? myAvatarUrl
+                : art.artistAvatarUrl || '/unicorn.png';
+        let cancelled = false;
+        resolveMuseumArtistAvatarUrl(artistUser, fallback)
+            .then((compactUrl) => ensureTransparentAvatarUrl(compactUrl))
+            .then((renderedUrl) => {
+                if (!cancelled && renderedUrl) {
+                    plaqueAvatarUrl = renderedUrl;
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
     });
 
     // --- INSPECTOR 3D TURNTABLE STATE ---
@@ -2510,8 +2532,14 @@
 
                                 <div class="vault-card-info">
                                     <div class="vault-card-title">“{qArt.title}”</div>
-                                    <div class="vault-card-sub">
-                                        by <strong>@{qArt.artistUsername}</strong> • ❤️ {qArt.likes.length}
+                                    <div class="vault-card-sub queue-artist-row">
+                                        <img
+                                            src="/unicorn.png"
+                                            use:hydrateTraitAvatar={qArt.artistAvatarUrl}
+                                            alt={qArt.artistUsername}
+                                            class="queue-mini-avatar"
+                                        />
+                                        <span>by <strong>@{qArt.artistUsername}</strong> • ❤️ {qArt.likes.length}</span>
                                     </div>
                                 </div>
 
@@ -3501,6 +3529,22 @@
     .vault-card-sub {
         font-size: 10px;
         color: #444444;
+    }
+
+    .queue-artist-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .queue-mini-avatar {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #101426;
+        border: 1px solid #ffd700;
+        object-fit: contain;
+        flex-shrink: 0;
     }
 
     .vault-card-actions {
