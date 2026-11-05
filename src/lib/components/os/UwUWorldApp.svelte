@@ -1150,9 +1150,7 @@
         forestFloorCache.build("forest");
         museumFloorCache.build("museum");
         preloadIsoAssets(() => {
-            floorCache.build("casino");
             forestFloorCache.build("forest");
-            museumFloorCache.build("museum");
         });
         initPersistentGraffitiCanvas();
         dealerAvatarSrc = getTransparentDealerDataUrl();

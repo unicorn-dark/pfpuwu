@@ -22,32 +22,6 @@ export interface CroppedIsoSprite {
 }
 
 const ASSET_MANIFEST: Record<string, string> = {
-    // Terrain & Floor Tiles
-    grass_lush: '/assets/iso/tiles/grass_lush.png',
-    grass_path_straight: '/assets/iso/tiles/grass_path_straight.png',
-    grass_path_tile: '/assets/iso/tiles/grass_path_tile.png',
-    grass_path_rocks: '/assets/iso/tiles/grass_path_rocks.png',
-    path_stone: '/assets/iso/tiles/path_stone.png',
-    path_stone_circle: '/assets/iso/tiles/path_stone_circle.png',
-    path_wood: '/assets/iso/tiles/path_wood.png',
-    river_water: '/assets/iso/tiles/river_water.png',
-    river_tile: '/assets/iso/tiles/river_tile.png',
-    river_rocks: '/assets/iso/tiles/river_rocks.png',
-    river_bank: '/assets/iso/tiles/river_bank.png',
-    beach_sand: '/assets/iso/tiles/beach_sand.png',
-    landscape_grass: '/assets/iso/tiles/landscape_grass.png',
-    landscape_water: '/assets/iso/tiles/landscape_water.png',
-
-    // Casino & Plaza Floor Tiles
-    casino_carpet: '/assets/iso/tiles/casino_carpet.png',
-    plaza_stone: '/assets/iso/tiles/plaza_stone.png',
-    stone_inset: '/assets/iso/tiles/stone_inset.png',
-    wood_parquet: '/assets/iso/tiles/wood_parquet.png',
-    marble_tile: '/assets/iso/tiles/marble_tile.png',
-    road_plaza: '/assets/iso/tiles/road_plaza.png',
-    road_curb: '/assets/iso/tiles/road_curb.png',
-    planks_plaza: '/assets/iso/tiles/planks_plaza.png',
-
     // Trees & Canopy
     tree_pine_tall: '/assets/iso/nature/tree_pine_tall.png',
     tree_pine_round: '/assets/iso/nature/tree_pine_round.png',

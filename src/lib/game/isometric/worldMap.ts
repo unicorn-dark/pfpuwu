@@ -11,7 +11,7 @@
  */
 
 import { TILE_WIDTH, TILE_HEIGHT, clamp } from './isoMath';
-import { drawIsoTileSprite, drawIsoDetailSprite } from './isoAssetLoader';
+import { drawIsoDetailSprite } from './isoAssetLoader';
 import { MUSEUM_PEDESTAL_LOCATIONS } from '../activities/museumArt';
 
 export const MAP_SIZE = 32;
@@ -1290,14 +1290,18 @@ export function drawRichIsometricTile(
             ctx.fillStyle = isAlt ? '#b87a3d' : '#a3682f';
             ctx.fill();
 
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, isAlt ? 'wood_parquet' : 'planks_plaza', sx, sy, 0.88, 1.04);
-            if (!isAlt) {
-                ctx.fillStyle = 'rgba(40, 20, 5, 0.14)';
-                ctx.fill();
+            // Clean isometric hardwood plank seam & warm bevel highlight
+            ctx.strokeStyle = 'rgba(58, 30, 10, 0.24)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            if (isAlt) {
+                ctx.moveTo(sx - TILE_WIDTH / 4, sy - TILE_HEIGHT / 4);
+                ctx.lineTo(sx + TILE_WIDTH / 4, sy + TILE_HEIGHT / 4);
+            } else {
+                ctx.moveTo(sx + TILE_WIDTH / 4, sy - TILE_HEIGHT / 4);
+                ctx.lineTo(sx - TILE_WIDTH / 4, sy + TILE_HEIGHT / 4);
             }
-            ctx.restore();
+            ctx.stroke();
             break;
         }
 
@@ -1305,13 +1309,6 @@ export function drawRichIsometricTile(
             const isAlt = (gx + gy) % 2 === 0;
             ctx.fillStyle = isAlt ? '#6b0d22' : '#5e0a1d';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'casino_carpet', sx, sy, 0.38, 1.05);
-            ctx.fillStyle = isAlt ? 'rgba(107, 13, 34, 0.52)' : 'rgba(85, 8, 25, 0.58)';
-            ctx.fill();
-            ctx.restore();
 
             ctx.strokeStyle = 'rgba(255, 215, 0, 0.32)';
             ctx.lineWidth = 1;
@@ -1329,15 +1326,9 @@ export function drawRichIsometricTile(
         }
 
         case TileType.VIP_WALKWAY: {
-            ctx.fillStyle = '#9e112b';
+            const isAlt = (gx + gy) % 2 === 0;
+            ctx.fillStyle = isAlt ? '#a6122e' : '#940f28';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'casino_carpet', sx, sy, 0.65, 1.05);
-            ctx.fillStyle = 'rgba(165, 15, 42, 0.35)';
-            ctx.fill();
-            ctx.restore();
 
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 1.5;
@@ -1354,13 +1345,6 @@ export function drawRichIsometricTile(
         case TileType.GOLD_BORDER: {
             ctx.fillStyle = '#1d192b';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'stone_inset', sx, sy, 0.42, 1.04);
-            ctx.fillStyle = 'rgba(29, 25, 43, 0.55)';
-            ctx.fill();
-            ctx.restore();
 
             ctx.strokeStyle = 'rgba(255, 215, 0, 0.78)';
             ctx.lineWidth = 1.5;
@@ -1383,11 +1367,6 @@ export function drawRichIsometricTile(
             const pulse = 0.7 + 0.3 * Math.sin(timeMs / 240);
             ctx.fillStyle = '#092b24';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'stone_inset', sx, sy, 0.35, 1.04);
-            ctx.restore();
 
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 2;
@@ -1478,21 +1457,20 @@ export function drawRichIsometricTile(
 
         case TileType.MARBLE_WHITE: {
             const isAlt = (gx + gy) % 2 === 0;
-            ctx.fillStyle = isAlt ? '#ebe6dc' : '#dfd9ce';
+            ctx.fillStyle = isAlt ? '#f2ede4' : '#e6dfd3';
             ctx.fill();
 
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, isAlt ? 'marble_tile' : 'plaza_stone', sx, sy, 0.72, 1.04);
-            ctx.fillStyle = isAlt ? 'rgba(245, 240, 232, 0.35)' : 'rgba(220, 212, 200, 0.38)';
-            ctx.fill();
-            ctx.restore();
-
-            ctx.strokeStyle = 'rgba(130, 120, 110, 0.32)';
+            // Clean architectural marble inner bevel (no stone blob or squiggle)
+            ctx.strokeStyle = isAlt
+                ? 'rgba(255, 255, 255, 0.55)'
+                : 'rgba(195, 185, 172, 0.35)';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(sx - 12, sy - 3);
-            ctx.bezierCurveTo(sx - 4, sy + 4, sx + 4, sy - 2, sx + 13, sy + 3);
+            ctx.moveTo(sx, sy - TILE_HEIGHT / 2 + 2.5);
+            ctx.lineTo(sx + TILE_WIDTH / 2 - 5, sy);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2 - 2.5);
+            ctx.lineTo(sx - TILE_WIDTH / 2 + 5, sy);
+            ctx.closePath();
             ctx.stroke();
             break;
         }
@@ -1520,13 +1498,6 @@ export function drawRichIsometricTile(
             ctx.fillStyle = isAlt ? '#2c333d' : '#252b34';
             ctx.fill();
 
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'plaza_stone', sx, sy, 0.5, 1.04);
-            ctx.fillStyle = isAlt ? 'rgba(44, 51, 61, 0.55)' : 'rgba(32, 38, 48, 0.6)';
-            ctx.fill();
-            ctx.restore();
-
             ctx.fillStyle = '#4e5a6b';
             ctx.fillRect(sx - 4, sy - 2, 2, 2);
             ctx.fillRect(sx + 3, sy + 1, 2, 2);
@@ -1539,13 +1510,6 @@ export function drawRichIsometricTile(
             const b = Math.floor(225 + 30 * wave);
             ctx.fillStyle = `rgb(0, ${g}, ${b})`;
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, (gx + gy) % 2 === 0 ? 'river_water' : 'river_tile', sx, sy, 0.72, 1.05);
-            ctx.fillStyle = `rgba(0, ${g}, ${b}, 0.32)`;
-            ctx.fill();
-            ctx.restore();
 
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
             ctx.lineWidth = 1.2;
@@ -1566,13 +1530,6 @@ export function drawRichIsometricTile(
             const isAlt = (gx + gy) % 2 === 0;
             ctx.fillStyle = isAlt ? '#32124a' : '#2a0e3f';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'plaza_stone', sx, sy, 0.28, 1.04);
-            ctx.fillStyle = isAlt ? 'rgba(50, 18, 74, 0.65)' : 'rgba(42, 14, 63, 0.68)';
-            ctx.fill();
-            ctx.restore();
             break;
         }
 
@@ -1580,13 +1537,6 @@ export function drawRichIsometricTile(
             const isAlt = (gx + gy) % 2 === 0;
             ctx.fillStyle = isAlt ? '#0c3b40' : '#093034';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'stone_inset', sx, sy, 0.3, 1.04);
-            ctx.fillStyle = isAlt ? 'rgba(12, 59, 64, 0.62)' : 'rgba(9, 48, 52, 0.66)';
-            ctx.fill();
-            ctx.restore();
             break;
         }
 
@@ -1639,20 +1589,6 @@ export function drawRichIsometricTile(
                   : '#256e39';
             ctx.fill();
 
-            // Render pre-rendered 3D Kenney grass tile texture clipped cleanly to diamond
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'grass_lush', sx, sy, 0.9, 1.04);
-            ctx.fillStyle = isLush
-                ? isAlt
-                    ? 'rgba(20, 75, 38, 0.22)'
-                    : 'rgba(14, 58, 28, 0.28)'
-                : isAlt
-                  ? 'rgba(55, 155, 75, 0.14)'
-                  : 'rgba(35, 115, 55, 0.18)';
-            ctx.fill();
-            ctx.restore();
-
             // Crisp grass blade detail tufts
             ctx.strokeStyle = isLush ? 'rgba(65, 185, 95, 0.65)' : 'rgba(90, 210, 115, 0.65)';
             ctx.lineWidth = 1.1;
@@ -1670,13 +1606,6 @@ export function drawRichIsometricTile(
             const isAlt = (gx + gy) % 2 === 0;
             ctx.fillStyle = isAlt ? '#26733b' : '#206332';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'grass_lush', sx, sy, 0.92, 1.04);
-            ctx.fillStyle = 'rgba(35, 120, 58, 0.18)';
-            ctx.fill();
-            ctx.restore();
 
             // Render real 3D Kenney flower & mushroom sprites on top of the grass diamond
             const flowerKeys = ['flower_red', 'flower_purple', 'flower_yellow', 'mushroom_red'];
@@ -1697,26 +1626,23 @@ export function drawRichIsometricTile(
 
         case TileType.STONE_PATH: {
             const isAlt = (gx + gy) % 2 === 0;
-            ctx.fillStyle = isAlt ? '#7a7467' : '#6e685c';
+            ctx.fillStyle = isAlt ? '#746e62' : '#686256';
             ctx.fill();
 
-            ctx.save();
-            ctx.clip();
-            const pathKey = (gx + gy) % 3 === 0 ? 'grass_path_rocks' : 'grass_path_tile';
-            drawIsoTileSprite(ctx, pathKey, sx, sy, 0.92, 1.04);
-            ctx.restore();
+            // Crisp vector cobblestone stepping stones
+            ctx.fillStyle = isAlt ? '#968f80' : '#8a8375';
+            ctx.strokeStyle = 'rgba(42, 38, 32, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.ellipse(sx - 6, sy - 1, 7.5, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
 
-            // Overlay 3D Kenney cobblestone stepping stones
-            drawIsoDetailSprite(
-                ctx,
-                isAlt ? 'path_stone' : 'path_stone_circle',
-                sx,
-                sy,
-                1.08,
-                0,
-                0,
-                0.92
-            );
+            ctx.fillStyle = isAlt ? '#878072' : '#968f80';
+            ctx.beginPath();
+            ctx.ellipse(sx + 6, sy + 2, 6, 3.2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
             break;
         }
 
@@ -1724,11 +1650,6 @@ export function drawRichIsometricTile(
             const pulse = 0.65 + 0.35 * Math.sin(timeMs / 220);
             ctx.fillStyle = '#0d3d28';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'grass_path_tile', sx, sy, 0.6, 1.04);
-            ctx.restore();
 
             ctx.strokeStyle = `rgba(0, 255, 136, ${0.9 * pulse})`;
             ctx.lineWidth = 2;
@@ -1755,11 +1676,6 @@ export function drawRichIsometricTile(
             const pulse = 0.65 + 0.35 * Math.sin(timeMs / 220);
             ctx.fillStyle = '#24123b';
             ctx.fill();
-
-            ctx.save();
-            ctx.clip();
-            drawIsoTileSprite(ctx, 'marble_tile', sx, sy, 0.55, 1.04);
-            ctx.restore();
 
             ctx.strokeStyle = `rgba(255, 215, 0, ${0.92 * pulse})`;
             ctx.lineWidth = 2;
