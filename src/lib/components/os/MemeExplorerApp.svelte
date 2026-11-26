@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onDestroy, onMount } from "svelte";
-    import { blur, fade } from "svelte/transition";
+    import { fade } from "svelte/transition";
+    import { playSuccess, playPaperFlick } from "$lib/utils/audio";
 
     type Meme = {
         id: string;
@@ -32,6 +33,8 @@
     let exportProgress = $state(0);
     let exportStatusText = $state("");
     let totalExportCount = $state(0);
+    let isRollingRandom = $state(false);
+    let isDeletingMeme = $state(false);
 
     let photoCount = $state(0);
     let videoCount = $state(0);
@@ -51,6 +54,8 @@
     let reelsContainer: HTMLDivElement | null = $state(null);
     const videoElements = new Map<string, HTMLVideoElement>();
     let reelsObserver: IntersectionObserver | null = null;
+    let videoThumbObserver: IntersectionObserver | null = null;
+    const videoThumbUrls = new WeakMap<HTMLVideoElement, string>();
 
     // Gesture detection
     let touchStartX = 0;
@@ -66,7 +71,12 @@
     let tagInputRef: HTMLInputElement | null = $state(null);
 
     const pageSize = 40;
+    const MAX_PAGE_CACHE = 40;
+    const MAX_PREFETCH_URLS = 80;
     const pageCache = new Map<string, Meme[]>();
+    const loadedIds = new Set<string>();
+    const prefetchedUrls = new Set<string>();
+    let activeAbortController: AbortController | null = null;
     let searchTimeout: ReturnType<typeof setTimeout>;
     let clipboardTimeout: ReturnType<typeof setTimeout>;
     let activeFetchId = 0;
@@ -117,9 +127,6 @@
         exportProgress = 0;
         exportStatusText = "Fetching list...";
         totalExportCount = 0;
-
-        const btn = document.querySelector(".menu-btn");
-        if (btn) btn.innerHTML = `<u>F</u>ile ▸ Zipping...`;
 
         try {
             const { downloadZip } = await import("client-zip");
@@ -225,9 +232,6 @@
             exportProgress = 0;
             exportStatusText = "";
             totalExportCount = 0;
-            if (btn) {
-                btn.innerHTML = `<u>F</u>ile ▸ Export All ${filterType === "photo" ? "Photos" : "Videos"}`;
-            }
         }
     }
 
@@ -246,15 +250,70 @@
         return `${filterType}:${sortBy}:${sortBy === "random" ? sessionSeed : ""}:${searchQuery.trim().toLowerCase()}:${offset}`;
     }
 
+    function setPageCacheLru(key: string, rows: Meme[]) {
+        if (pageCache.has(key)) {
+            pageCache.delete(key);
+        } else if (pageCache.size >= MAX_PAGE_CACHE) {
+            const oldestKey = pageCache.keys().next().value;
+            if (oldestKey) pageCache.delete(oldestKey);
+        }
+        pageCache.set(key, rows);
+    }
+
+    function prefetchNeighbors(centerIdx: number) {
+        if (typeof window === "undefined" || memes.length === 0) return;
+        for (let offset = 1; offset <= 3; offset++) {
+            const candidate = memes[centerIdx + offset];
+            if (!candidate || candidate.type !== "photo") continue;
+            if (prefetchedUrls.has(candidate.url)) continue;
+
+            if (prefetchedUrls.size >= MAX_PREFETCH_URLS) {
+                const firstUrl = prefetchedUrls.values().next().value;
+                if (firstUrl) prefetchedUrls.delete(firstUrl);
+            }
+            prefetchedUrls.add(candidate.url);
+
+            const img = new Image();
+            img.decoding = "async";
+            img.src = candidate.url;
+        }
+    }
+
     async function fetchStats() {
+        const STATS_CACHE_KEY = "uwu_meme_stats_v1";
+        if (typeof sessionStorage !== "undefined") {
+            try {
+                const cachedRaw = sessionStorage.getItem(STATS_CACHE_KEY);
+                if (cachedRaw) {
+                    const parsed = JSON.parse(cachedRaw);
+                    if (
+                        parsed &&
+                        typeof parsed.photo === "number" &&
+                        typeof parsed.video === "number" &&
+                        Date.now() - (parsed.ts || 0) < 5 * 60 * 1000
+                    ) {
+                        photoCount = parsed.photo;
+                        videoCount = parsed.video;
+                        return;
+                    }
+                }
+            } catch {}
+        }
+
         try {
             const res = await fetch("/api/memes/stats");
             if (res.ok) {
                 const data = await res.json();
                 photoCount = data.photo;
                 videoCount = data.video;
+                try {
+                    sessionStorage.setItem(
+                        STATS_CACHE_KEY,
+                        JSON.stringify({ photo: photoCount, video: videoCount, ts: Date.now() }),
+                    );
+                } catch {}
             }
-        } catch (err) {}
+        } catch {}
     }
 
     async function fetchMemes({ append = false } = {}) {
@@ -266,16 +325,21 @@
             if (isLoadingMore || !hasMore) return;
             isLoadingMore = true;
         } else {
+            activeAbortController?.abort();
             isLoading = true;
             hasMore = true;
         }
 
+        const controller = new AbortController();
+        activeAbortController = controller;
         errorMessage = "";
 
         try {
             let nextBatch: Meme[] | undefined = pageCache.get(cacheKey);
-
-            if (!nextBatch) {
+            if (nextBatch) {
+                // Refresh LRU order
+                setPageCacheLru(cacheKey, nextBatch);
+            } else {
                 let url = `/api/memes?type=${filterType}&sort=${sortBy}&limit=${pageSize}&offset=${offset}`;
                 if (sortBy === "random") {
                     url += `&seed=${sessionSeed}`;
@@ -284,26 +348,34 @@
                     url += `&search=${encodeURIComponent(searchQuery.trim())}`;
                 }
 
-                const res = await fetch(url);
+                const res = await fetch(url, { signal: controller.signal });
                 if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
                 const fetched: Meme[] = await res.json();
                 nextBatch = fetched;
-                pageCache.set(cacheKey, fetched);
+                setPageCacheLru(cacheKey, fetched);
             }
 
             if (fetchId !== activeFetchId || !nextBatch) return;
 
-            const newItems = nextBatch.filter(
-                (newItem) =>
-                    !memes.some((existing) => existing.id === newItem.id),
-            );
+            if (!append) {
+                loadedIds.clear();
+            }
+
+            const newItems: Meme[] = [];
+            for (let i = 0; i < nextBatch.length; i++) {
+                const item = nextBatch[i];
+                if (!loadedIds.has(item.id)) {
+                    loadedIds.add(item.id);
+                    newItems.push(item);
+                }
+            }
 
             if (append) {
                 if (newItems.length === 0) hasMore = false;
                 else memes = [...memes, ...newItems];
             } else {
-                memes = nextBatch;
+                memes = newItems;
             }
 
             hasMore =
@@ -314,19 +386,23 @@
                 memes.length > 0 &&
                 (!selectedMeme ||
                     selectedMeme.type !== filterType ||
-                    !memes.some((meme) => meme.id === selectedMeme?.id))
+                    !loadedIds.has(selectedMeme.id))
             ) {
                 selectMeme(memes[0]);
             } else if (memes.length === 0) {
                 selectedMeme = null;
             }
-        } catch (err) {
+        } catch (err: any) {
+            if (err?.name === "AbortError") return;
             if (fetchId !== activeFetchId) return;
             memes = [];
             selectedMeme = null;
             errorMessage =
                 err instanceof Error ? err.message : "Could not load data.";
         } finally {
+            if (activeAbortController === controller) {
+                activeAbortController = null;
+            }
             if (fetchId === activeFetchId) {
                 isLoading = false;
                 isLoadingMore = false;
@@ -374,10 +450,15 @@
 
     function selectMeme(meme: Meme) {
         if (selectedMeme?.id === meme.id) return;
-        isMediaLoading = true;
+        isMediaLoading = meme.type === "photo" ? !prefetchedUrls.has(meme.url) : true;
         meme.tags = meme.tags || [];
         selectedMeme = meme;
         editingTagIndex = null;
+
+        const idx = memes.findIndex((m) => m.id === meme.id);
+        if (idx !== -1) {
+            prefetchNeighbors(idx);
+        }
 
         requestAnimationFrame(() => {
             mediaGrid
@@ -473,8 +554,7 @@
         }
 
         const idToDelete = selectedMeme.id;
-        const btn = document.querySelector(".admin-delete-btn");
-        if (btn) btn.innerHTML = "⏳";
+        isDeletingMeme = true;
 
         try {
             const res = await fetch("/api/memes/delete", {
@@ -490,7 +570,6 @@
                 alert(
                     "Session expired or missing secure cookie. Please click delete again to log in.",
                 );
-                if (btn) btn.innerHTML = "🗑️";
                 return;
             }
 
@@ -500,17 +579,16 @@
             }
 
             // Remove from local grid without needing a page refresh
+            loadedIds.delete(idToDelete);
             memes = memes.filter((m) => m.id !== idToDelete);
             selectedMeme = memes.length > 0 ? memes[0] : null;
 
             if (filterType === "photo") photoCount--;
             else videoCount--;
-
-            // Fix: Reset the button back to the dustbin on SUCCESS
-            if (btn) btn.innerHTML = "🗑️";
         } catch (err: any) {
             alert("Failed to delete: " + err.message);
-            if (btn) btn.innerHTML = "🗑️";
+        } finally {
+            isDeletingMeme = false;
         }
     }
 
@@ -596,20 +674,21 @@
 
     async function pickRandom() {
         const total = filterType === "photo" ? photoCount : videoCount;
-        if (total === 0) return;
+        if (total === 0 || isRollingRandom) return;
 
+        isRollingRandom = true;
         isMediaLoading = true;
         const randomOffset = Math.floor(Math.random() * total);
-        const btn = document.getElementById("random-btn");
-        if (btn) btn.innerText = "Rolling...";
 
         try {
             const url = `/api/memes?type=${filterType}&limit=1&offset=${randomOffset}`;
             const res = await fetch(url);
             const [randomMeme] = await res.json();
             if (randomMeme) {
-                if (!memes.some((m) => m.id === randomMeme.id))
+                if (!loadedIds.has(randomMeme.id)) {
+                    loadedIds.add(randomMeme.id);
                     memes = [randomMeme, ...memes];
+                }
                 selectMeme(randomMeme);
                 const newIdx = memes.findIndex((m) => m.id === randomMeme.id);
                 if (newIdx !== -1) {
@@ -623,15 +702,13 @@
             }
         } catch (err) {
         } finally {
-            if (btn) btn.innerText = "Random";
+            isRollingRandom = false;
         }
     }
 
     async function downloadMeme(targetMeme: Meme | null = selectedMeme) {
         if (!targetMeme) return;
         downloadingId = targetMeme.id;
-        const btn = document.getElementById("download-btn");
-        if (btn && targetMeme.id === selectedMeme?.id) btn.innerText = "Downloading...";
 
         try {
             const res = await fetch(targetMeme.url);
@@ -642,12 +719,12 @@
             link.download = `uwu_${targetMeme.id.substring(0, 8)}.${targetMeme.type === "photo" ? "png" : "mp4"}`;
             link.click();
             window.URL.revokeObjectURL(blobUrl);
+            playSuccess();
             setClipboardMessage("Saved to downloads!");
         } catch (err) {
             window.open(targetMeme.url, "_blank");
         } finally {
             downloadingId = null;
-            if (btn && targetMeme.id === selectedMeme?.id) btn.innerText = "Download";
         }
     }
 
@@ -681,15 +758,18 @@
                 await navigator.clipboard.write([
                     new ClipboardItem({ [imageBlob.type]: imageBlob }),
                 ]);
+                playSuccess();
                 setClipboardMessage("Image copied!");
             } catch (err) {
                 await navigator.clipboard.writeText(targetMeme.url);
+                playSuccess();
                 setClipboardMessage("Link copied instead");
             }
         } else {
             // Handle Video Type
             try {
                 await navigator.clipboard.writeText(targetMeme.url);
+                playSuccess();
                 setClipboardMessage("Video link copied!");
             } catch (err) {
                 setClipboardMessage("Failed to copy link");
@@ -810,10 +890,14 @@
                         if (entry.isIntersecting) {
                             const idx = Number(entry.target.getAttribute("data-index"));
                             if (!isNaN(idx)) {
+                                if (activeReelIndex !== idx) {
+                                    playPaperFlick();
+                                }
                                 activeReelIndex = idx;
                                 if (memes[idx]) {
                                     selectedMeme = memes[idx];
                                 }
+                                prefetchNeighbors(idx);
                                 handleVideoPlayback(idx);
 
                                 if (idx >= memes.length - 4 && hasMore && !isLoadingMore) {
@@ -836,6 +920,59 @@
             },
             destroy() {
                 reelsObserver?.unobserve(node);
+            }
+        };
+    }
+
+    // Visibility-gated video thumbnail loader: caps active <video> decoders to <= 8 visible cards
+    function observeVideoThumb(node: HTMLVideoElement, url: string) {
+        videoThumbUrls.set(node, url);
+        if (!videoThumbObserver && typeof IntersectionObserver !== "undefined") {
+            videoThumbObserver = new IntersectionObserver(
+                (entries) => {
+                    for (const entry of entries) {
+                        const vid = entry.target as HTMLVideoElement;
+                        const mediaUrl = videoThumbUrls.get(vid);
+                        if (!mediaUrl) continue;
+                        if (entry.isIntersecting) {
+                            const targetSrc = `${mediaUrl}#t=0.001`;
+                            if (vid.getAttribute("src") !== targetSrc) {
+                                vid.preload = "metadata";
+                                vid.src = targetSrc;
+                            }
+                        } else if (vid.hasAttribute("src")) {
+                            vid.pause();
+                            vid.removeAttribute("src");
+                            vid.load();
+                        }
+                    }
+                },
+                { rootMargin: "160px" }
+            );
+        }
+
+        if (videoThumbObserver) {
+            videoThumbObserver.observe(node);
+        } else {
+            node.preload = "metadata";
+            node.src = `${url}#t=0.001`;
+        }
+
+        return {
+            update(nextUrl: string) {
+                videoThumbUrls.set(node, nextUrl);
+                if (node.hasAttribute("src")) {
+                    node.src = `${nextUrl}#t=0.001`;
+                }
+            },
+            destroy() {
+                videoThumbObserver?.unobserve(node);
+                videoThumbUrls.delete(node);
+                if (node.hasAttribute("src")) {
+                    node.pause();
+                    node.removeAttribute("src");
+                    node.load();
+                }
             }
         };
     }
@@ -1020,7 +1157,10 @@
         clearTimeout(searchTimeout);
         clearTimeout(clipboardTimeout);
         if (tapTimeout) clearTimeout(tapTimeout);
+        activeAbortController?.abort();
         reelsObserver?.disconnect();
+        videoThumbObserver?.disconnect();
+        videoThumbObserver = null;
         gridObserver?.disconnect();
         gridObserver = null;
         videoElements.clear();
@@ -1200,26 +1340,30 @@
                             onclick={(e) => handleMediaTap(meme, e)}
                             role="presentation"
                         >
-                            {#if meme.type === "photo"}
-                                <img
-                                    src={meme.url}
-                                    alt="Meme"
-                                    class="reel-media-img"
-                                    loading={Math.abs(i - activeReelIndex) <= 2 ? "eager" : "lazy"}
-                                    decoding="async"
-                                />
+                            {#if Math.abs(i - activeReelIndex) <= 3}
+                                {#if meme.type === "photo"}
+                                    <img
+                                        src={meme.url}
+                                        alt="Meme"
+                                        class="reel-media-img"
+                                        loading={Math.abs(i - activeReelIndex) <= 2 ? "eager" : "lazy"}
+                                        decoding="async"
+                                    />
+                                {:else}
+                                    <video
+                                        use:registerVideoElement={meme.id}
+                                        src={meme.url}
+                                        class="reel-media-video"
+                                        playsinline
+                                        loop
+                                        preload={Math.abs(i - activeReelIndex) <= 1 ? "auto" : "none"}
+                                        muted={isMuted}
+                                    >
+                                        <track kind="captions" />
+                                    </video>
+                                {/if}
                             {:else}
-                                <video
-                                    use:registerVideoElement={meme.id}
-                                    src={meme.url}
-                                    class="reel-media-video"
-                                    playsinline
-                                    loop
-                                    preload={Math.abs(i - activeReelIndex) <= 1 ? "auto" : "none"}
-                                    muted={isMuted}
-                                >
-                                    <track kind="captions" />
-                                </video>
+                                <div class="reel-media-placeholder"></div>
                             {/if}
                         </div>
 
@@ -1228,6 +1372,7 @@
                             <!-- Upvote Button -->
                             <button
                                 type="button"
+                                data-sfx={localVotes[meme.id] === 1 ? "pop-down" : "pop-up"}
                                 class="reel-action-btn {localVotes[meme.id] === 1 ? 'voted-up' : ''}"
                                 onclick={() => castVote(1, meme)}
                                 title="Upvote"
@@ -1239,6 +1384,7 @@
                             <!-- Downvote Button -->
                             <button
                                 type="button"
+                                data-sfx="pop-down"
                                 class="reel-action-btn {localVotes[meme.id] === -1 ? 'voted-down' : ''}"
                                 onclick={() => castVote(-1, meme)}
                                 title="Downvote"
@@ -1463,6 +1609,7 @@
                 {#each memes as meme, i (meme.id)}
                     <button
                         type="button"
+                        data-meme-id={meme.id}
                         class="grid-item {selectedMeme?.id === meme.id ? 'selected' : ''}"
                         onclick={() => openInReels(meme, i)}
                     >
@@ -1475,9 +1622,9 @@
                             />
                         {:else}
                             <video
-                                src={`${meme.url}#t=0.001`}
+                                use:observeVideoThumb={meme.url}
                                 muted
-                                preload="metadata"
+                                preload="none"
                                 playsinline
                             >
                                 <track kind="captions" />
@@ -1620,6 +1767,7 @@
                         {#each memes as meme (meme.id)}
                             <button
                                 type="button"
+                                data-meme-id={meme.id}
                                 class="grid-item {selectedMeme?.id === meme.id
                                     ? 'selected'
                                     : ''}"
@@ -1634,9 +1782,9 @@
                                     />
                                 {:else}
                                     <video
-                                        src={`${meme.url}#t=0.001`}
+                                        use:observeVideoThumb={meme.url}
                                         muted
-                                        preload="metadata"
+                                        preload="none"
                                         playsinline
                                     >
                                         <track kind="captions" />
@@ -1710,9 +1858,10 @@
                             type="button"
                             class="admin-delete-btn"
                             title="Delete Meme (Admin Only)"
+                            disabled={isDeletingMeme}
                             onclick={deleteMeme}
                         >
-                            🗑️
+                            {isDeletingMeme ? "⏳" : "🗑️"}
                         </button>
                         <div class="media-wrapper">
                             {#if selectedMeme.type === "photo"}
@@ -1720,6 +1869,8 @@
                                     class:is-blur={isMediaLoading}
                                     src={selectedMeme.url}
                                     alt="Selected media"
+                                    fetchpriority="high"
+                                    decoding="async"
                                     onload={() => (isMediaLoading = false)}
                                 />
                             {:else}
@@ -1794,6 +1945,7 @@
                     <div class="vote-controls">
                         <button
                             type="button"
+                            data-sfx={selectedMeme && localVotes[selectedMeme.id] === 1 ? "pop-down" : "pop-up"}
                             class="win-btn vote-btn {selectedMeme &&
                             localVotes[selectedMeme.id] === 1
                                 ? 'active-up'
@@ -1806,6 +1958,7 @@
                         </button>
                         <button
                             type="button"
+                            data-sfx="pop-down"
                             class="win-btn vote-btn {selectedMeme &&
                             localVotes[selectedMeme.id] === -1
                                 ? 'active-down'
@@ -1822,10 +1975,10 @@
                         type="button"
                         id="download-btn"
                         class="win-btn action-btn"
-                        disabled={!selectedMeme}
+                        disabled={!selectedMeme || (selectedMeme && downloadingId === selectedMeme.id)}
                         onclick={() => downloadMeme(selectedMeme)}
                     >
-                        Download
+                        {selectedMeme && downloadingId === selectedMeme.id ? "Downloading..." : "Download"}
                     </button>
 
                     <button
@@ -2144,6 +2297,9 @@
         overflow: hidden;
         padding: 0;
         box-shadow: inset 1px 1px #f4f4f4;
+        content-visibility: auto;
+        contain-intrinsic-size: 88px 88px;
+        contain: layout style paint;
     }
 
     .grid-item.selected {
@@ -2227,8 +2383,14 @@
         max-height: 100%;
         object-fit: contain;
         transition:
-            filter 0.4s ease-out,
-            opacity 0.4s ease-out;
+            filter 0.14s ease-out,
+            opacity 0.14s ease-out;
+    }
+
+    .reel-media-placeholder {
+        width: 100%;
+        height: 100%;
+        background: #08080c;
     }
 
     .is-blur {

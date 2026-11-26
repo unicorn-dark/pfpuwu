@@ -12,20 +12,47 @@
     import PfpMaker from "./PfpMaker.svelte";
     import ChatboxApp from "./ChatboxApp.svelte";
     import MemeExplorerApp from "./MemeExplorerApp.svelte";
-    import MinesweeperApp from "./MinesweeperApp.svelte";
-    import PrivateersApp from "./PrivateersApp.svelte";
-    import Roadmap from "./Roadmap.svelte";
-    import UwUWorldApp from "./UwUWorldApp.svelte";
     import SoundManager from "./SoundManager.svelte";
     import XAuthModal from "./XAuthModal.svelte";
     import AvatarCustomizerModal from "./AvatarCustomizerModal.svelte";
-    import DesktopNamecard from "./DesktopNamecard.svelte";
     import {
         userProfile,
         showAuthModal,
         authModalReason,
         showAvatarCustomizer
     } from "$lib/stores/auth";
+
+    type AsyncAppId = "uwu-world" | "namecard" | "roadmap" | "minesweeper" | "privateers-blog";
+    let loadedAsyncApps = $state<Partial<Record<AsyncAppId, any>>>({});
+    const pendingAppLoads = new Set<AsyncAppId>();
+
+    async function ensureAsyncAppLoaded(appId: string) {
+        if (
+            appId !== "uwu-world" &&
+            appId !== "namecard" &&
+            appId !== "roadmap" &&
+            appId !== "minesweeper" &&
+            appId !== "privateers-blog"
+        ) {
+            return;
+        }
+        const key = appId as AsyncAppId;
+        if (loadedAsyncApps[key] || pendingAppLoads.has(key)) return;
+        pendingAppLoads.add(key);
+        try {
+            let mod: any;
+            if (key === "uwu-world") mod = await import("./UwUWorldApp.svelte");
+            else if (key === "namecard") mod = await import("./DesktopNamecard.svelte");
+            else if (key === "roadmap") mod = await import("./Roadmap.svelte");
+            else if (key === "minesweeper") mod = await import("./MinesweeperApp.svelte");
+            else if (key === "privateers-blog") mod = await import("./PrivateersApp.svelte");
+            if (mod?.default) {
+                loadedAsyncApps = { ...loadedAsyncApps, [key]: mod.default };
+            }
+        } finally {
+            pendingAppLoads.delete(key);
+        }
+    }
 
     const launchApp = (appId: string) => {
         if (appId === "chatbox") {
@@ -34,8 +61,18 @@
         }
         const def = APP_REGISTRY.find((a) => a.id === appId);
         if (!def) return;
+        void ensureAsyncAppLoaded(appId);
         openWindow(def.id, def.title, def.defaultWidth, def.defaultHeight);
     };
+
+    // Also pre-load any async window opened directly via Start menu / Taskbar
+    $effect(() => {
+        for (const win of $activeWindows) {
+            if (win.isOpen) {
+                void ensureAsyncAppLoaded(win.id);
+            }
+        }
+    });
 
     onMount(() => {
         initAuth();
@@ -163,7 +200,12 @@
                         </div>
                     {:else if win.id === "namecard"}
                         <div class="app-content">
-                            <DesktopNamecard />
+                            {#if loadedAsyncApps["namecard"]}
+                                {@const NamecardComp = loadedAsyncApps["namecard"]}
+                                <NamecardComp isMinimized={win.isMinimized} />
+                            {:else}
+                                <div class="app-chunk-loading">⌛ Loading My Namecard...</div>
+                            {/if}
                         </div>
                     {:else if win.id === "meme-explorer"}
                         <div class="app-content">
@@ -177,19 +219,39 @@
                         ></iframe>
                     {:else if win.id === "minesweeper"}
                         <div class="app-content">
-                            <MinesweeperApp />
+                            {#if loadedAsyncApps["minesweeper"]}
+                                {@const MinesweeperComp = loadedAsyncApps["minesweeper"]}
+                                <MinesweeperComp />
+                            {:else}
+                                <div class="app-chunk-loading">⌛ Loading Minesweeper...</div>
+                            {/if}
                         </div>
                     {:else if win.id === "privateers-blog"}
                         <div class="app-content">
-                            <PrivateersApp />
+                            {#if loadedAsyncApps["privateers-blog"]}
+                                {@const BlogComp = loadedAsyncApps["privateers-blog"]}
+                                <BlogComp />
+                            {:else}
+                                <div class="app-chunk-loading">⌛ Loading Privateer Blog...</div>
+                            {/if}
                         </div>
                     {:else if win.id === "roadmap"}
                         <div class="app-content">
-                            <Roadmap />
+                            {#if loadedAsyncApps["roadmap"]}
+                                {@const RoadmapComp = loadedAsyncApps["roadmap"]}
+                                <RoadmapComp />
+                            {:else}
+                                <div class="app-chunk-loading">⌛ Loading UwU Roadmap...</div>
+                            {/if}
                         </div>
                     {:else if win.id === "uwu-world"}
                         <div class="app-content">
-                            <UwUWorldApp />
+                            {#if loadedAsyncApps["uwu-world"]}
+                                {@const WorldComp = loadedAsyncApps["uwu-world"]}
+                                <WorldComp isMinimized={win.isMinimized} />
+                            {:else}
+                                <div class="app-chunk-loading">⌛ Entering UwU World (MMO)...</div>
+                            {/if}
                         </div>
                     {/if}
                 </Window>
@@ -319,5 +381,16 @@
         border: none;
         background: #c0c0c0;
         display: block;
+    }
+
+    .app-chunk-loading {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #c0c0c0;
+        color: #000080;
+        font-weight: bold;
+        font-size: 13px;
     }
 </style>

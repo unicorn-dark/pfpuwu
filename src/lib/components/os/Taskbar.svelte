@@ -10,7 +10,16 @@
         minimizeWindow,
         highestZIndex
     } from "$lib/stores/os";
-    import { soundEnabled } from "$lib/utils/audio";
+    import {
+        soundEnabled,
+        soundPack,
+        soundVolume,
+        SOUND_PACKS,
+        playClick,
+        playPop,
+        playAppOpen,
+        type SoundPackId
+    } from "$lib/utils/audio";
     import {
         userProfile,
         showAuthModal,
@@ -21,6 +30,7 @@
 
     let startMenuOpen = $state(false);
     let profileMenuOpen = $state(false);
+    let soundMenuOpen = $state(false);
     let time = $state("");
     let clockInterval: any;
 
@@ -41,17 +51,39 @@
 
     const toggleStartMenu = () => {
         startMenuOpen = !startMenuOpen;
-        if (startMenuOpen) profileMenuOpen = false;
+        if (startMenuOpen) {
+            profileMenuOpen = false;
+            soundMenuOpen = false;
+        }
     };
     const closeMenu = () => (startMenuOpen = false);
 
     const toggleProfileMenu = () => {
         profileMenuOpen = !profileMenuOpen;
-        if (profileMenuOpen) startMenuOpen = false;
+        if (profileMenuOpen) {
+            startMenuOpen = false;
+            soundMenuOpen = false;
+        }
     };
     const closeProfileMenu = () => (profileMenuOpen = false);
 
+    const toggleSoundMenu = () => {
+        soundMenuOpen = !soundMenuOpen;
+        if (soundMenuOpen) {
+            startMenuOpen = false;
+            profileMenuOpen = false;
+        }
+    };
+
+    const selectSoundPack = (id: SoundPackId) => {
+        $soundPack = id;
+        $soundEnabled = true;
+        playClick("primary");
+        setTimeout(() => playPop("up"), 90);
+    };
+
     const launchApp = (app: any) => {
+        playAppOpen();
         if (app.id === "chatbox") {
             openChatDrawer();
             startMenuOpen = false;
@@ -77,7 +109,7 @@
     }
 </script>
 
-{#if startMenuOpen || profileMenuOpen}
+{#if startMenuOpen || profileMenuOpen || soundMenuOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -85,6 +117,7 @@
         onclick={() => {
             closeMenu();
             closeProfileMenu();
+            soundMenuOpen = false;
         }}
     ></div>
 {/if}
@@ -200,13 +233,68 @@
 
     <div class="system-tray">
         <button
-            class="sound-toggle-btn"
-            onclick={() => ($soundEnabled = !$soundEnabled)}
-            title={$soundEnabled ? "Mute system sounds" : "Enable system sounds"}
+            class="sound-toggle-btn {soundMenuOpen ? 'active' : ''}"
+            onclick={toggleSoundMenu}
+            title="ASMR Sound Engine & Volume"
         >
             {$soundEnabled ? "🔊" : "🔇"}
         </button>
         <span class="clock">{time}</span>
+
+        {#if soundMenuOpen}
+            <div class="sound-mixer-popover" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="ASMR Audio Mixer">
+                <div class="sound-mixer-header">
+                    <span>🎧 ASMR Audio Engine</span>
+                    <button
+                        type="button"
+                        class="mixer-mute-btn"
+                        data-sfx={$soundEnabled ? "pop-down" : "pop-up"}
+                        onclick={() => ($soundEnabled = !$soundEnabled)}
+                    >
+                        {$soundEnabled ? "Mute" : "Unmute"}
+                    </button>
+                </div>
+
+                <div class="sound-vol-row">
+                    <span class="mixer-label">Level:</span>
+                    {#each [
+                        { label: "Low", val: 0.4 },
+                        { label: "Med", val: 0.75 },
+                        { label: "Crisp", val: 1.0 }
+                    ] as vOpt (vOpt.val)}
+                        <button
+                            type="button"
+                            class="mixer-vol-btn {Math.abs($soundVolume - vOpt.val) < 0.08 ? 'active' : ''}"
+                            onclick={() => {
+                                $soundVolume = vOpt.val;
+                                $soundEnabled = true;
+                                playClick("primary");
+                            }}
+                        >
+                            {vOpt.label}
+                        </button>
+                    {/each}
+                </div>
+
+                <div class="menu-divider"></div>
+                <div class="mixer-pack-title">Tactile Sound Pack:</div>
+                <div class="mixer-pack-list">
+                    {#each SOUND_PACKS as pack (pack.id)}
+                        <button
+                            type="button"
+                            class="mixer-pack-btn {$soundPack === pack.id ? 'active' : ''}"
+                            onclick={() => selectSoundPack(pack.id)}
+                        >
+                            <span class="pack-icon">{pack.icon}</span>
+                            <span class="pack-text">
+                                <strong>{pack.name}</strong>
+                                <small>{pack.desc}</small>
+                            </span>
+                        </button>
+                    {/each}
+                </div>
+            </div>
+        {/if}
     </div>
 
     {#if startMenuOpen}
@@ -504,6 +592,7 @@
     }
 
     .system-tray {
+        position: relative;
         padding: 3px 8px;
         border: 2px solid;
         border-color: #808080 #ffffff #ffffff #808080;
@@ -525,6 +614,128 @@
         align-items: center;
         justify-content: center;
         outline: none;
+    }
+
+    .sound-toggle-btn.active {
+        background: #000080;
+        color: #ffffff;
+    }
+
+    .sound-mixer-popover {
+        position: absolute;
+        bottom: 35px;
+        right: 0;
+        width: 248px;
+        background: #c0c0c0;
+        border: 2px solid;
+        border-color: #ffffff #000000 #000000 #ffffff;
+        box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+        z-index: 10002;
+        padding: 3px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 11px;
+        color: #000000;
+    }
+
+    .sound-mixer-header {
+        background: linear-gradient(90deg, #000080, #1084d0);
+        color: #ffffff;
+        padding: 4px 6px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+    }
+
+    .mixer-mute-btn,
+    .mixer-vol-btn {
+        background: #c0c0c0;
+        color: #000000;
+        border: 1.5px solid;
+        border-color: #ffffff #000000 #000000 #ffffff;
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .mixer-vol-btn.active {
+        background: #000080;
+        color: #ffffff;
+        border-color: #000000 #ffffff #ffffff #000000;
+    }
+
+    .sound-vol-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 4px;
+    }
+
+    .mixer-label {
+        font-weight: bold;
+        margin-right: auto;
+    }
+
+    .mixer-pack-title {
+        font-weight: bold;
+        padding: 0 4px;
+        font-size: 10px;
+        color: #222222;
+    }
+
+    .mixer-pack-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 0 2px 2px;
+    }
+
+    .mixer-pack-btn {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        text-align: left;
+        background: #dfdfdf;
+        border: 1.5px solid;
+        border-color: #ffffff #808080 #808080 #ffffff;
+        padding: 5px 6px;
+        cursor: pointer;
+        color: #000000;
+    }
+
+    .mixer-pack-btn:hover {
+        background: #eaeaea;
+    }
+
+    .mixer-pack-btn.active {
+        background: #000080;
+        color: #ffffff;
+        border-color: #000000 #ffffff #ffffff #000000;
+    }
+
+    .pack-icon {
+        font-size: 15px;
+        flex-shrink: 0;
+    }
+
+    .pack-text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+    }
+
+    .pack-text strong {
+        font-size: 11px;
+    }
+
+    .pack-text small {
+        font-size: 9.5px;
+        opacity: 0.85;
     }
 
     .clock {

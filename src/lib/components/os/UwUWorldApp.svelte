@@ -42,7 +42,7 @@
         type WorldObject,
         type WorldZone
     } from "$lib/game/isometric/worldMap";
-    import MuseumStudioModal from "./MuseumStudioModal.svelte";
+    import { playPaperFlick, playPop } from "$lib/utils/audio";
     import {
         MUSEUM_GALLERY_FEE,
         MUSEUM_PEDESTAL_LOCATIONS,
@@ -68,6 +68,11 @@
     } from "$lib/game/activities/museumArt";
     import { findPath, type Point } from "$lib/game/isometric/pathfinding";
     import { preloadIsoAssets, drawIsoObjectSprite } from "$lib/game/isometric/isoAssetLoader";
+    import {
+        drawCachedGlow,
+        drawCachedBackdrop,
+        drawZoneAtmosphere
+    } from "$lib/game/isometric/atmosphere";
     import {
         renderPlayerAvatar,
         getCachedAvatarImage,
@@ -120,8 +125,24 @@
         type ArcadeLeaderboardMap
     } from "$lib/game/economy/worldEconomy";
 
+    let { isMinimized = false }: { isMinimized?: boolean } = $props();
+
     let canvasElement: HTMLCanvasElement | null = $state(null);
     let containerElement: HTMLDivElement | null = $state(null);
+
+    // Lazy-loaded Museum Studio Modal (3,657 lines split out until needed)
+    let MuseumStudioModalComp = $state<any>(null);
+    let isLoadingMuseumModal = $state(false);
+    async function ensureMuseumModalLoaded() {
+        if (MuseumStudioModalComp || isLoadingMuseumModal) return;
+        isLoadingMuseumModal = true;
+        try {
+            const mod = await import("./MuseumStudioModal.svelte");
+            MuseumStudioModalComp = mod.default;
+        } finally {
+            isLoadingMuseumModal = false;
+        }
+    }
 
     // Activity, Floor Cache & Sound Managers
     let networkManager = $state<WorldNetworkManager | null>(null);
@@ -187,12 +208,16 @@
     // Transparent Unicorn House Dealer Avatar Data URL
     let dealerAvatarSrc = $state("/traits/body/classic.png");
 
-    // Camera & Viewport
+    // Camera, Zoom & Viewport
     let cameraX = $state(0);
     let cameraY = $state(0);
+    let cameraZoom = $state(1.0);
     let canvasWidth = $state(860);
     let canvasHeight = $state(580);
     let resizeObserver: ResizeObserver | null = null;
+    let lastProximityCheckMs = 0;
+    let lastProxX = -999;
+    let lastProxY = -999;
 
     // Navigation & Waypoints
     let activeWaypoints: Point[] = [];
@@ -226,12 +251,15 @@
     let statusNotice = $state("");
     let noticeTimeout: number | null = null;
 
-    // Modals & Overlays
+    // Modals & HUD Popovers
     let showGuideModal = $state(false);
     let showGraffitiModal = $state(false);
     let showDJModal = $state(false);
     let showArcadeModal = $state(false);
     let showTravelMenu = $state(false);
+    let showHubMenu = $state(false);
+    let showAudioMenu = $state(false);
+    let showEmoteMenu = $state(false);
     let showMuseumModal = $state(false);
     let museumModalTab = $state<"inspect" | "studio" | "vault" | "queue">("inspect");
     let activeMuseumSpot = $state(1);
@@ -1274,11 +1302,29 @@
         canvasWidth = Math.max(320, Math.floor(rect.width));
         canvasHeight = Math.max(280, Math.floor(rect.height));
 
-        const dpr = window.devicePixelRatio || 1;
+        // Cap DPR (1.5x mobile / 2x desktop) to prevent excessive mobile GPU fill-rate
+        const rawDpr = window.devicePixelRatio || 1;
+        const dpr = Math.min(rawDpr, window.innerWidth <= 768 ? 1.5 : 2);
         canvasElement.style.width = `${canvasWidth}px`;
         canvasElement.style.height = `${canvasHeight}px`;
         canvasElement.width = Math.round(canvasWidth * dpr);
         canvasElement.height = Math.round(canvasHeight * dpr);
+    }
+
+    function setCameraZoom(nextZoom: number) {
+        cameraZoom = Math.max(0.8, Math.min(1.4, Math.round(nextZoom * 20) / 20));
+    }
+
+    function handleCanvasWheel(e: WheelEvent) {
+        e.preventDefault();
+        setCameraZoom(cameraZoom + (e.deltaY < 0 ? 0.08 : -0.08));
+    }
+
+    function closeAllHudPopovers() {
+        showTravelMenu = false;
+        showHubMenu = false;
+        showAudioMenu = false;
+        showEmoteMenu = false;
     }
 
     async function ensureVoiceInitialized() {
@@ -1606,6 +1652,7 @@
     ) {
         activeMuseumSpot = spotNumber;
         museumModalTab = tab;
+        void ensureMuseumModalLoaded();
         showMuseumModal = true;
         synth.playNatureChimeSfx();
         loadMuseumState(myUsername).then((mState) => {
@@ -3128,8 +3175,10 @@
     function handleCanvasPointerMove(e: MouseEvent) {
         if (!canvasElement) return;
         const rect = canvasElement.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
+        const rawX = e.clientX - rect.left;
+        const rawY = e.clientY - rect.top;
+        const screenX = (rawX - canvasWidth / 2) / cameraZoom + canvasWidth / 2;
+        const screenY = (rawY - canvasHeight / 2) / cameraZoom + canvasHeight / 2;
         const grid = screenToGrid(screenX, screenY, cameraX, cameraY, canvasWidth, canvasHeight);
         const gx = Math.floor(grid.x);
         const gy = Math.floor(grid.y);
@@ -3148,7 +3197,7 @@
         if (!$userProfile) return;
         if (!canvasElement || e.target !== canvasElement) return;
 
-        showTravelMenu = false;
+        closeAllHudPopovers();
         voiceManager?.unlockAudio();
 
         if (isChatFocused || document.activeElement === chatInputEl) {
@@ -3160,8 +3209,10 @@
         const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
         const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
 
-        const screenX = clientX - rect.left;
-        const screenY = clientY - rect.top;
+        const rawX = clientX - rect.left;
+        const rawY = clientY - rect.top;
+        const screenX = (rawX - canvasWidth / 2) / cameraZoom + canvasWidth / 2;
+        const screenY = (rawY - canvasHeight / 2) / cameraZoom + canvasHeight / 2;
 
         const gridPos = screenToGrid(screenX, screenY, cameraX, cameraY, canvasWidth, canvasHeight);
         const gx = Math.floor(gridPos.x);
@@ -3460,8 +3511,13 @@
         const deltaSec = Math.min(0.1, (now - lastFrameTime) / 1000);
         lastFrameTime = now;
 
-        updatePhysics(deltaSec);
-        renderScene(now);
+        const hidden =
+            isMinimized ||
+            (typeof document !== "undefined" && document.hidden);
+        if (!hidden) {
+            updatePhysics(deltaSec);
+            renderScene(now);
+        }
 
         animationFrameId = requestAnimationFrame(gameLoop);
     }
@@ -3610,39 +3666,46 @@
             voiceManager.updateSpatialVolumes({ x: myX, y: myY }, networkManager.getRemotePositions(currentZone));
         }
 
+        const nowProxMs = performance.now();
+        const movedEnough =
+            Math.abs(myX - lastProxX) > 0.03 || Math.abs(myY - lastProxY) > 0.03;
+        const shouldCheckProximity = movedEnough || nowProxMs - lastProximityCheckMs >= 160;
+
         if (currentZone === "casino") {
-            const allPlayers = [
-                {
-                    id: myId,
-                    username: myUsername,
-                    avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
-                    x: myX,
-                    y: myY
-                },
-                ...(networkManager?.getRemotePlayers("casino") || [])
-            ];
+            if (shouldCheckProximity) {
+                const allPlayers = [
+                    {
+                        id: myId,
+                        username: myUsername,
+                        avatarUrl: $userProfile?.avatar_url || "/unicorn.png",
+                        x: myX,
+                        y: myY
+                    },
+                    ...(networkManager?.getRemotePlayers("casino") || [])
+                ];
 
-            diceManager.updateOccupants(allPlayers, myId);
+                diceManager.updateOccupants(allPlayers, myId);
 
-            // Well-Separated Casino Station Proximity Detection
-            const stationCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
-                { id: "dice", dist: gridDistance(myX, myY, 11.5, 13.5), maxRadius: 2.35 },
-                { id: "roulette", dist: gridDistance(myX, myY, 19.5, 14.0), maxRadius: 2.5 },
-                { id: "blackjack", dist: gridDistance(myX, myY, 11.5, 19.5), maxRadius: 2.35 },
-                { id: "slots", dist: gridDistance(myX, myY, 21.0, 19.5), maxRadius: 2.25 },
-                { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 },
-                { id: "mines", dist: gridDistance(myX, myY, 27.5, 19.5), maxRadius: 2.35 }
-            ];
+                // Well-Separated Casino Station Proximity Detection
+                const stationCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
+                    { id: "dice", dist: gridDistance(myX, myY, 11.5, 13.5), maxRadius: 2.35 },
+                    { id: "roulette", dist: gridDistance(myX, myY, 19.5, 14.0), maxRadius: 2.5 },
+                    { id: "blackjack", dist: gridDistance(myX, myY, 11.5, 19.5), maxRadius: 2.35 },
+                    { id: "slots", dist: gridDistance(myX, myY, 21.0, 19.5), maxRadius: 2.25 },
+                    { id: "crash", dist: gridDistance(myX, myY, 15.5, 12.5), maxRadius: 2.2 },
+                    { id: "mines", dist: gridDistance(myX, myY, 27.5, 19.5), maxRadius: 2.35 }
+                ];
 
-            let closestStation: typeof activeStation = "none";
-            let bestDist = Infinity;
-            for (const cand of stationCandidates) {
-                if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
-                    bestDist = cand.dist;
-                    closestStation = cand.id;
+                let closestStation: typeof activeStation = "none";
+                let bestDist = Infinity;
+                for (const cand of stationCandidates) {
+                    if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
+                        bestDist = cand.dist;
+                        closestStation = cand.id;
+                    }
                 }
+                activeStation = closestStation;
             }
-            activeStation = closestStation;
 
             myDiceSeatIndex = diceManager.getSeatedPlayerSeat(myId);
             isSeatedAtDiceTable = myDiceSeatIndex !== -1;
@@ -3665,37 +3728,44 @@
                 wf.y = wf.anchorY + Math.cos(wf.phase * 1.3) * 0.42;
             }
 
-            // Whispering Woods Social Station Proximity Detection
-            const forestCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
-                { id: "campfire", dist: gridDistance(myX, myY, 16.0, 16.0), maxRadius: 3.4 },
-                {
-                    id: "picnic",
-                    dist: Math.min(gridDistance(myX, myY, 10.0, 9.0), gridDistance(myX, myY, 23.0, 10.0)),
-                    maxRadius: 2.9
-                },
-                { id: "fishing", dist: gridDistance(myX, myY, 11.0, 22.0), maxRadius: 3.2 },
-                { id: "fireflies", dist: gridDistance(myX, myY, 22.0, 23.0), maxRadius: 3.2 }
-            ];
+            if (shouldCheckProximity) {
+                // Whispering Woods Social Station Proximity Detection
+                const forestCandidates: Array<{ id: typeof activeStation; dist: number; maxRadius: number }> = [
+                    { id: "campfire", dist: gridDistance(myX, myY, 16.0, 16.0), maxRadius: 3.4 },
+                    {
+                        id: "picnic",
+                        dist: Math.min(gridDistance(myX, myY, 10.0, 9.0), gridDistance(myX, myY, 23.0, 10.0)),
+                        maxRadius: 2.9
+                    },
+                    { id: "fishing", dist: gridDistance(myX, myY, 11.0, 22.0), maxRadius: 3.2 },
+                    { id: "fireflies", dist: gridDistance(myX, myY, 22.0, 23.0), maxRadius: 3.2 }
+                ];
 
-            let closestStation: typeof activeStation = "none";
-            let bestDist = Infinity;
-            for (const cand of forestCandidates) {
-                if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
-                    bestDist = cand.dist;
-                    closestStation = cand.id;
+                let closestStation: typeof activeStation = "none";
+                let bestDist = Infinity;
+                for (const cand of forestCandidates) {
+                    if (cand.dist <= cand.maxRadius && cand.dist < bestDist) {
+                        bestDist = cand.dist;
+                        closestStation = cand.id;
+                    }
                 }
+                activeStation = closestStation;
             }
-            activeStation = closestStation;
         }
 
-        const zone = getCurrentZone(myX, myY, currentZone);
-        currentZoneName = zone
-            ? zone.name
-            : currentZone === "forest"
-              ? "🌲 Whispering Woods Sanctuary"
-              : currentZone === "museum"
-                ? "🏛️ UwU Grand Art Museum"
-                : "🎲 High Roller Casino Lounge";
+        if (shouldCheckProximity) {
+            lastProximityCheckMs = nowProxMs;
+            lastProxX = myX;
+            lastProxY = myY;
+            const zone = getCurrentZone(myX, myY, currentZone);
+            currentZoneName = zone
+                ? zone.name
+                : currentZone === "forest"
+                  ? "🌲 Whispering Woods"
+                  : currentZone === "museum"
+                    ? "🏛️ Grand Art Museum"
+                    : "🎲 Casino Lounge";
+        }
 
         for (let i = particles.length - 1; i >= 0; i--) {
             const p = particles[i];
@@ -3713,27 +3783,30 @@
         const ctx = canvasElement.getContext("2d");
         if (!ctx) return;
 
-        const dpr = window.devicePixelRatio || 1;
+        const rawDpr = window.devicePixelRatio || 1;
+        const dpr = Math.min(rawDpr, canvasWidth <= 768 ? 1.5 : 2);
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        const grad = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-        if (currentZone === "forest") {
-            grad.addColorStop(0, "#061814");
-            grad.addColorStop(0.5, "#0c2922");
-            grad.addColorStop(1, "#14382c");
-        } else if (currentZone === "museum") {
-            grad.addColorStop(0, "#100e1c");
-            grad.addColorStop(0.5, "#19152b");
-            grad.addColorStop(1, "#241e3c");
-        } else {
-            grad.addColorStop(0, "#050510");
-            grad.addColorStop(0.5, "#0d061c");
-            grad.addColorStop(1, "#18092c");
-        }
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        // 1. Pre-rendered Zone Backdrop (Sky Gradient + Starfield + Horizon)
+        drawCachedBackdrop(ctx, currentZone, canvasWidth, canvasHeight);
 
+        // Apply smooth camera zoom around viewport center for the isometric world pass
+        const halfW = canvasWidth / 2;
+        const halfH = canvasHeight / 2;
+        ctx.save();
+        if (cameraZoom !== 1) {
+            ctx.translate(halfW, halfH);
+            ctx.scale(cameraZoom, cameraZoom);
+            ctx.translate(-halfW, -halfH);
+        }
+
+        const viewLeft = halfW - halfW / cameraZoom - TILE_WIDTH * 2;
+        const viewRight = halfW + halfW / cameraZoom + TILE_WIDTH * 2;
+        const viewTop = halfH - halfH / cameraZoom - TILE_HEIGHT * 3;
+        const viewBottom = halfH + halfH / cameraZoom + TILE_HEIGHT * 3;
+
+        // 2. Viewport-Clipped StaticFloorCache Blit (Draws ONLY visible pixels!)
         const activeFloor =
             currentZone === "forest"
                 ? forestFloorCache
@@ -3741,11 +3814,31 @@
                   ? museumFloorCache
                   : floorCache;
         if (activeFloor.canvas) {
-            const mapOriginScreenX = canvasWidth / 2 - cameraX;
-            const mapOriginScreenY = canvasHeight / 2 - cameraY;
+            const mapOriginScreenX = halfW - cameraX;
+            const mapOriginScreenY = halfH - cameraY;
             const drawX = Math.round(mapOriginScreenX - activeFloor.originX);
             const drawY = Math.round(mapOriginScreenY - activeFloor.originY);
-            ctx.drawImage(activeFloor.canvas, drawX, drawY);
+
+            const sx = Math.max(0, Math.floor(viewLeft - drawX));
+            const sy = Math.max(0, Math.floor(viewTop - drawY));
+            const sx2 = Math.min(activeFloor.width, Math.ceil(viewRight - drawX));
+            const sy2 = Math.min(activeFloor.height, Math.ceil(viewBottom - drawY));
+            const sw = sx2 - sx;
+            const sh = sy2 - sy;
+
+            if (sw > 0 && sh > 0) {
+                ctx.drawImage(
+                    activeFloor.canvas,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    drawX + sx,
+                    drawY + sy,
+                    sw,
+                    sh
+                );
+            }
         }
 
         const animCoords =
@@ -3758,10 +3851,10 @@
             const t = animCoords[i];
             const screen = gridToScreen(t.x + 0.5, t.y + 0.5, 0, cameraX, cameraY, canvasWidth, canvasHeight);
             if (
-                screen.x < -TILE_WIDTH ||
-                screen.x > canvasWidth + TILE_WIDTH ||
-                screen.y < -TILE_HEIGHT ||
-                screen.y > canvasHeight + TILE_HEIGHT
+                screen.x < viewLeft ||
+                screen.x > viewRight ||
+                screen.y < viewTop ||
+                screen.y > viewBottom
             ) {
                 continue;
             }
@@ -3788,11 +3881,15 @@
             ctx.closePath();
 
             const isSolid = activeCollision[hy]?.[hx];
-            ctx.strokeStyle = isSolid ? "rgba(255, 180, 0, 0.85)" : "rgba(0, 255, 255, 0.9)";
-            ctx.fillStyle = isSolid ? "rgba(255, 180, 0, 0.14)" : "rgba(0, 255, 255, 0.18)";
+            ctx.strokeStyle = isSolid ? "rgba(255, 180, 0, 0.9)" : "rgba(0, 255, 255, 0.95)";
+            ctx.fillStyle = isSolid ? "rgba(255, 180, 0, 0.14)" : "rgba(0, 255, 255, 0.16)";
             ctx.lineWidth = 2;
             ctx.fill();
             ctx.stroke();
+
+            // Crisp corner reticle tick dot at hovered tile center
+            ctx.fillStyle = isSolid ? "#ffb400" : "#00ffff";
+            ctx.fillRect(sc.x - 1.5, sc.y - 1.5, 3, 3);
             ctx.restore();
         }
 
@@ -3846,8 +3943,18 @@
                 : currentZone === "museum"
                   ? MUSEUM_OBJECTS
                   : WORLD_OBJECTS;
+        // Pre-sort frustum culling: only push visible objects into depth sort
         for (let i = 0; i < objectsList.length; i++) {
             const obj = objectsList[i];
+            const objSc = gridToScreen(obj.x, obj.y, 0, cameraX, cameraY, canvasWidth, canvasHeight);
+            if (
+                objSc.x < viewLeft - 220 ||
+                objSc.x > viewRight + 220 ||
+                objSc.y < viewTop - 220 ||
+                objSc.y > viewBottom + 220
+            ) {
+                continue;
+            }
             renderEntities.push({
                 depth: calculateDepth(obj.x, obj.y, obj.z || 0, obj.depthOffset || 0),
                 type: "obj",
@@ -3966,10 +4073,17 @@
 
             const lastPt = activeWaypoints[activeWaypoints.length - 1];
             const destSc = gridToScreen(lastPt.x, lastPt.y, 0, cameraX, cameraY, canvasWidth, canvasHeight);
+            const ringPulse = (timeMs % 900) / 900;
             ctx.fillStyle = "#00ffff";
             ctx.beginPath();
-            ctx.ellipse(destSc.x, destSc.y, 8, 4, 0, 0, Math.PI * 2);
+            ctx.ellipse(destSc.x, destSc.y, 6, 3, 0, 0, Math.PI * 2);
             ctx.fill();
+            ctx.strokeStyle = `rgba(0, 255, 255, ${(1 - ringPulse) * 0.85})`;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.ellipse(destSc.x, destSc.y, 7 + ringPulse * 12, 3.5 + ringPulse * 6, 0, 0, Math.PI * 2);
+            ctx.stroke();
             ctx.restore();
         }
 
@@ -3980,7 +4094,7 @@
             ctx.fillRect(sc.x, sc.y, p.size, p.size);
         }
 
-        // Render roaming wild fireflies in Whispering Woods
+        // Render roaming wild fireflies in Whispering Woods (uses cached glow stamps)
         if (currentZone === "forest") {
             const nowMs = Date.now();
             for (const wf of wildFireflies) {
@@ -3989,17 +4103,10 @@
                 const sc = gridToScreen(wf.x, wf.y, bobZ, cameraX, cameraY, canvasWidth, canvasHeight);
                 const pulse = 0.65 + Math.sin(timeMs / 170 + wf.phase) * 0.35;
 
-                ctx.save();
-                const aura = ctx.createRadialGradient(sc.x, sc.y, 1, sc.x, sc.y, 18);
-                aura.addColorStop(0, `rgba(212, 255, 110, ${0.88 * pulse})`);
-                aura.addColorStop(0.5, `rgba(120, 255, 160, ${0.38 * pulse})`);
-                aura.addColorStop(1, "rgba(0, 255, 140, 0)");
-                ctx.fillStyle = aura;
-                ctx.beginPath();
-                ctx.arc(sc.x, sc.y, 18, 0, Math.PI * 2);
-                ctx.fill();
+                drawCachedGlow(ctx, "emerald", sc.x, sc.y, 18, 18, 0.85 * pulse);
 
                 // Fluttering wings
+                ctx.save();
                 const wingSpread = 4 + Math.sin(timeMs / 45 + wf.phase) * 2.5;
                 ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
                 ctx.beginPath();
@@ -4016,11 +4123,15 @@
             }
         }
 
-        renderProximityPill(ctx);
-
         if (hoveredTile) {
             renderHoverTooltip(ctx, hoveredTile.x, hoveredTile.y);
         }
+
+        // End zoomed world pass
+        ctx.restore();
+
+        // Ambient Zone Lighting Beams & Dust/Petals (unscaled screen pass)
+        drawZoneAtmosphere(ctx, currentZone, canvasWidth, canvasHeight, cameraX, cameraY, timeMs);
 
         ctx.restore();
     }
@@ -4282,15 +4393,19 @@
                 drawIsoPrism(ctx, 16, 8, 42, "#ffd700", "#2a1442", "#1a0b2e", "#ffd700");
             }
 
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(-10, -32, 20, 11);
+            // Crisp vector 3-reel illuminated glass window
+            ctx.fillStyle = "#0b0818";
+            ctx.fillRect(-10, -33, 20, 12);
             ctx.strokeStyle = "#ff00aa";
             ctx.lineWidth = 1.5;
-            ctx.strokeRect(-10, -32, 20, 11);
+            ctx.strokeRect(-10, -33, 20, 12);
 
-            ctx.font = "8px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("🍒🐸🚀", 0, -24);
+            const reelColors = ["#ff2a6d", "#00e5ff", "#ffd700", "#00ff88"];
+            const reelShift = isSlotSpinning ? Math.floor(timeMs / 80) : 0;
+            for (let r = 0; r < 3; r++) {
+                ctx.fillStyle = reelColors[(r + reelShift) % reelColors.length];
+                ctx.fillRect(-7.5 + r * 6, -30, 4, 6);
+            }
 
             const flash = Math.floor(timeMs / 200) % 2 === 0;
             ctx.fillStyle = flash ? "#ff0055" : "#ffff00";
@@ -4319,11 +4434,32 @@
                 drawIsoPrism(ctx, 26, 13, 22, "#1a103c", "#110a28", "#0a0518", "#ff0055");
             }
             const rocketLift = crashPhase === "flying" ? Math.min(28, (crashMultiplier - 1) * 10) : 0;
-            ctx.font = "20px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText(crashPhase === "crashed" ? "💥" : "🚀", 0, -28 - rocketLift);
+            const ry = -28 - rocketLift;
+            drawCachedGlow(ctx, crashPhase === "crashed" ? "warmOrange" : "cyan", 0, ry, 18, 18, 0.6);
+
+            // Clean vector isometric rocket body + thruster flame
+            const flicker = Math.sin(timeMs / 55) * 2.5;
+            ctx.fillStyle = crashPhase === "crashed" ? "#ff5722" : "#00e5ff";
+            ctx.beginPath();
+            ctx.moveTo(-4, ry + 5);
+            ctx.lineTo(4, ry + 5);
+            ctx.lineTo(0, ry + 13 + flicker);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "#e2e8f0";
+            ctx.beginPath();
+            ctx.moveTo(0, ry - 12);
+            ctx.lineTo(5.5, ry + 4);
+            ctx.lineTo(-5.5, ry + 4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#ff1744";
+            ctx.fillRect(-2, ry - 4, 4, 3);
+
             ctx.font = "bold 8px monospace";
             ctx.fillStyle = "#00ff88";
+            ctx.textAlign = "center";
             ctx.fillText("CRASH", 0, -12);
         } else if (obj.type === "graffiti_wall") {
             [-28, 28].forEach((px) => {
@@ -4407,13 +4543,7 @@
             ctx.fill();
             drawIsoObjectSprite(ctx, "speaker_club", 0, 0, 24, 6);
         } else if (obj.type === "street_lamp") {
-            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 38);
-            glow.addColorStop(0, "rgba(255, 235, 160, 0.34)");
-            glow.addColorStop(1, "rgba(255, 235, 160, 0)");
-            ctx.fillStyle = glow;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 38, 19, 0, 0, Math.PI * 2);
-            ctx.fill();
+            drawCachedGlow(ctx, "gold", 0, 0, 38, 19, 0.45);
 
             const lampKey = currentZone === "forest" ? "lantern_street" : "lightpost_double";
             const lampW = currentZone === "forest" ? 16 : 32;
@@ -4422,14 +4552,7 @@
                 ctx.fillRect(-2, -44, 4, 44);
             }
 
-            // Warm top lantern halo
-            const halo = ctx.createRadialGradient(0, -48, 2, 0, -48, 16);
-            halo.addColorStop(0, "rgba(255, 245, 180, 0.7)");
-            halo.addColorStop(1, "rgba(255, 220, 120, 0)");
-            ctx.fillStyle = halo;
-            ctx.beginPath();
-            ctx.arc(0, -48, 16, 0, Math.PI * 2);
-            ctx.fill();
+            drawCachedGlow(ctx, "gold", 0, -48, 16, 16, 0.72);
         } else if (obj.type === "palm_tree") {
             ctx.fillStyle = "rgba(0,0,0,0.35)";
             ctx.beginPath();
@@ -4474,14 +4597,7 @@
             ctx.arc(Math.cos(pPhase * 0.8) * 14, -32 + ((timeMs / 55 + obj.x * 12) % 26), 1.8, 0, Math.PI * 2);
             ctx.fill();
         } else if (obj.type === "campfire_pit") {
-            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 62);
-            glow.addColorStop(0, "rgba(255, 150, 45, 0.5)");
-            glow.addColorStop(0.6, "rgba(255, 95, 15, 0.18)");
-            glow.addColorStop(1, "rgba(255, 100, 0, 0)");
-            ctx.fillStyle = glow;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 62, 31, 0, 0, Math.PI * 2);
-            ctx.fill();
+            drawCachedGlow(ctx, "warmOrange", 0, 0, 62, 31, 0.56);
 
             // Render 3D Kenney stone ring + stacked campfire logs
             drawIsoObjectSprite(ctx, "campfire_stones", 0, 0, 44, 9);
@@ -4514,30 +4630,32 @@
                 drawIsoPrism(ctx, 20, 9, 10, "#754724", "#593418", "#3d220e", "#a66c38");
             }
         } else if (obj.type === "picnic_table") {
-            // Cozy woven picnic rug underneath + 3D cloth table + treats
+            // Cozy woven picnic rug underneath + 3D cloth table + crisp vector picnic basket
             drawIsoObjectSprite(ctx, "rug_rectangle", 0, 6, 78, 16, 0.92);
             if (!drawIsoObjectSprite(ctx, "table_cloth", 0, 0, 52, 10)) {
                 drawIsoPrism(ctx, 30, 15, 16, "#d32f2f", "#5c3818", "#3e240e", "#ffffff");
             }
-            ctx.font = "12px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("🍵🍡🧺", 0, -24);
+            // Vector picnic basket + warm lantern mug
+            ctx.fillStyle = "#b87a3d";
+            ctx.fillRect(-7, -28, 12, 8);
+            ctx.strokeStyle = "#5c3412";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(-7, -28, 12, 8);
+            ctx.fillStyle = "#88d4ab";
+            ctx.fillRect(8, -25, 4, 5);
         } else if (obj.type === "koi_dock") {
             if (!drawIsoObjectSprite(ctx, "bridge_wood", 0, 4, 72, 16)) {
                 drawIsoPrism(ctx, 28, 14, 10, "#8c5828", "#69401a", "#4d2d10", "#b87a40");
             }
-            ctx.font = "14px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("🎣🐟", 0, -24);
+            // Warm pier lantern post
+            ctx.fillStyle = "#5c3818";
+            ctx.fillRect(-18, -30, 3, 22);
+            drawCachedGlow(ctx, "gold", -16.5, -31, 14, 14, 0.6);
+            ctx.fillStyle = "#ffe082";
+            ctx.fillRect(-19, -34, 5, 6);
         } else if (obj.type === "firefly_shrine") {
             const pulse = 0.55 + Math.sin(timeMs / 220) * 0.35;
-            const aura = ctx.createRadialGradient(0, -16, 4, 0, -16, 46);
-            aura.addColorStop(0, `rgba(190, 255, 110, ${0.42 * pulse})`);
-            aura.addColorStop(1, "rgba(0, 255, 140, 0)");
-            ctx.fillStyle = aura;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 44, 22, 0, 0, Math.PI * 2);
-            ctx.fill();
+            drawCachedGlow(ctx, "emerald", 0, 0, 44, 22, 0.55 * pulse);
 
             if (!drawIsoObjectSprite(ctx, "statue_obelisk", 0, 0, 36, 8)) {
                 drawIsoPrism(ctx, 22, 11, 32, "#788496", "#586270", "#3e4652", "#ccff66");
@@ -4570,15 +4688,18 @@
                 const lx = Math.cos(angle) * radiusX;
                 const ly = -52 - (lIdx % 3) * 13 + Math.sin(timeMs / 480 + lIdx) * 4;
                 const lColor = lanternPalette[lantern.color] || "#ffd54f";
+                const glowKey =
+                    lantern.color === "cyan"
+                        ? "cyan"
+                        : lantern.color === "emerald"
+                          ? "emerald"
+                          : lantern.color === "sakura"
+                            ? "magenta"
+                            : lantern.color === "violet"
+                              ? "violet"
+                              : "gold";
 
-                // Warm lantern glow
-                const lGlow = ctx.createRadialGradient(lx, ly, 1, lx, ly, 12);
-                lGlow.addColorStop(0, lColor);
-                lGlow.addColorStop(1, "rgba(255, 213, 79, 0)");
-                ctx.fillStyle = lGlow;
-                ctx.beginPath();
-                ctx.arc(lx, ly, 12, 0, Math.PI * 2);
-                ctx.fill();
+                drawCachedGlow(ctx, glowKey, lx, ly, 12, 12, 0.72);
 
                 // Lantern body
                 ctx.fillStyle = lColor;
@@ -4701,21 +4822,16 @@
             ctx.ellipse(0, 5, 28, 14, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            // Golden Spotlight Cone on Floor
-            const spotGlow = ctx.createRadialGradient(0, -10, 4, 0, -10, 42);
-            spotGlow.addColorStop(
+            // Cached Golden Spotlight Cone on Floor
+            drawCachedGlow(
+                ctx,
+                art ? "gold" : isNear ? "cyan" : "violet",
                 0,
-                art
-                    ? "rgba(255, 224, 130, 0.34)"
-                    : isNear
-                      ? "rgba(0, 229, 255, 0.32)"
-                      : "rgba(180, 160, 255, 0.16)"
+                0,
+                36,
+                18,
+                art ? 0.36 : isNear ? 0.34 : 0.2
             );
-            spotGlow.addColorStop(1, "rgba(255, 215, 0, 0)");
-            ctx.fillStyle = spotGlow;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, 36, 18, 0, 0, Math.PI * 2);
-            ctx.fill();
 
             // 3D Marble Plinth Base + Stepped Column
             drawIsoPrism(
@@ -4825,82 +4941,33 @@
         ctx.restore();
     }
 
-    function renderProximityPill(ctx: CanvasRenderingContext2D) {
-        let promptText = "";
+    const nearbyPrompt = $derived.by(() => {
         if (currentZone === "casino") {
-            if (activeStation === "dice") {
-                promptText = "🎲 Craps Table [Press E to Roll]";
-            } else if (activeStation === "roulette") {
-                promptText = "🎡 Meme Roulette [Press E to Spin]";
-            } else if (activeStation === "blackjack") {
-                promptText = "🃏 Blackjack 21 [Press E to Deal]";
-            } else if (activeStation === "slots") {
-                promptText = "🎰 Golden Slots [Press E to Spin]";
-            } else if (activeStation === "crash") {
-                promptText = "🚀 Rocket Crash [Press E]";
-            } else if (activeStation === "mines") {
-                promptText = "💣 Cyber Mines [Press E]";
-            } else if (gridDistance(myX, myY, 27.5, 12.5) <= 3.5) {
-                promptText = "🕹️ Retro Arcade [Press E / Click]";
-            } else if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) {
-                promptText = "🪩 DJ Booth [Press E / Click]";
-            } else if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) {
-                promptText = "🎨 Graffiti Wall [Press E / Click]";
-            } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🌲 Walk East → Whispering Woods";
-            } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🏛️ Walk West → Grand Art Museum";
-            }
-        } else if (currentZone === "museum") {
+            if (activeStation === "dice") return "🎲 Roll Craps Duel";
+            if (activeStation === "roulette") return "🎡 Spin Meme Roulette";
+            if (activeStation === "blackjack") return "🃏 Deal Blackjack 21";
+            if (activeStation === "slots") return "🎰 Pull Golden Slots";
+            if (activeStation === "crash") return crashPhase === "flying" ? "🚀 Cash Out Rocket!" : "🚀 Launch Rocket Crash";
+            if (activeStation === "mines") return minesPhase === "playing" ? "💣 Cash Out Mines" : "💣 Play Cyber Mines";
+            if (gridDistance(myX, myY, 27.5, 12.5) <= 3.5) return "🕹️ Open Retro Arcade";
+            if (gridDistance(myX, myY, 16.0, 2.5) <= 3.2) return "🪩 Open DJ Turntable";
+            if (gridDistance(myX, myY, 27.5, 15.5) <= 3.2) return "🎨 Paint Graffiti Wall";
+            return "";
+        }
+        if (currentZone === "museum") {
             const nearPed = getNearestMuseumPedestal(myX, myY, 3.1);
             if (nearPed) {
                 const art = museumState.spots[nearPed.spotNumber];
-                if (art) {
-                    promptText = `🏛️ Spot #${nearPed.spotNumber}: "${art.title}" by @${art.artistUsername} [Press E / Click to Inspect]`;
-                } else {
-                    promptText = `✨ Open Spot #${nearPed.spotNumber} (${nearPed.wingName}) [Press E / Click to Exhibit 2D or 3D Art]`;
-                }
-            } else if (myX >= 28.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🎲 Walk East → Casino Lounge";
-            } else {
-                promptText = "🎨 Press [E] or Click Any Pedestal to Open 2D/3D Art Studio & Vault";
+                return art
+                    ? `🏛️ Inspect "${art.title}" (#${nearPed.spotNumber})`
+                    : `✨ Exhibit on Spot #${nearPed.spotNumber}`;
             }
-        } else {
-            if (activeStation === "campfire") {
-                promptText = "🔥 Campfire Circle";
-            } else if (activeStation === "picnic") {
-                promptText = "🧺 Woodland Picnic";
-            } else if (activeStation === "fishing") {
-                promptText = "🎣 Koi Pond [Press E to Cast]";
-            } else if (activeStation === "fireflies") {
-                promptText = `🏮 Wish Lantern Shrine [Press E — ${wishLanterns.length} Active 24h]`;
-            } else if (myX <= 4.0 && myY >= 13.5 && myY <= 18.5) {
-                promptText = "🎲 Walk West → Casino Lounge";
-            }
+            return "";
         }
-
-        if (promptText) {
-            ctx.save();
-            ctx.font = 'bold 11px "MS Sans Serif", Tahoma, Arial, sans-serif';
-            const metrics = ctx.measureText(promptText);
-            const pw = metrics.width + 24;
-            const ph = 24;
-            const px = canvasWidth / 2 - pw / 2;
-            const py = canvasHeight - 36;
-
-            ctx.fillStyle = "rgba(0, 12, 85, 0.9)";
-            ctx.fillRect(px, py, pw, ph);
-            ctx.strokeStyle = "#00ffff";
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(px, py, pw, ph);
-
-            ctx.fillStyle = "#ffffff";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(promptText, canvasWidth / 2, py + ph / 2);
-            ctx.restore();
-        }
-    }
+        if (activeStation === "fishing") return "🎣 Cast Koi Pond Line";
+        if (activeStation === "fireflies") return "🏮 Open Firefly Wish Shrine";
+        return "";
+    });
 
     function renderHoverTooltip(ctx: CanvasRenderingContext2D, hx: number, hy: number) {
         let hoverLabel = "";
@@ -4969,131 +5036,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="mmo-container" bind:this={containerElement}>
-    <!-- Sleek Single-Row Top HUD Bar -->
-    <div class="mmo-toolbar">
-        <div class="toolbar-left">
-            <span class="room-pill" title={currentZoneName}>
-                <span class="room-name-text">{currentZoneName}</span>
-                <span class="online-inline">🟢 {onlineCount}</span>
-            </span>
-
-            <span class="chips-pill" title="Record: {myWins}W - {myLosses}L">
-                🪙 {chips.toLocaleString()} $UWU
-            </span>
-
-            <button
-                class="win98-btn daily-reward-btn"
-                class:daily-ready={dailyStatus.canClaim}
-                onclick={claimDailyReward}
-                title="Claim 1,000 $UWU Daily Reward"
-            >
-                {dailyStatus.canClaim ? "🎁 +1,000" : `⏳ ${dailyStatus.formattedRemaining}`}
-            </button>
-        </div>
-
-        <div class="toolbar-right">
-            <!-- Compact Map Teleport Dropdown -->
-            <div class="travel-dropdown-wrap">
-                <button
-                    class="win98-btn map-menu-btn"
-                    class:active-wager={showTravelMenu}
-                    onclick={(e) => {
-                        e.stopPropagation();
-                        showTravelMenu = !showTravelMenu;
-                    }}
-                >
-                    🗺️ Map ▾
-                </button>
-                {#if showTravelMenu}
-                    <div class="travel-popover win98-window" onclick={(e) => e.stopPropagation()}>
-                        <button class="travel-item" onclick={() => teleportTo(15.5, 16.5, "Casino Floor", "casino")}>
-                            🎲 Casino Floor
-                        </button>
-                        <button class="travel-item" onclick={() => teleportTo(16.0, 6.5, "Club DJ Stage", "casino")}>
-                            🪩 Club DJ Stage
-                        </button>
-                        <button class="travel-item" onclick={() => teleportTo(27.5, 13.8, "Retro Arcade", "casino")}>
-                            🕹️ Retro Arcade
-                        </button>
-                        <button class="travel-item" onclick={() => teleportTo(27.5, 18.2, "Cyber Mines", "casino")}>
-                            💣 Cyber Mines
-                        </button>
-                        <button class="travel-item" onclick={() => teleportTo(25.5, 15.5, "Graffiti Wall", "casino")}>
-                            🎨 Graffiti Wall
-                        </button>
-                        <button class="travel-item" onclick={() => teleportTo(16.0, 23.5, "Grand Plaza", "casino")}>
-                            ⛲ Grand Plaza
-                        </button>
-                        <button class="travel-item woods-item" onclick={() => teleportTo(16.0, 16.0, "Whispering Woods", "forest")}>
-                            🌲 Whispering Woods
-                        </button>
-                        <button class="travel-item museum-item" onclick={() => teleportTo(16.0, 15.5, "Grand Art Museum", "museum")}>
-                            🏛️ Grand Art Museum
-                        </button>
-                    </div>
-                {/if}
-            </div>
-
-            <button
-                class="win98-btn museum-open-btn"
-                onclick={() => openMuseumSpotInspector(activeMuseumSpot || 1, currentZone === "museum" ? "inspect" : "studio")}
-                title="Open 2D & 3D IsoBrick Art Studio, Personal Vault & Museum Exhibits"
-            >
-                🏛️ Art Studio
-            </button>
-
-            <button class="win98-btn arcade-open-btn" onclick={() => openArcadeModal("brick")}>
-                🕹️ Arcade
-            </button>
-
-            <button class="win98-btn dj-open-btn" onclick={() => (showDJModal = true)} title="Open DJ Turntable Deck">
-                🪩 DJ
-            </button>
-
-            <button class="win98-btn leaderboard-btn" onclick={openLeaderboard}>
-                🏆 Ranks
-            </button>
-
-            <button class="win98-btn send-uwu-btn" onclick={() => openSendUwuModal("")}>
-                💸 Tip
-            </button>
-
-            <button class="win98-btn guide-btn" onclick={() => openChatDrawer()} title="Global Chat">
-                💬 Chat
-            </button>
-
-            <button class="win98-btn icon-only-btn" onclick={() => (showGuideModal = true)} title="World Guide">
-                📖
-            </button>
-
-            <button
-                class="win98-btn icon-only-btn"
-                title={isMusicPlaying ? "Mute Music" : "Play Music"}
-                onclick={() => {
-                    isMusicPlaying = !isMusicPlaying;
-                    synth.setMute(!isMusicPlaying);
-                    if (isMusicPlaying) synth.playTrack(currentTrackId);
-                }}
-            >
-                {isMusicPlaying ? "🔊" : "🔇"}
-            </button>
-
-            <button
-                class="win98-btn icon-only-btn"
-                title="Toggle Microphone"
-                onclick={async () => {
-                    await ensureVoiceInitialized();
-                    if (voiceManager) {
-                        isMuted = voiceManager.toggleUserMute();
-                    }
-                }}
-            >
-                {isMuted ? "🔇" : "🎙️"}
-            </button>
-        </div>
-    </div>
-
-    <!-- Central Game Canvas -->
+    <!-- Central Game Canvas + Streamlined Game-First Floating HUD -->
     <div class="canvas-wrapper" role="application" aria-label="Isometric World View">
         <canvas
             bind:this={canvasElement}
@@ -5101,12 +5044,271 @@
             ontouchstart={handleCanvasPointerDown}
             onmousemove={handleCanvasPointerMove}
             onmouseleave={handleCanvasPointerLeave}
+            onwheel={handleCanvasWheel}
         ></canvas>
+
+        <!-- FLOATING TOP HUD (Clean Game-First Layout) -->
+        <div class="mmo-floating-hud">
+            <!-- Top-Left: Clickable Zone Pill + $UWU Economy & Inline Daily Claim -->
+            <div class="hud-cluster-left">
+                <button
+                    type="button"
+                    class="win98-btn hud-zone-pill"
+                    onclick={(e) => {
+                        e.stopPropagation();
+                        const next = !showTravelMenu;
+                        closeAllHudPopovers();
+                        showTravelMenu = next;
+                        playPaperFlick();
+                    }}
+                    title="Current Location & Online Players — Click to Fast Travel"
+                >
+                    <span class="room-name-text">{currentZoneName}</span>
+                    <span class="online-inline">🟢 {onlineCount}</span>
+                    <span class="hud-caret">▾</span>
+                </button>
+
+                <div class="hud-chips-pill" title="Record: {myWins}W - {myLosses}L">
+                    <span>🪙 {chips.toLocaleString()}</span>
+                    <button
+                        type="button"
+                        class="win98-btn hud-daily-mini"
+                        class:daily-ready={dailyStatus.canClaim}
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            claimDailyReward();
+                        }}
+                        title="Claim 1,000 $UWU Daily Reward"
+                    >
+                        {dailyStatus.canClaim ? "🎁 +1k" : `⏳ ${dailyStatus.formattedRemaining}`}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Top-Right: Compact 3-Control Cluster (Map / Hub / Audio & Zoom) -->
+            <div class="hud-cluster-right">
+                <!-- 1. Map Fast Travel -->
+                <div class="hud-popover-anchor">
+                    <button
+                        type="button"
+                        class="win98-btn hud-action-pill {showTravelMenu ? 'active-wager' : ''}"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            const next = !showTravelMenu;
+                            closeAllHudPopovers();
+                            showTravelMenu = next;
+                            playPaperFlick();
+                        }}
+                    >
+                        🗺️ Map
+                    </button>
+
+                    {#if showTravelMenu}
+                        <div class="travel-popover grouped-map win98-window" onclick={(e) => e.stopPropagation()}>
+                            <div class="win98-title-bar">
+                                <span class="win98-title">🗺️ World Fast Travel</span>
+                                <button type="button" class="win98-close" onclick={() => (showTravelMenu = false)}>X</button>
+                            </div>
+                            <div class="map-groups-body">
+                                <div class="map-group-title">🎲 Casino District</div>
+                                <div class="map-group-grid">
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(15.5, 16.5, "Casino Floor", "casino"); }}>🎲 Casino Floor</button>
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(16.0, 6.5, "Club DJ Stage", "casino"); }}>🪩 Club DJ Stage</button>
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(27.5, 13.8, "Retro Arcade", "casino"); }}>🕹️ Retro Arcade</button>
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(27.5, 18.2, "Cyber Mines", "casino"); }}>💣 Cyber Mines</button>
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(25.5, 15.5, "Graffiti Wall", "casino"); }}>🎨 Graffiti Wall</button>
+                                    <button type="button" class="travel-item" onclick={() => { closeAllHudPopovers(); teleportTo(16.0, 23.5, "Grand Plaza", "casino"); }}>⛲ Grand Plaza</button>
+                                </div>
+
+                                <div class="map-group-title">🏛️ Exhibitions & Sanctuary</div>
+                                <div class="map-group-grid">
+                                    <button type="button" class="travel-item museum-item" onclick={() => { closeAllHudPopovers(); teleportTo(16.0, 15.5, "Grand Art Museum", "museum"); }}>🏛️ Grand Art Museum</button>
+                                    <button type="button" class="travel-item woods-item" onclick={() => { closeAllHudPopovers(); teleportTo(16.0, 16.0, "Whispering Woods", "forest"); }}>🌲 Whispering Woods</button>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- 2. World Hub Menu -->
+                <div class="hud-popover-anchor">
+                    <button
+                        type="button"
+                        class="win98-btn hud-action-pill {showHubMenu ? 'active-wager' : ''}"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            const next = !showHubMenu;
+                            closeAllHudPopovers();
+                            showHubMenu = next;
+                            playPaperFlick();
+                        }}
+                    >
+                        ☰ Hub
+                    </button>
+
+                    {#if showHubMenu}
+                        <div class="hub-popover win98-window" onclick={(e) => e.stopPropagation()}>
+                            <div class="win98-title-bar">
+                                <span class="win98-title">☰ World Hub</span>
+                                <button type="button" class="win98-close" onclick={() => (showHubMenu = false)}>X</button>
+                            </div>
+                            <div class="hub-grid">
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn museum"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        openMuseumSpotInspector(activeMuseumSpot || 1, currentZone === "museum" ? "inspect" : "studio");
+                                    }}
+                                >
+                                    <span>🏛️</span>
+                                    <strong>Art Studio</strong>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        openArcadeModal("brick");
+                                    }}
+                                >
+                                    <span>🕹️</span>
+                                    <strong>Arcade</strong>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        showDJModal = true;
+                                    }}
+                                >
+                                    <span>🪩</span>
+                                    <strong>DJ Deck</strong>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        openLeaderboard();
+                                    }}
+                                >
+                                    <span>🏆</span>
+                                    <strong>Ranks</strong>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        openSendUwuModal("");
+                                    }}
+                                >
+                                    <span>💸</span>
+                                    <strong>Tip $UWU</strong>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="win98-btn hub-tile-btn"
+                                    onclick={() => {
+                                        closeAllHudPopovers();
+                                        showGuideModal = true;
+                                    }}
+                                >
+                                    <span>📖</span>
+                                    <strong>Guide</strong>
+                                </button>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- 3. Audio & Camera Zoom Popover -->
+                <div class="hud-popover-anchor">
+                    <button
+                        type="button"
+                        class="win98-btn hud-action-pill {showAudioMenu ? 'active-wager' : ''}"
+                        onclick={(e) => {
+                            e.stopPropagation();
+                            const next = !showAudioMenu;
+                            closeAllHudPopovers();
+                            showAudioMenu = next;
+                            playPaperFlick();
+                        }}
+                        title="Music, Voice Mic & Camera Zoom"
+                    >
+                        {isMusicPlaying ? "🔊" : "🔇"}
+                    </button>
+
+                    {#if showAudioMenu}
+                        <div class="audio-popover win98-window" onclick={(e) => e.stopPropagation()}>
+                            <div class="win98-title-bar">
+                                <span class="win98-title">🎛️ Audio & Camera</span>
+                                <button type="button" class="win98-close" onclick={() => (showAudioMenu = false)}>X</button>
+                            </div>
+                            <div class="audio-pop-body">
+                                <button
+                                    type="button"
+                                    class="win98-btn audio-pop-row"
+                                    data-sfx={isMusicPlaying ? "pop-down" : "pop-up"}
+                                    onclick={() => {
+                                        isMusicPlaying = !isMusicPlaying;
+                                        synth.setMute(!isMusicPlaying);
+                                        if (isMusicPlaying) synth.playTrack(currentTrackId);
+                                    }}
+                                >
+                                    <span>{isMusicPlaying ? "🔊" : "🔇"} World Music</span>
+                                    <strong>{isMusicPlaying ? "ON" : "OFF"}</strong>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    class="win98-btn audio-pop-row"
+                                    onclick={async () => {
+                                        await ensureVoiceInitialized();
+                                        if (voiceManager) {
+                                            isMuted = voiceManager.toggleUserMute();
+                                        }
+                                    }}
+                                >
+                                    <span>{isMuted ? "🔇" : "🎙️"} Proximity Mic</span>
+                                    <strong>{isMuted ? "MUTED" : "LIVE"}</strong>
+                                </button>
+
+                                <div class="zoom-control-row">
+                                    <span>🔍 Zoom:</span>
+                                    <div class="zoom-btns">
+                                        <button type="button" class="win98-btn" onclick={() => setCameraZoom(cameraZoom - 0.1)}>−</button>
+                                        <button type="button" class="win98-btn" onclick={() => setCameraZoom(1.0)}>{Math.round(cameraZoom * 100)}%</button>
+                                        <button type="button" class="win98-btn" onclick={() => setCameraZoom(cameraZoom + 0.1)}>+</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        </div>
 
         {#if statusNotice}
             <div class="status-notice">
                 {statusNotice}
             </div>
+        {/if}
+
+        {#if nearbyPrompt && activeStation === "none"}
+            <button
+                type="button"
+                class="contextual-e-pill"
+                onclick={(e) => {
+                    e.stopPropagation();
+                    handleInteraction();
+                }}
+            >
+                <span class="e-key-badge">E</span>
+                <span>{nearbyPrompt}</span>
+            </button>
         {/if}
 
         <!-- 1. CRAPS / DICE DUEL HUD (Turn-by-Turn 2-4 Party Arena & Solo vs House) -->
@@ -6034,18 +6236,56 @@
         </button>
     </div>
 
-    <!-- Bottom Action & Chat Bar -->
+    <!-- Compact Bottom Social Dock -->
     <div class="mmo-action-bar">
-        <button class="win98-btn dance-cycle-btn" onclick={cycleDanceMove} title="Tap to cycle 6 dance moves">
-            {DANCE_MOVES[currentDanceIndex].icon} {DANCE_MOVES[currentDanceIndex].label}
-        </button>
+        <div class="hud-popover-anchor">
+            <button
+                type="button"
+                class="win98-btn dance-cycle-btn {showEmoteMenu ? 'active-wager' : ''}"
+                onclick={(e) => {
+                    e.stopPropagation();
+                    const next = !showEmoteMenu;
+                    closeAllHudPopovers();
+                    showEmoteMenu = next;
+                    playPaperFlick();
+                }}
+                title="Dance Moves & Quick Emotes"
+            >
+                ✨ Emotes ▴
+            </button>
 
-        <div class="quick-emotes">
-            <button class="win98-btn emote-btn" onclick={() => triggerEmote("✨")}>✨</button>
-            <button class="win98-btn emote-btn" onclick={() => triggerEmote("💎")}>💎</button>
-            <button class="win98-btn emote-btn" onclick={() => triggerEmote("❤️")}>❤️</button>
-            <button class="win98-btn emote-btn" onclick={() => triggerEmote("👑")}>👑</button>
-            <button class="win98-btn emote-btn" onclick={() => triggerEmote("🔥")}>🔥</button>
+            {#if showEmoteMenu}
+                <div class="emote-popover win98-window" onclick={(e) => e.stopPropagation()}>
+                    <div class="emote-pop-section">
+                        <button
+                            type="button"
+                            class="win98-btn dance-cycle-btn"
+                            style="width:100%;"
+                            onclick={() => {
+                                cycleDanceMove();
+                                showEmoteMenu = false;
+                            }}
+                        >
+                            {DANCE_MOVES[currentDanceIndex].icon} Cycle Dance ({DANCE_MOVES[currentDanceIndex].label})
+                        </button>
+                    </div>
+                    <div class="quick-emotes">
+                        {#each ["✨", "💎", "❤️", "👑", "🔥"] as em (em)}
+                            <button
+                                type="button"
+                                class="win98-btn emote-btn"
+                                data-sfx="pop-up"
+                                onclick={() => {
+                                    triggerEmote(em);
+                                    showEmoteMenu = false;
+                                }}
+                            >
+                                {em}
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
         </div>
 
         <form
@@ -6059,7 +6299,7 @@
                 bind:this={chatInputEl}
                 type="text"
                 class="win98-input chat-input"
-                placeholder="Say something nearby... (Enter to send)"
+                placeholder="Say something nearby... (Enter)"
                 bind:value={chatInput}
                 onfocus={() => (isChatFocused = true)}
                 onblur={() => (isChatFocused = false)}
@@ -6068,8 +6308,17 @@
             <button type="submit" class="win98-btn send-btn">Send</button>
         </form>
 
+        <button
+            type="button"
+            class="win98-btn global-chat-dock-btn"
+            onclick={() => openChatDrawer()}
+            title="Open 24h Global Chat Drawer"
+        >
+            💬 Global
+        </button>
+
         <div class="desktop-ptt-hint">
-            <span>[WASD / Click: Move] [E: Interact] [Space: Mic]</span>
+            <span>[WASD/Click: Move • E: Use • Wheel: Zoom • Space: Mic]</span>
         </div>
     </div>
 
@@ -7142,31 +7391,40 @@
         </div>
     {/if}
 
-    <!-- Modal 7: 🏛️ UWU GRAND ART MUSEUM — 2D GALLERY EASEL, 3D ISOBRICK BUILDER, PERSONAL ART VAULT & @0XSHA3 CURATOR DESK -->
+    <!-- Modal 7: 🏛️ UWU GRAND ART MUSEUM — Lazy Loaded on Demand -->
     {#if showMuseumModal}
-        <MuseumStudioModal
-            {museumState}
-            initialTab={museumModalTab}
-            initialSpotNumber={activeMuseumSpot}
-            myUserId={myId}
-            myUsername={myUsername}
-            myDisplayName={$userProfile?.x_display_name || myUsername}
-            myAvatarUrl={toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits)}
-            myChips={chips}
-            onClose={() => (showMuseumModal = false)}
-            onSaveToVault={handleSaveArtworkToVault}
-            onExhibitOnSpot={handleExhibitArtworkOnSpot}
-            onSubmitToQueue={handleSubmitArtworkToQueue}
-            onCuratorApproveToSpot={handleCuratorApproveToSpot}
-            onRemoveFromQueue={handleRemoveFromCuratorQueue}
-            onVacateSpot={handleVacateMuseumSpot}
-            onDeleteFromVault={handleDeleteArtworkFromVault}
-            onToggleLike={handleToggleMuseumLike}
-            onTipArtist={(artistUsername) => {
-                showMuseumModal = false;
-                openSendUwuModal(artistUsername);
-            }}
-        />
+        {#if MuseumStudioModalComp}
+            {@const StudioComp = MuseumStudioModalComp}
+            <StudioComp
+                {museumState}
+                initialTab={museumModalTab}
+                initialSpotNumber={activeMuseumSpot}
+                myUserId={myId}
+                myUsername={myUsername}
+                myDisplayName={$userProfile?.x_display_name || myUsername}
+                myAvatarUrl={toCompactAvatarUrl($userProfile?.avatar_url, $userProfile?.avatar_traits)}
+                myChips={chips}
+                onClose={() => (showMuseumModal = false)}
+                onSaveToVault={handleSaveArtworkToVault}
+                onExhibitOnSpot={handleExhibitArtworkOnSpot}
+                onSubmitToQueue={handleSubmitArtworkToQueue}
+                onCuratorApproveToSpot={handleCuratorApproveToSpot}
+                onRemoveFromQueue={handleRemoveFromCuratorQueue}
+                onVacateSpot={handleVacateMuseumSpot}
+                onDeleteFromVault={handleDeleteArtworkFromVault}
+                onToggleLike={handleToggleMuseumLike}
+                onTipArtist={(artistUsername: string) => {
+                    showMuseumModal = false;
+                    openSendUwuModal(artistUsername);
+                }}
+            />
+        {:else}
+            <div class="modal-overlay" onclick={() => (showMuseumModal = false)}>
+                <div class="win98-window" style="padding: 16px 24px; font-weight: bold;" onclick={(e) => e.stopPropagation()}>
+                    🏛️ Loading 2D/3D Art Studio...
+                </div>
+            </div>
+        {/if}
     {/if}
 
     <!-- Full-Game 𝕏 Authentication Gate Overlay (Prevents anon joins, DB spam & graffiti resets) -->
@@ -7446,6 +7704,206 @@
         justify-content: space-between;
         overflow: hidden;
         box-sizing: border-box;
+    }
+
+    /* FLOATING GAME-FIRST TOP HUD OVERLAY */
+    .mmo-floating-hud {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        pointer-events: none;
+    }
+
+    .hud-cluster-left,
+    .hud-cluster-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        pointer-events: auto;
+        min-width: 0;
+    }
+
+    .hud-zone-pill {
+        background: rgba(8, 12, 48, 0.88);
+        color: #ffffff;
+        border: 1px solid rgba(0, 229, 255, 0.55);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        padding: 4px 9px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: bold;
+        max-width: 220px;
+    }
+
+    .hud-caret {
+        font-size: 9px;
+        opacity: 0.75;
+    }
+
+    .hud-chips-pill {
+        background: rgba(8, 12, 48, 0.88);
+        color: #ffd700;
+        border: 1px solid rgba(255, 215, 0, 0.55);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        padding: 2px 4px 2px 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: bold;
+        white-space: nowrap;
+    }
+
+    .hud-daily-mini {
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: bold;
+    }
+
+    .hud-daily-mini.daily-ready {
+        background: #007a3d;
+        color: #ffff80;
+    }
+
+    .hud-popover-anchor {
+        position: relative;
+        display: inline-flex;
+    }
+
+    .hud-action-pill {
+        padding: 4px 9px;
+        font-size: 11px;
+        font-weight: bold;
+        box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.45);
+        white-space: nowrap;
+    }
+
+    .hub-popover {
+        position: absolute;
+        top: calc(100% + 5px);
+        right: 0;
+        width: 228px;
+        z-index: 65;
+    }
+
+    .hub-grid {
+        padding: 6px;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 5px;
+    }
+
+    .hub-tile-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 8px;
+        text-align: left;
+        font-size: 11px;
+    }
+
+    .hub-tile-btn.museum {
+        background: #4a148c;
+        color: #ffd700;
+    }
+
+    .audio-popover {
+        position: absolute;
+        top: calc(100% + 5px);
+        right: 0;
+        width: 210px;
+        z-index: 65;
+    }
+
+    .audio-pop-body {
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .audio-pop-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 5px 8px;
+    }
+
+    .zoom-control-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        font-weight: bold;
+        color: #000000;
+        padding-top: 2px;
+    }
+
+    .zoom-btns {
+        display: flex;
+        gap: 3px;
+    }
+
+    .contextual-e-pill {
+        position: absolute;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 25;
+        background: rgba(6, 16, 68, 0.94);
+        color: #ffffff;
+        border: 1.5px solid #00ffff;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
+        padding: 5px 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 11.5px;
+        font-weight: bold;
+        font-family: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+        max-width: calc(100% - 24px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .contextual-e-pill:hover {
+        background: #000080;
+    }
+
+    .e-key-badge {
+        background: #00ffff;
+        color: #000033;
+        padding: 1px 5px;
+        font-size: 10px;
+        font-weight: 900;
+    }
+
+    .emote-popover {
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 0;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        z-index: 65;
+        width: 210px;
+    }
+
+    .global-chat-dock-btn {
+        font-weight: bold;
+        white-space: nowrap;
     }
 
     .room-name-text {
@@ -8751,16 +9209,36 @@
         background: #d4d0c8;
     }
 
-    .travel-popover {
+    .travel-popover.grouped-map {
         position: absolute;
-        top: calc(100% + 4px);
-        left: 0;
-        width: 165px;
-        padding: 4px;
+        top: calc(100% + 5px);
+        right: 0;
+        width: 256px;
+        padding: 0;
         display: flex;
         flex-direction: column;
-        gap: 2px;
-        z-index: 60;
+        z-index: 65;
+    }
+
+    .map-groups-body {
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .map-group-title {
+        font-size: 10px;
+        font-weight: bold;
+        color: #000080;
+        border-bottom: 1px solid #808080;
+        padding-bottom: 2px;
+    }
+
+    .map-group-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 4px;
     }
 
     .travel-item {
@@ -9974,32 +10452,34 @@
     }
 
     @media (max-width: 768px) {
-        .mmo-toolbar {
+        .mmo-floating-hud {
             flex-direction: column;
             align-items: stretch;
-            gap: 4px;
-            padding: 4px 6px;
+            gap: 5px;
+            top: 6px;
+            left: 6px;
+            right: 6px;
         }
-        .toolbar-left {
+        .hud-cluster-left,
+        .hud-cluster-right {
             width: 100%;
             justify-content: space-between;
-            flex-wrap: nowrap;
         }
-        .room-pill {
-            width: 0;
+        .hud-zone-pill {
             max-width: none;
             flex: 1 1 0;
         }
-        .toolbar-right {
-            width: 100%;
-            flex-wrap: wrap;
-            gap: 4px;
+        .travel-popover.grouped-map,
+        .hub-popover,
+        .audio-popover {
+            right: 0;
+            max-width: calc(100vw - 24px);
         }
         .desktop-ptt-hint {
             display: none;
         }
         .mmo-action-bar {
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             padding: 4px 6px;
             padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
             z-index: 25;

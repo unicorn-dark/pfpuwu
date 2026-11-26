@@ -1511,6 +1511,15 @@ export function drawRichIsometricTile(
             ctx.fillStyle = `rgb(0, ${g}, ${b})`;
             ctx.fill();
 
+            // Subtle crisp shoreline foam highlight along top-left/top-right water edge
+            ctx.strokeStyle = 'rgba(205, 250, 255, 0.32)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(sx - TILE_WIDTH / 2 + 4, sy);
+            ctx.lineTo(sx, sy - TILE_HEIGHT / 2 + 2);
+            ctx.lineTo(sx + TILE_WIDTH / 2 - 4, sy);
+            ctx.stroke();
+
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
             ctx.lineWidth = 1.2;
             ctx.beginPath();
@@ -1745,6 +1754,57 @@ export class StaticFloorCache {
         c.height = this.height;
         const ctx = c.getContext('2d');
         if (!ctx) return;
+
+        // Sculpted 3D Floating-Island Foundation Skirt along SW (x=0) and SE (y=MAP_SIZE-1) outer edges
+        const skirtH = 16;
+        const leftSkirtCol =
+            zone === 'forest' ? '#2c422c' : zone === 'museum' ? '#3d345c' : '#231b3d';
+        const rightSkirtCol =
+            zone === 'forest' ? '#1e2e20' : zone === 'museum' ? '#292242' : '#161028';
+        const trimStroke =
+            zone === 'forest'
+                ? 'rgba(105, 240, 174, 0.35)'
+                : zone === 'museum'
+                  ? 'rgba(255, 215, 0, 0.4)'
+                  : 'rgba(0, 229, 255, 0.32)';
+
+        // Left SW outer cliff face (y === MAP_SIZE - 1, x from 0..MAP_SIZE-1)
+        for (let x = 0; x < MAP_SIZE; x++) {
+            const gx = x + 0.5;
+            const gy = MAP_SIZE - 0.5;
+            const sx = (gx - gy) * (TILE_WIDTH / 2) + this.originX;
+            const sy = (gx + gy) * (TILE_HEIGHT / 2) + this.originY;
+            ctx.fillStyle = leftSkirtCol;
+            ctx.beginPath();
+            ctx.moveTo(sx - TILE_WIDTH / 2, sy);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2 + skirtH);
+            ctx.lineTo(sx - TILE_WIDTH / 2, sy + skirtH);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = trimStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // Right SE outer cliff face (x === MAP_SIZE - 1, y from 0..MAP_SIZE-1)
+        for (let y = 0; y < MAP_SIZE; y++) {
+            const gx = MAP_SIZE - 0.5;
+            const gy = y + 0.5;
+            const sx = (gx - gy) * (TILE_WIDTH / 2) + this.originX;
+            const sy = (gx + gy) * (TILE_HEIGHT / 2) + this.originY;
+            ctx.fillStyle = rightSkirtCol;
+            ctx.beginPath();
+            ctx.moveTo(sx + TILE_WIDTH / 2, sy);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2);
+            ctx.lineTo(sx, sy + TILE_HEIGHT / 2 + skirtH);
+            ctx.lineTo(sx + TILE_WIDTH / 2, sy + skirtH);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = trimStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
 
         for (let y = 0; y < MAP_SIZE; y++) {
             for (let x = 0; x < MAP_SIZE; x++) {

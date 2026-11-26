@@ -9,259 +9,280 @@ import {
     decodeAvatarTraitsUrl
 } from '$lib/utils/avatar';
 
-export type NamecardBgMode = 'liquid' | 'gradient' | 'solid';
-export type NamecardBorderId =
-    | 'glass_rim'
-    | 'holo_glow'
-    | 'chrome_edge'
-    | 'pearl_soft'
-    | 'neon_line'
-    | 'none';
-export type NamecardTextTone = 'auto' | 'dark' | 'light';
+export type NamecardSkinId =
+    | 'win98_exec'
+    | 'cyber_terminal'
+    | 'liquid_titanium'
+    | 'casino_royale'
+    | 'vapor_grid'
+    | 'pocket_lcd'
+    | 'sakura_shrine'
+    | 'prismatic_chase';
 
-export interface NamecardStickerInstance {
-    id: string;
-    symbol: string;
-    x: number; // 0..100 percentage of card width
-    y: number; // 0..100 percentage of card height
-    scale: number; // 0.6..1.8
-    rotation: number; // -45..45 degrees
-}
+export type NamecardFinishId = 'matte' | 'holo_sweep' | 'scanlines' | 'dot_matrix' | 'halftone';
+export type NamecardFrameId = 'win98_bevel' | 'tech_brackets' | 'gold_hairline' | 'holo_rim' | 'minimal';
+export type NamecardEmblemId =
+    | 'crown'
+    | 'diamond'
+    | 'dice'
+    | 'joystick'
+    | 'palette'
+    | 'lantern'
+    | 'star_crest'
+    | 'trophy';
 
 export interface NamecardConfig {
-    version: 2;
+    version: 3;
     userId: string;
     username: string;
     displayName: string;
     tagline: string;
-    bgMode: NamecardBgMode;
-    bgPresetId: string;
-    solidColor: string;
-    showSparkles: boolean;
-    borderId: NamecardBorderId;
-    textTone: NamecardTextTone;
-    stickers: NamecardStickerInstance[];
+    skinId: NamecardSkinId;
+    finishId: NamecardFinishId;
+    frameId: NamecardFrameId;
+    roleBadge: string;
+    emblems: NamecardEmblemId[];
     paintDataUrl: string | null;
-    paintLayer?: 'above' | 'behind';
     updatedAt: number;
 }
 
-export interface LiquidPreset {
-    id: string;
+export interface NamecardSkinMeta {
+    id: NamecardSkinId;
     name: string;
-    baseBg: string;
-    ribbons: [string, string, string, string, string];
-    defaultTextTone: 'dark' | 'light';
+    tag: string;
+    tone: 'dark' | 'light';
+    primaryText: string;
+    secondaryText: string;
     accentColor: string;
-    swatchGradient: string;
+    headerBg: string;
+    headerText: string;
+    dividerColor: string;
+    bayBg: string;
+    bayBorder: string;
+    swatchCss: string;
 }
 
-export interface GradientPreset {
-    id: string;
-    name: string;
-    stops: [string, string, string];
-    angle: number;
-    defaultTextTone: 'dark' | 'light';
-    accentColor: string;
-}
-
-export interface SolidColorPreset {
-    id: string;
-    name: string;
-    hex: string;
-    defaultTextTone: 'dark' | 'light';
-}
-
-export interface NamecardBorderOption {
-    id: NamecardBorderId;
+export interface NamecardFinishMeta {
+    id: NamecardFinishId;
     name: string;
     desc: string;
 }
 
-export const CARD_FONT_STACK =
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+export interface NamecardFrameMeta {
+    id: NamecardFrameId;
+    name: string;
+    desc: string;
+}
 
-export const LIQUID_PRESETS: LiquidPreset[] = [
+export interface NamecardEmblemMeta {
+    id: NamecardEmblemId;
+    name: string;
+    viewBoxPath: string;
+}
+
+export const CARD_UI_FONT_STACK = "'Tahoma', 'MS Sans Serif', 'Segoe UI', Arial, sans-serif";
+export const CARD_MONO_FONT_STACK = "'JetBrains Mono', 'SFMono-Regular', Consolas, 'Courier New', monospace";
+
+export const NAMECARD_SKINS: NamecardSkinMeta[] = [
     {
-        id: 'holo_pearl',
-        name: 'Dreamy Holo',
-        baseBg: '#f9d8f4',
-        ribbons: ['#ffafe6', '#9bf6ff', '#fff3b0', '#c8b6ff', '#ffffff'],
-        defaultTextTone: 'dark',
-        accentColor: '#9d2ec5',
-        swatchGradient: 'linear-gradient(135deg, #ffafe6 0%, #c8b6ff 35%, #9bf6ff 70%, #fff3b0 100%)'
+        id: 'win98_exec',
+        name: 'Win98 Executive',
+        tag: 'OS CLASSIC',
+        tone: 'dark',
+        primaryText: '#0b0e14',
+        secondaryText: '#3e4452',
+        accentColor: '#000080',
+        headerBg: '#000080',
+        headerText: '#ffffff',
+        dividerColor: 'rgba(0, 0, 0, 0.22)',
+        bayBg: '#ebe8df',
+        bayBorder: '#808080',
+        swatchCss: 'linear-gradient(180deg, #000080 0%, #1084d0 28%, #d6d2c8 29%, #c0c0c0 100%)'
     },
     {
-        id: 'liquid_chrome',
-        name: 'Liquid Chrome',
-        baseBg: '#e8eef7',
-        ribbons: ['#ffffff', '#bde0fe', '#d8d2ff', '#a2d2ff', '#f8f9fa'],
-        defaultTextTone: 'dark',
-        accentColor: '#2563eb',
-        swatchGradient: 'linear-gradient(135deg, #ffffff 0%, #bde0fe 40%, #d8d2ff 75%, #94a3b8 100%)'
+        id: 'cyber_terminal',
+        name: 'Midnight Terminal',
+        tag: 'NEON SYS',
+        tone: 'light',
+        primaryText: '#f0fdf4',
+        secondaryText: '#86efac',
+        accentColor: '#00f0ff',
+        headerBg: '#071422',
+        headerText: '#00f0ff',
+        dividerColor: 'rgba(0, 240, 255, 0.24)',
+        bayBg: 'rgba(0, 240, 255, 0.06)',
+        bayBorder: 'rgba(0, 240, 255, 0.35)',
+        swatchCss: 'linear-gradient(135deg, #070b14 0%, #0b192c 55%, #004e64 100%)'
     },
     {
-        id: 'rose_silk',
-        name: 'Rose Silk',
-        baseBg: '#ffe5ec',
-        ribbons: ['#ffb3c6', '#ffd6a5', '#ffcad4', '#e2afff', '#fff0f5'],
-        defaultTextTone: 'dark',
-        accentColor: '#d62872',
-        swatchGradient: 'linear-gradient(135deg, #ffb3c6 0%, #ffd6a5 50%, #e2afff 100%)'
+        id: 'liquid_titanium',
+        name: 'Y2K Chrome Foil',
+        tag: 'METALLIC',
+        tone: 'dark',
+        primaryText: '#0f172a',
+        secondaryText: '#475569',
+        accentColor: '#1d4ed8',
+        headerBg: '#1e293b',
+        headerText: '#f8fafc',
+        dividerColor: 'rgba(15, 23, 42, 0.16)',
+        bayBg: 'rgba(255, 255, 255, 0.5)',
+        bayBorder: 'rgba(100, 116, 139, 0.5)',
+        swatchCss: 'linear-gradient(135deg, #f8fafc 0%, #cbd5e1 42%, #94a3b8 68%, #f1f5f9 100%)'
     },
     {
-        id: 'aurora_mint',
-        name: 'Mint Aurora',
-        baseBg: '#e0fbfc',
-        ribbons: ['#98f5e1', '#a3c4f3', '#cfbaf0', '#b9fbc0', '#ffffff'],
-        defaultTextTone: 'dark',
-        accentColor: '#0d9488',
-        swatchGradient: 'linear-gradient(135deg, #98f5e1 0%, #a3c4f3 50%, #cfbaf0 100%)'
+        id: 'casino_royale',
+        name: 'High Roller Gold',
+        tag: 'VIP VAULT',
+        tone: 'light',
+        primaryText: '#fffbeb',
+        secondaryText: '#e9d5ff',
+        accentColor: '#ffd700',
+        headerBg: '#26081c',
+        headerText: '#ffd700',
+        dividerColor: 'rgba(255, 215, 0, 0.28)',
+        bayBg: 'rgba(255, 215, 0, 0.06)',
+        bayBorder: 'rgba(255, 215, 0, 0.36)',
+        swatchCss: 'linear-gradient(135deg, #16081a 0%, #3b0a26 60%, #78350f 100%)'
     },
     {
-        id: 'sunset_prism',
-        name: 'Sunset Prism',
-        baseBg: '#fde2e4',
-        ribbons: ['#ff9ebb', '#ffcb77', '#c77dff', '#ff8fa3', '#fff8e8'],
-        defaultTextTone: 'dark',
-        accentColor: '#b5179e',
-        swatchGradient: 'linear-gradient(135deg, #ff9ebb 0%, #ffcb77 50%, #c77dff 100%)'
+        id: 'vapor_grid',
+        name: 'Sunset Wireframe',
+        tag: 'SYNTH 98',
+        tone: 'light',
+        primaryText: '#ffffff',
+        secondaryText: '#f5d0fe',
+        accentColor: '#ff4ecd',
+        headerBg: '#1b0b38',
+        headerText: '#00f5d4',
+        dividerColor: 'rgba(255, 78, 205, 0.32)',
+        bayBg: 'rgba(17, 7, 38, 0.55)',
+        bayBorder: 'rgba(255, 78, 205, 0.45)',
+        swatchCss: 'linear-gradient(180deg, #120829 0%, #4c1d95 55%, #be185d 100%)'
     },
     {
-        id: 'obsidian_opal',
-        name: 'Midnight Opal',
-        baseBg: '#121324',
-        ribbons: ['#241b4b', '#0f4c75', '#5a189a', '#0077b6', '#3c096c'],
-        defaultTextTone: 'light',
+        id: 'pocket_lcd',
+        name: 'Pocket 98 LCD',
+        tag: 'DOT MATRIX',
+        tone: 'dark',
+        primaryText: '#0f210b',
+        secondaryText: '#324a24',
+        accentColor: '#1a3812',
+        headerBg: '#1b2e16',
+        headerText: '#c4d69c',
+        dividerColor: 'rgba(15, 33, 11, 0.24)',
+        bayBg: 'rgba(15, 33, 11, 0.08)',
+        bayBorder: 'rgba(15, 33, 11, 0.36)',
+        swatchCss: 'linear-gradient(135deg, #cbd8a3 0%, #9cb370 100%)'
+    },
+    {
+        id: 'sakura_shrine',
+        name: 'Twilight Sakura',
+        tag: 'SANCTUARY',
+        tone: 'light',
+        primaryText: '#fff1f5',
+        secondaryText: '#fbcfe8',
+        accentColor: '#ff9ebb',
+        headerBg: '#231538',
+        headerText: '#ffd580',
+        dividerColor: 'rgba(255, 158, 187, 0.28)',
+        bayBg: 'rgba(255, 158, 187, 0.08)',
+        bayBorder: 'rgba(255, 158, 187, 0.36)',
+        swatchCss: 'linear-gradient(135deg, #161026 0%, #371b47 60%, #831843 100%)'
+    },
+    {
+        id: 'prismatic_chase',
+        name: 'Prismatic Holo',
+        tag: 'RARE FOIL',
+        tone: 'light',
+        primaryText: '#ffffff',
+        secondaryText: '#cbd5e1',
         accentColor: '#72efdd',
-        swatchGradient: 'linear-gradient(135deg, #121324 0%, #3c096c 45%, #0077b6 85%, #72efdd 100%)'
+        headerBg: '#090a10',
+        headerText: '#ffffff',
+        dividerColor: 'rgba(255, 255, 255, 0.2)',
+        bayBg: 'rgba(255, 255, 255, 0.06)',
+        bayBorder: 'rgba(114, 239, 221, 0.35)',
+        swatchCss: 'linear-gradient(125deg, #0b0d14 0%, #1e1b4b 38%, #0d9488 68%, #db2777 100%)'
     }
 ];
 
-export const GRADIENT_PRESETS: GradientPreset[] = [
-    {
-        id: 'cotton_candy',
-        name: 'Cotton Candy',
-        stops: ['#ffcbf2', '#e2afff', '#c0fdff'],
-        angle: 135,
-        defaultTextTone: 'dark',
-        accentColor: '#9d2ec5'
-    },
-    {
-        id: 'lavender_haze',
-        name: 'Lavender Mist',
-        stops: ['#e0c3fc', '#d9d2e9', '#8ec5fc'],
-        angle: 135,
-        defaultTextTone: 'dark',
-        accentColor: '#5a189a'
-    },
-    {
-        id: 'sky_glass',
-        name: 'Sky Glass',
-        stops: ['#d9f0ff', '#eef8ff', '#c8e7ff'],
-        angle: 140,
-        defaultTextTone: 'dark',
-        accentColor: '#0284c7'
-    },
-    {
-        id: 'peach_aura',
-        name: 'Peach Glow',
-        stops: ['#ffd8be', '#ffebf0', '#ffc4d6'],
-        angle: 130,
-        defaultTextTone: 'dark',
-        accentColor: '#e11d48'
-    },
-    {
-        id: 'matcha_milk',
-        name: 'Matcha Cream',
-        stops: ['#d8f3dc', '#f1faee', '#b7e4c7'],
-        angle: 135,
-        defaultTextTone: 'dark',
-        accentColor: '#15803d'
-    },
-    {
-        id: 'midnight_slate',
-        name: 'Midnight Glass',
-        stops: ['#0f172a', '#1e1b4b', '#1e293b'],
-        angle: 135,
-        defaultTextTone: 'light',
-        accentColor: '#38bdf8'
-    }
+export const NAMECARD_FINISHES: NamecardFinishMeta[] = [
+    { id: 'matte', name: 'Crisp Matte', desc: 'Clean flat ink surface' },
+    { id: 'holo_sweep', name: 'Holo Foil Sweep', desc: 'Diagonal iridescent specular sweep' },
+    { id: 'scanlines', name: 'CRT Scanlines', desc: 'Subtle horizontal monitor lines' },
+    { id: 'dot_matrix', name: 'Pixel Matrix', desc: 'Fine hardware micro-grid texture' },
+    { id: 'halftone', name: 'Arcade Halftone', desc: 'Subtle comic print micro-dots' }
 ];
 
-export const SOLID_COLOR_PRESETS: SolidColorPreset[] = [
-    { id: 'snow', name: 'Pearl White', hex: '#ffffff', defaultTextTone: 'dark' },
-    { id: 'blush', name: 'Soft Blush', hex: '#fff0f6', defaultTextTone: 'dark' },
-    { id: 'lilac', name: 'Soft Lilac', hex: '#f3e8ff', defaultTextTone: 'dark' },
-    { id: 'ice', name: 'Ice Blue', hex: '#ecfeff', defaultTextTone: 'dark' },
-    { id: 'mint', name: 'Soft Mint', hex: '#ecfdf5', defaultTextTone: 'dark' },
-    { id: 'butter', name: 'Warm Cream', hex: '#fefce8', defaultTextTone: 'dark' },
-    { id: 'plum', name: 'Deep Plum', hex: '#1e142b', defaultTextTone: 'light' },
-    { id: 'obsidian', name: 'Obsidian', hex: '#111318', defaultTextTone: 'light' }
+export const NAMECARD_FRAMES: NamecardFrameMeta[] = [
+    { id: 'win98_bevel', name: 'Win98 Bevel', desc: 'Classic OS 3D chiseled border' },
+    { id: 'tech_brackets', name: 'Tech Brackets', desc: 'Precision corner reticle brackets' },
+    { id: 'gold_hairline', name: 'Gold Hairline', desc: 'Double gilded collector trim' },
+    { id: 'holo_rim', name: 'Prismatic Rim', desc: 'Iridescent foil collector edge' },
+    { id: 'minimal', name: 'Clean Edge', desc: 'Crisp single hairline border' }
 ];
 
-export const NAMECARD_BORDERS: NamecardBorderOption[] = [
-    { id: 'glass_rim', name: 'Specular Glass', desc: 'Frosted translucent rim light' },
-    { id: 'holo_glow', name: 'Iridescent Halo', desc: 'Soft pastel rainbow border shimmer' },
-    { id: 'chrome_edge', name: 'Liquid Silver', desc: 'Crisp metallic specular frame' },
-    { id: 'pearl_soft', name: 'Soft Pearl', desc: 'Warm luminous white border' },
-    { id: 'neon_line', name: 'Cyber Glow', desc: 'Luminous neon accent outline' },
-    { id: 'none', name: 'Frameless', desc: 'Clean edge-to-edge card' }
+export const NAMECARD_ROLE_BADGES: string[] = [
+    'OG UNICORN',
+    'HIGH ROLLER',
+    'MEME ARCHIVIST',
+    'MUSEUM ARTIST',
+    'ARCADE ACE',
+    'WOODS KEEPER',
+    'VIP MEMBER',
+    'NIGHT OWL'
 ];
 
 export const TAGLINE_SUGGESTIONS: string[] = [
-    '✨ vibing in uwu world',
-    '🦋 firefly catcher',
-    '🎲 high roller',
-    '🌸 daydreaming',
-    '🕹️ arcade regular',
-    '💎 diamond hands',
-    '🌙 night owl',
-    '🫧 floating by'
+    'Collecting memes since 98',
+    'High stakes at the Craps table',
+    'Curating voxel sculptures',
+    'Late night arcade grinder',
+    'Lantern keeper in the Woods',
+    'Verified px-unicorn citizen'
 ];
 
-export const NAMECARD_STICKER_CATALOG: { id: string; symbol: string; label: string }[] = [
-    { id: 'stk_sparkle', symbol: '✦', label: 'Star Sparkle' },
-    { id: 'stk_twinkle', symbol: '✨', label: 'Twinkle' },
-    { id: 'stk_heart_w', symbol: '♡', label: 'Outline Heart' },
-    { id: 'stk_heart_p', symbol: '💖', label: 'Sparkle Heart' },
-    { id: 'stk_butterfly', symbol: '🦋', label: 'Butterfly' },
-    { id: 'stk_ribbon', symbol: '🎀', label: 'Ribbon' },
-    { id: 'stk_sakura', symbol: '🌸', label: 'Blossom' },
-    { id: 'stk_bubbles', symbol: '🫧', label: 'Bubbles' },
-    { id: 'stk_crown', symbol: '👑', label: 'Crown' },
-    { id: 'stk_gem', symbol: '💎', label: 'Gem' },
-    { id: 'stk_clover', symbol: '🍀', label: 'Lucky Clover' },
-    { id: 'stk_disc', symbol: '💿', label: 'Holo Disc' },
-    { id: 'stk_fire', symbol: '🔥', label: 'Fire' },
-    { id: 'stk_bolt', symbol: '⚡', label: 'Bolt' },
-    { id: 'stk_moon', symbol: '🌙', label: 'Crescent' },
-    { id: 'stk_alien', symbol: '👾', label: 'Pixel Sprite' },
-    { id: 'stk_boba', symbol: '🧋', label: 'Boba' },
-    { id: 'stk_paw', symbol: '🐾', label: 'Paws' }
-];
-
-export const NAMECARD_PAINT_PALETTE: string[] = [
-    '#ffffff',
-    '#111318',
-    '#ff2a85',
-    '#ff85c1',
-    '#ffcad4',
-    '#ff595e',
-    '#ff9f1c',
-    '#fee440',
-    '#fff3b0',
-    '#00f5d4',
-    '#72efdd',
-    '#00bbf9',
-    '#a2d2ff',
-    '#4361ee',
-    '#1e1b4b',
-    '#9d4edd',
-    '#c8b6ff',
-    '#e0aaff',
-    '#8ac926',
-    '#adb5bd'
+export const NAMECARD_EMBLEMS: NamecardEmblemMeta[] = [
+    {
+        id: 'crown',
+        name: 'Crown',
+        viewBoxPath: 'M3 18h18v2H3v-2zm0-2L5 7l4.5 4L12 5l2.5 6L19 7l2 9H3z'
+    },
+    {
+        id: 'diamond',
+        name: 'Diamond',
+        viewBoxPath: 'M6 4h12l4 5-10 12L2 9l4-5zm1.2 2L4.8 9h14.4l-2.4-3H7.2z'
+    },
+    {
+        id: 'dice',
+        name: 'High Roller',
+        viewBoxPath: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm3 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm-4 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm-4 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z'
+    },
+    {
+        id: 'joystick',
+        name: 'Arcade',
+        viewBoxPath: 'M12 2a3 3 0 0 1 1 5.83V13h5a2 2 0 0 1 2 2v4H4v-4a2 2 0 0 1 2-2h5V7.83A3 3 0 0 1 12 2zm-5 14v2h4v-2H7zm7 0v2h3v-2h-3z'
+    },
+    {
+        id: 'palette',
+        name: 'Artist',
+        viewBoxPath: 'M12 3a9 9 0 0 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.3-.5-.8-.5-1.2 0-1.1.9-2 2-2h2.3A4.7 4.7 0 0 0 21 10.8C21 6.5 17 3 12 3zM7.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z'
+    },
+    {
+        id: 'lantern',
+        name: 'Lantern',
+        viewBoxPath: 'M9 3h6v2h2v3h1v8h-1v3H7v-3H6V8h1V5h2V3zm1 4v9h4V7h-4zm1 13h2v2h-2v-2z'
+    },
+    {
+        id: 'star_crest',
+        name: 'Star Crest',
+        viewBoxPath: 'M12 2l2.6 6.4L21 9.2l-5 4.5 1.4 6.6L12 17l-5.4 3.3L8 13.7 3 9.2l6.4-.8L12 2z'
+    },
+    {
+        id: 'trophy',
+        name: 'Champion',
+        viewBoxPath: 'M6 3h12v3h3v3c0 2.5-1.8 4.4-4 4.8A5.5 5.5 0 0 1 13 17v2h3v2H8v-2h3v-2a5.5 5.5 0 0 1-4-3.2C4.8 13.4 3 11.5 3 9V6h3V3zm-1 5v1c0 1.3.9 2.4 2 2.8V8H5zm12 3.8c1.1-.4 2-1.5 2-2.8V8h-2v3.8z'
+    }
 ];
 
 export const showNamecardStudio = writable<boolean>(false);
@@ -277,37 +298,19 @@ function hashString(str: string): number {
     return Math.abs(hash);
 }
 
-/**
- * Resolves whether text on the card should be dark or light for crisp legibility.
- */
-export function resolveCardTextTone(config: NamecardConfig): 'dark' | 'light' {
-    if (config.textTone === 'dark' || config.textTone === 'light') {
-        return config.textTone;
-    }
-    if (config.bgMode === 'liquid') {
-        const preset = LIQUID_PRESETS.find((p) => p.id === config.bgPresetId) || LIQUID_PRESETS[0];
-        return preset.defaultTextTone;
-    }
-    if (config.bgMode === 'gradient') {
-        const preset = GRADIENT_PRESETS.find((p) => p.id === config.bgPresetId) || GRADIENT_PRESETS[0];
-        return preset.defaultTextTone;
-    }
-    // Solid color luminance check
-    const hex = (config.solidColor || '#ffffff').replace('#', '');
-    if (hex.length === 6) {
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
-        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        return lum < 0.45 ? 'light' : 'dark';
-    }
-    return 'dark';
+export function formatMemberSerial(userId: string, username: string): string {
+    const h = hashString(`${userId || 'guest'}:${username || 'player'}`);
+    return `#${(h & 0xffff).toString(16).toUpperCase().padStart(4, '0')}`;
 }
 
-/**
- * Generates a clean default Namecard config for a user.
- * Defaults to the 'holo_pearl' dynamic liquid chrome background inspired by the reference image.
- */
+export function getSkinMeta(skinId: NamecardSkinId | string): NamecardSkinMeta {
+    return NAMECARD_SKINS.find((s) => s.id === skinId) || NAMECARD_SKINS[0];
+}
+
+export function resolveCardTextTone(config: NamecardConfig): 'dark' | 'light' {
+    return getSkinMeta(config.skinId).tone;
+}
+
 export function generateDefaultNamecardConfig(
     userId: string,
     username: string,
@@ -315,91 +318,82 @@ export function generateDefaultNamecardConfig(
 ): NamecardConfig {
     const cleanHandle = (username || 'player').replace(/^@/, '');
     const seed = hashString(`${userId}:${cleanHandle}`);
-    const tagline = TAGLINE_SUGGESTIONS[seed % TAGLINE_SUGGESTIONS.length];
 
     return {
-        version: 2,
+        version: 3,
         userId: userId || 'guest',
         username: cleanHandle,
         displayName: (displayName || cleanHandle).slice(0, 26),
-        tagline,
-        bgMode: 'liquid',
-        bgPresetId: 'holo_pearl',
-        solidColor: '#fff0f6',
-        showSparkles: true,
-        borderId: 'glass_rim',
-        textTone: 'auto',
-        stickers: [],
+        tagline: TAGLINE_SUGGESTIONS[seed % TAGLINE_SUGGESTIONS.length],
+        skinId: 'win98_exec',
+        finishId: 'matte',
+        frameId: 'win98_bevel',
+        roleBadge: 'OG UNICORN',
+        emblems: ['star_crest', 'crown'],
         paintDataUrl: null,
-        paintLayer: 'above',
         updatedAt: Date.now()
     };
+}
+
+function mapLegacySkin(raw: any): NamecardSkinId {
+    if (NAMECARD_SKINS.some((s) => s.id === raw?.skinId)) {
+        return raw.skinId as NamecardSkinId;
+    }
+    const preset = String(raw?.bgPresetId || '');
+    if (preset === 'obsidian_opal' || preset === 'midnight_slate') return 'cyber_terminal';
+    if (preset === 'liquid_chrome' || preset === 'sky_glass') return 'liquid_titanium';
+    if (preset === 'sunset_prism') return 'vapor_grid';
+    if (preset === 'aurora_mint' || preset === 'matcha_milk') return 'pocket_lcd';
+    if (preset === 'rose_silk' || preset === 'peach_aura') return 'sakura_shrine';
+    if (preset === 'holo_pearl' || preset === 'cotton_candy') return 'prismatic_chase';
+    return 'win98_exec';
 }
 
 function normalizeConfig(raw: any, userId: string, username: string, displayName?: string): NamecardConfig {
     const fallback = generateDefaultNamecardConfig(userId, username, displayName);
     if (!raw || typeof raw !== 'object') return fallback;
 
-    // Migrate legacy v1 configs cleanly to v2
-    const bgMode: NamecardBgMode =
-        raw.bgMode === 'liquid' || raw.bgMode === 'gradient' || raw.bgMode === 'solid'
-            ? raw.bgMode
-            : 'liquid';
+    const skinId = mapLegacySkin(raw);
+    const finishId: NamecardFinishId = NAMECARD_FINISHES.some((f) => f.id === raw.finishId)
+        ? raw.finishId
+        : raw.version === 2
+          ? 'holo_sweep'
+          : 'matte';
+    const frameId: NamecardFrameId = NAMECARD_FRAMES.some((f) => f.id === raw.frameId)
+        ? raw.frameId
+        : skinId === 'win98_exec'
+          ? 'win98_bevel'
+          : 'tech_brackets';
+    const roleBadge =
+        typeof raw.roleBadge === 'string' && NAMECARD_ROLE_BADGES.includes(raw.roleBadge)
+            ? raw.roleBadge
+            : fallback.roleBadge;
 
-    let bgPresetId = typeof raw.bgPresetId === 'string' ? raw.bgPresetId : 'holo_pearl';
-    if (bgMode === 'liquid' && !LIQUID_PRESETS.some((p) => p.id === bgPresetId)) {
-        bgPresetId = 'holo_pearl';
-    } else if (bgMode === 'gradient' && !GRADIENT_PRESETS.some((p) => p.id === bgPresetId)) {
-        bgPresetId = 'cotton_candy';
-    }
-
-    const borderId: NamecardBorderId = NAMECARD_BORDERS.some((b) => b.id === raw.borderId)
-        ? raw.borderId
-        : 'glass_rim';
-
-    const rawStickers = Array.isArray(raw.stickers)
-        ? raw.stickers
-              .filter((s: any) => s && !s.isStamp && typeof s.symbol === 'string')
-              .map((s: any) => ({
-                  id: String(s.id || `stk_${Math.random().toString(36).slice(2, 7)}`),
-                  symbol: String(s.symbol),
-                  x: typeof s.x === 'number' ? s.x : 80,
-                  y: typeof s.y === 'number' ? s.y : 25,
-                  scale: typeof s.scale === 'number' ? s.scale : 1,
-                  rotation: typeof s.rotation === 'number' ? s.rotation : 0
-              }))
-        : [];
+    const emblems: NamecardEmblemId[] = Array.isArray(raw.emblems)
+        ? (raw.emblems
+              .filter((id: any) => NAMECARD_EMBLEMS.some((e) => e.id === id))
+              .slice(0, 3) as NamecardEmblemId[])
+        : fallback.emblems;
 
     return {
-        version: 2,
+        version: 3,
         userId,
         username: username.replace(/^@/, ''),
-        displayName: (raw.displayName || displayName || username).slice(0, 26),
+        displayName: String(raw.displayName || displayName || username).slice(0, 26),
         tagline:
             typeof raw.tagline === 'string'
-                ? raw.tagline.slice(0, 40)
-                : typeof raw.moodPill === 'string'
-                  ? raw.moodPill.slice(0, 40)
-                  : fallback.tagline,
-        bgMode,
-        bgPresetId,
-        solidColor: typeof raw.solidColor === 'string' ? raw.solidColor : '#fff0f6',
-        showSparkles: typeof raw.showSparkles === 'boolean' ? raw.showSparkles : true,
-        borderId,
-        textTone:
-            raw.textTone === 'dark' || raw.textTone === 'light' || raw.textTone === 'auto'
-                ? raw.textTone
-                : 'auto',
-        stickers: rawStickers,
+                ? raw.tagline.slice(0, 44)
+                : fallback.tagline,
+        skinId,
+        finishId,
+        frameId,
+        roleBadge,
+        emblems,
         paintDataUrl: typeof raw.paintDataUrl === 'string' ? raw.paintDataUrl : null,
-        paintLayer: raw.paintLayer === 'behind' ? 'behind' : 'above',
         updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now()
     };
 }
 
-/**
- * Loads a user's Namecard configuration from localStorage and Supabase.
- */
 export async function loadNamecardConfig(
     userId: string,
     username: string,
@@ -463,11 +457,6 @@ async function flushNamecardRemoteSync(config: NamecardConfig): Promise<void> {
     } catch {}
 }
 
-/**
- * Saves the user's Namecard configuration to localStorage immediately,
- * and syncs to Supabase either immediately (on explicit Save button) or after a 4.5s idle debounce
- * so continuous brush strokes / preset clicks don't spam base64 upserts.
- */
 export async function saveNamecardConfig(
     config: NamecardConfig,
     immediateRemote = false
@@ -476,7 +465,7 @@ export async function saveNamecardConfig(
 
     const updated: NamecardConfig = {
         ...config,
-        version: 2,
+        version: 3,
         updatedAt: Date.now()
     };
 
@@ -506,10 +495,6 @@ export async function saveNamecardConfig(
     }
 }
 
-/**
- * Ensures we always have a 100% transparent character PNG (never an opaque square image like /unicorn.png).
- * Automatically decodes compact trait URLs (/unicorn.png?t=...) into high-res 256x256 transparent cutouts.
- */
 let cachedDefaultTransparentAvatar: string | null = null;
 export async function ensureTransparentAvatarUrl(
     profileOrUrl: UserProfile | string | null
@@ -561,218 +546,266 @@ export async function ensureTransparentAvatarUrl(
 }
 
 /**
- * Draws a 4-point star sparkle (✦) at (cx, cy) with outer radius r.
+ * Draws a crisp vector/SVG emblem badge onto Canvas using Path2D (zero raw OS emojis).
  */
-function drawFourPointStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
-    const inner = r * 0.24;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.quadraticCurveTo(cx + inner * 0.4, cy - inner * 0.4, cx + r, cy);
-    ctx.quadraticCurveTo(cx + inner * 0.4, cy + inner * 0.4, cx, cy + r);
-    ctx.quadraticCurveTo(cx - inner * 0.4, cy + inner * 0.4, cx - r, cy);
-    ctx.quadraticCurveTo(cx - inner * 0.4, cy - inner * 0.4, cx, cy - r);
-    ctx.closePath();
-    ctx.fill();
-}
+export function drawVectorEmblem(
+    ctx: CanvasRenderingContext2D,
+    emblemId: NamecardEmblemId,
+    cx: number,
+    cy: number,
+    sizePx: number,
+    fillColor: string,
+    badgeBg: string,
+    badgeBorder: string
+) {
+    const meta = NAMECARD_EMBLEMS.find((e) => e.id === emblemId);
+    if (!meta) return;
 
-/**
- * Draws a delicate diamond (◇) at (cx, cy).
- */
-function drawDiamondOutline(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - r);
-    ctx.lineTo(cx + r * 0.85, cy);
-    ctx.lineTo(cx, cy + r);
-    ctx.lineTo(cx - r * 0.85, cy);
-    ctx.closePath();
-    ctx.stroke();
-}
-
-/**
- * Draws a delicate heart outline/fill (♡) at (cx, cy).
- */
-function drawMiniHeart(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, fill = false) {
     ctx.save();
-    ctx.translate(cx, cy - size * 0.35);
-    ctx.beginPath();
-    ctx.moveTo(0, size * 0.3);
-    ctx.bezierCurveTo(0, 0, -size * 0.55, 0, -size * 0.55, size * 0.35);
-    ctx.bezierCurveTo(-size * 0.55, size * 0.68, 0, size * 0.9, 0, size * 1.1);
-    ctx.bezierCurveTo(0, size * 0.9, size * 0.55, size * 0.68, size * 0.55, size * 0.35);
-    ctx.bezierCurveTo(size * 0.55, 0, 0, 0, 0, size * 0.3);
-    ctx.closePath();
-    if (fill) ctx.fill();
-    else ctx.stroke();
+    // Crisp square collector pin badge
+    const half = sizePx / 2;
+    drawRoundedRectPath(ctx, cx - half, cy - half, sizePx, sizePx, 5);
+    ctx.fillStyle = badgeBg;
+    ctx.fill();
+    ctx.strokeStyle = badgeBorder;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const iconSize = sizePx * 0.62;
+    ctx.translate(cx - iconSize / 2, cy - iconSize / 2);
+    ctx.scale(iconSize / 24, iconSize / 24);
+    ctx.fillStyle = fillColor;
+    if (typeof Path2D !== 'undefined') {
+        ctx.fill(new Path2D(meta.viewBoxPath));
+    }
     ctx.restore();
 }
 
 /**
- * Renders the Namecard background (Dynamic Liquid Holo/Chrome waves, Gradient, or Solid)
- * onto any 2D canvas context. Used both for live 60fps/30fps card animation AND for high-res PNG export!
+ * Renders the crisp art-directed Collector Pass background + surface finish onto a 2D canvas.
  */
 export function drawNamecardBackgroundFrame(
     ctx: CanvasRenderingContext2D,
     W: number,
     H: number,
     config: NamecardConfig,
-    timeSec = 0
+    timeSec = 0,
+    pointerNormX = 0.5
 ) {
     ctx.save();
+    const skin = getSkinMeta(config.skinId);
 
-    if (config.bgMode === 'solid') {
-        ctx.fillStyle = config.solidColor || '#fff0f6';
+    // 1. Art-directed Base Background per Skin
+    if (skin.id === 'win98_exec') {
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+        bgGrad.addColorStop(0, '#dbd8cf');
+        bgGrad.addColorStop(1, '#c4c0b6');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, W, H);
-    } else if (config.bgMode === 'gradient') {
-        const preset =
-            GRADIENT_PRESETS.find((p) => p.id === config.bgPresetId) || GRADIENT_PRESETS[0];
-        const rad = (preset.angle * Math.PI) / 180;
-        const cx = W / 2;
-        const cy = H / 2;
-        const dx = Math.cos(rad) * (W * 0.6);
-        const dy = Math.sin(rad) * (H * 0.6);
-        const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-        grad.addColorStop(0, preset.stops[0]);
-        grad.addColorStop(0.5, preset.stops[1]);
-        grad.addColorStop(1, preset.stops[2]);
-        ctx.fillStyle = grad;
+
+        // Classic subtle engineering blueprint grid
+        ctx.strokeStyle = 'rgba(0, 0, 128, 0.05)';
+        ctx.lineWidth = 1;
+        const step = Math.round(W / 24);
+        ctx.beginPath();
+        for (let x = step; x < W; x += step) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, H);
+        }
+        for (let y = step; y < H; y += step) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(W, y);
+        }
+        ctx.stroke();
+    } else if (skin.id === 'cyber_terminal') {
+        const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+        bgGrad.addColorStop(0, '#060a12');
+        bgGrad.addColorStop(0.55, '#0b1628');
+        bgGrad.addColorStop(1, '#072233');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, W, H);
+
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+        ctx.lineWidth = 1;
+        const step = Math.round(W / 22);
+        ctx.beginPath();
+        for (let x = step; x < W; x += step) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, H);
+        }
+        for (let y = step; y < H; y += step) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(W, y);
+        }
+        ctx.stroke();
+    } else if (skin.id === 'liquid_titanium') {
+        const mGrad = ctx.createLinearGradient(0, 0, W, H);
+        mGrad.addColorStop(0, '#f1f5f9');
+        mGrad.addColorStop(0.32, '#cbd5e1');
+        mGrad.addColorStop(0.55, '#f8fafc');
+        mGrad.addColorStop(0.82, '#94a3b8');
+        mGrad.addColorStop(1, '#e2e8f0');
+        ctx.fillStyle = mGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Fine brushed aluminum horizontal grain
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+        for (let y = 0; y < H; y += 4) {
+            ctx.fillRect(0, y, W, 1);
+        }
+    } else if (skin.id === 'casino_royale') {
+        const cGrad = ctx.createLinearGradient(0, 0, W, H);
+        cGrad.addColorStop(0, '#130716');
+        cGrad.addColorStop(0.5, '#290b22');
+        cGrad.addColorStop(1, '#1a0a12');
+        ctx.fillStyle = cGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Subtle diamond argyle casino felt lattice
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.07)';
+        ctx.lineWidth = 1;
+        const d = Math.round(W / 14);
+        ctx.beginPath();
+        for (let x = -H; x < W + H; x += d) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + H * 0.65, H);
+            ctx.moveTo(x + H * 0.65, 0);
+            ctx.lineTo(x, H);
+        }
+        ctx.stroke();
+    } else if (skin.id === 'vapor_grid') {
+        const vGrad = ctx.createLinearGradient(0, 0, 0, H);
+        vGrad.addColorStop(0, '#0e0724');
+        vGrad.addColorStop(0.58, '#2d0f57');
+        vGrad.addColorStop(1, '#68124e');
+        ctx.fillStyle = vGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Crisp synth horizon + perspective floor wireframe
+        const horizonY = H * 0.64;
+        ctx.strokeStyle = 'rgba(0, 245, 212, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY);
+        ctx.lineTo(W, horizonY);
+        for (let row = 1; row <= 5; row++) {
+            const ry = horizonY + Math.pow(row / 5, 1.45) * (H - horizonY);
+            ctx.moveTo(0, ry);
+            ctx.lineTo(W, ry);
+        }
+        for (let col = -8; col <= 8; col++) {
+            ctx.moveTo(W / 2 + col * (W * 0.05), horizonY);
+            ctx.lineTo(W / 2 + col * (W * 0.17), H);
+        }
+        ctx.stroke();
+    } else if (skin.id === 'pocket_lcd') {
+        const pGrad = ctx.createLinearGradient(0, 0, 0, H);
+        pGrad.addColorStop(0, '#c7d49c');
+        pGrad.addColorStop(1, '#a9bb7c');
+        ctx.fillStyle = pGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Authentic handheld pixel grid
+        ctx.strokeStyle = 'rgba(15, 33, 11, 0.08)';
+        ctx.lineWidth = 1;
+        const gStep = Math.max(4, Math.round(W / 60));
+        ctx.beginPath();
+        for (let x = gStep; x < W; x += gStep) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, H);
+        }
+        for (let y = gStep; y < H; y += gStep) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(W, y);
+        }
+        ctx.stroke();
+    } else if (skin.id === 'sakura_shrine') {
+        const sGrad = ctx.createLinearGradient(0, 0, W, H);
+        sGrad.addColorStop(0, '#140f24');
+        sGrad.addColorStop(0.55, '#2b1840');
+        sGrad.addColorStop(1, '#4c1839');
+        ctx.fillStyle = sGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Crisp 4px pixel-art falling blossom petals on right edge
+        const pxUnit = Math.max(3, Math.round(W / 140));
+        const petalCoords = [
+            [0.78, 0.22], [0.85, 0.16], [0.91, 0.28], [0.73, 0.34],
+            [0.88, 0.48], [0.94, 0.62], [0.81, 0.56], [0.68, 0.24]
+        ];
+        ctx.fillStyle = 'rgba(255, 179, 209, 0.45)';
+        for (const [px, py] of petalCoords) {
+            ctx.fillRect(Math.round(W * px), Math.round(H * py), pxUnit * 2, pxUnit);
+            ctx.fillRect(Math.round(W * px + pxUnit), Math.round(H * py + pxUnit), pxUnit * 2, pxUnit);
+        }
     } else {
-        // DYNAMIC LIQUID IRIDESCENT CHROME / HOLOGRAPHIC SWIRL
-        const preset = LIQUID_PRESETS.find((p) => p.id === config.bgPresetId) || LIQUID_PRESETS[0];
-        ctx.fillStyle = preset.baseBg;
+        // prismatic_chase: matte carbon base + controlled diagonal iridescent prism ribbon
+        ctx.fillStyle = '#0e1018';
         ctx.fillRect(0, 0, W, H);
 
-        // Soft glowing base blobs that slowly orbit
-        const t = timeSec * 0.55;
-        for (let i = 0; i < preset.ribbons.length; i++) {
-            const phase = i * 1.35;
-            const bx = W * (0.5 + 0.38 * Math.sin(t * 0.7 + phase));
-            const by = H * (0.5 + 0.38 * Math.cos(t * 0.55 + phase * 1.2));
-            const radius = Math.max(W, H) * (0.58 + 0.1 * Math.sin(t + i));
-            const rGrad = ctx.createRadialGradient(bx, by, radius * 0.04, bx, by, radius);
-            rGrad.addColorStop(0, preset.ribbons[i]);
-            rGrad.addColorStop(0.55, preset.ribbons[(i + 1) % preset.ribbons.length] + '88');
-            rGrad.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = rGrad;
-            ctx.fillRect(0, 0, W, H);
-        }
-
-        // Flowing Liquid Chrome / Iridescent Silk Ribbons (like reference image)
-        for (let r = 0; r < 5; r++) {
-            const colorA = preset.ribbons[r % preset.ribbons.length];
-            const colorB = preset.ribbons[(r + 2) % preset.ribbons.length];
-            const yBase = H * (0.15 + r * 0.19);
-            const amp1 = H * (0.16 + (r % 2) * 0.06);
-            const amp2 = H * 0.09;
-            const speed = (r % 2 === 0 ? 1 : -1) * 0.45;
-
-            ctx.beginPath();
-            for (let x = -20; x <= W + 20; x += 16) {
-                const nx = x / W;
-                const y =
-                    yBase +
-                    Math.sin(nx * 4.2 + t * speed + r * 1.1) * amp1 +
-                    Math.cos(nx * 7.5 - t * 0.35 + r * 2.0) * amp2;
-                if (x === -20) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            }
-            for (let x = W + 20; x >= -20; x -= 16) {
-                const nx = x / W;
-                const thickness = H * (0.14 + 0.05 * Math.sin(nx * 5 + t + r));
-                const y =
-                    yBase +
-                    thickness +
-                    Math.sin(nx * 4.2 + t * speed + r * 1.1 + 0.35) * amp1 +
-                    Math.cos(nx * 7.5 - t * 0.35 + r * 2.0) * amp2;
-                ctx.lineTo(x, y);
-            }
-            ctx.closePath();
-
-            const ribGrad = ctx.createLinearGradient(0, yBase - amp1, W, yBase + amp1);
-            ribGrad.addColorStop(0, colorA + '99');
-            ribGrad.addColorStop(0.5, preset.defaultTextTone === 'dark' ? '#ffffffcc' : colorB + 'aa');
-            ribGrad.addColorStop(1, colorB + '99');
-            ctx.fillStyle = ribGrad;
-            ctx.fill();
-        }
-
-        // Specular Chrome Highlight Sheen
-        const sheenX = W * (0.5 + 0.35 * Math.sin(t * 0.4));
-        const sheenGrad = ctx.createLinearGradient(sheenX - W * 0.45, 0, sheenX + W * 0.45, H);
-        const sheenAlpha = preset.defaultTextTone === 'dark' ? 0.34 : 0.14;
-        sheenGrad.addColorStop(0, 'rgba(255,255,255,0)');
-        sheenGrad.addColorStop(0.5, `rgba(255,255,255,${sheenAlpha})`);
-        sheenGrad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = sheenGrad;
+        const prismGrad = ctx.createLinearGradient(0, 0, W, H);
+        prismGrad.addColorStop(0, 'rgba(114, 239, 221, 0.14)');
+        prismGrad.addColorStop(0.35, 'rgba(99, 102, 241, 0.18)');
+        prismGrad.addColorStop(0.68, 'rgba(236, 72, 153, 0.18)');
+        prismGrad.addColorStop(1, 'rgba(250, 204, 21, 0.12)');
+        ctx.fillStyle = prismGrad;
         ctx.fillRect(0, 0, W, H);
     }
 
-    // Delicate Sparkle & Holo Vector Accents (✦, ◇, ♡, fine wave lines)
-    if (config.showSparkles) {
-        const tone = resolveCardTextTone(config);
-        const sparkleColor =
-            tone === 'dark' ? 'rgba(255, 255, 255, 0.92)' : 'rgba(255, 255, 255, 0.78)';
-        const scale = W / 360;
+    // 2. Micro-Header Strip across the top
+    const barH = Math.round(H * 0.115);
+    if (skin.id === 'win98_exec') {
+        const titleGrad = ctx.createLinearGradient(0, 0, W, 0);
+        titleGrad.addColorStop(0, '#000080');
+        titleGrad.addColorStop(1, '#1084d0');
+        ctx.fillStyle = titleGrad;
+    } else {
+        ctx.fillStyle = skin.headerBg;
+    }
+    ctx.fillRect(0, 0, W, barH);
+    ctx.fillStyle = skin.dividerColor;
+    ctx.fillRect(0, barH, W, Math.max(1, Math.round(H * 0.004)));
 
-        ctx.fillStyle = sparkleColor;
-        ctx.strokeStyle = sparkleColor;
-        ctx.lineWidth = 1.2 * scale;
-
-        // Subtle fine contour wave lines in corners (like reference image)
-        ctx.save();
-        ctx.globalAlpha = 0.28;
-        for (let wLine = 0; wLine < 4; wLine++) {
-            ctx.beginPath();
-            const offset = wLine * 4.5 * scale;
-            ctx.moveTo(0, H * 0.82 + offset);
-            ctx.bezierCurveTo(
-                W * 0.14,
-                H * 0.75 + offset,
-                W * 0.22,
-                H * 0.92 + offset,
-                W * 0.36,
-                H + offset
-            );
-            ctx.stroke();
+    // 3. Curated Surface Finish Overlay
+    if (config.finishId === 'holo_sweep') {
+        const sweepPos =
+            pointerNormX !== 0.5
+                ? pointerNormX
+                : 0.5 + 0.36 * Math.sin(timeSec * 0.9);
+        const cx = W * sweepPos;
+        const holo = ctx.createLinearGradient(cx - W * 0.32, 0, cx + W * 0.32, H);
+        holo.addColorStop(0, 'rgba(255,255,255,0)');
+        holo.addColorStop(0.32, 'rgba(120, 240, 255, 0.12)');
+        holo.addColorStop(0.5, 'rgba(255, 255, 255, 0.26)');
+        holo.addColorStop(0.68, 'rgba(255, 130, 220, 0.12)');
+        holo.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = holo;
+        ctx.fillRect(0, barH, W, H - barH);
+    } else if (config.finishId === 'scanlines') {
+        ctx.fillStyle = skin.tone === 'dark' ? 'rgba(0, 0, 0, 0.06)' : 'rgba(0, 0, 0, 0.16)';
+        const stride = Math.max(3, Math.round(H / 95));
+        for (let y = barH; y < H; y += stride) {
+            ctx.fillRect(0, y, W, 1);
         }
-        ctx.restore();
-
-        // Deterministic sparkle field that gently twinkles over time
-        const sparkles = [
-            { x: 0.12, y: 0.16, r: 6.5, type: 'star', speed: 1.8, phase: 0.2 },
-            { x: 0.28, y: 0.11, r: 4.2, type: 'star', speed: 2.3, phase: 1.4 },
-            { x: 0.86, y: 0.15, r: 7.0, type: 'star', speed: 1.5, phase: 2.1 },
-            { x: 0.92, y: 0.38, r: 4.5, type: 'heart', speed: 1.9, phase: 0.8 },
-            { x: 0.76, y: 0.22, r: 3.8, type: 'diamond', speed: 2.1, phase: 3.0 },
-            { x: 0.42, y: 0.14, r: 3.6, type: 'diamond', speed: 1.7, phase: 4.2 },
-            { x: 0.64, y: 0.66, r: 5.5, type: 'star', speed: 2.0, phase: 1.1 },
-            { x: 0.91, y: 0.72, r: 6.0, type: 'star', speed: 1.6, phase: 2.7 },
-            { x: 0.08, y: 0.68, r: 4.8, type: 'star', speed: 2.2, phase: 3.5 },
-            { x: 0.82, y: 0.52, r: 3.5, type: 'dot', speed: 2.5, phase: 0.5 },
-            { x: 0.34, y: 0.62, r: 2.8, type: 'dot', speed: 1.9, phase: 2.0 },
-            { x: 0.55, y: 0.12, r: 4.2, type: 'heart', speed: 1.4, phase: 1.7 }
-        ];
-
-        for (const sp of sparkles) {
-            const pulse = 0.55 + 0.45 * Math.sin(timeSec * sp.speed + sp.phase);
-            ctx.save();
-            ctx.globalAlpha = pulse * 0.9;
-            const sx = sp.x * W;
-            const sy = sp.y * H;
-            const sr = sp.r * scale * (0.8 + 0.25 * pulse);
-
-            if (sp.type === 'star') {
-                drawFourPointStar(ctx, sx, sy, sr);
-            } else if (sp.type === 'diamond') {
-                drawDiamondOutline(ctx, sx, sy, sr);
-            } else if (sp.type === 'heart') {
-                drawMiniHeart(ctx, sx, sy, sr * 1.4, false);
-            } else {
+    } else if (config.finishId === 'dot_matrix') {
+        ctx.fillStyle = skin.tone === 'dark' ? 'rgba(0, 0, 0, 0.07)' : 'rgba(255, 255, 255, 0.06)';
+        const step = Math.max(6, Math.round(W / 72));
+        for (let y = barH + 4; y < H; y += step) {
+            for (let x = 4; x < W; x += step) {
+                ctx.fillRect(x, y, 1.5, 1.5);
+            }
+        }
+    } else if (config.finishId === 'halftone') {
+        ctx.fillStyle = skin.tone === 'dark' ? 'rgba(0, 0, 0, 0.055)' : 'rgba(255, 255, 255, 0.05)';
+        const step = Math.max(10, Math.round(W / 44));
+        for (let row = 0; row * step + barH < H; row++) {
+            const y = barH + 6 + row * step;
+            const offset = (row % 2) * (step * 0.5);
+            for (let x = offset; x < W; x += step) {
                 ctx.beginPath();
-                ctx.arc(sx, sy, sr * 0.45, 0, Math.PI * 2);
+                ctx.arc(x, y, Math.max(1.2, W / 420), 0, Math.PI * 2);
                 ctx.fill();
             }
-            ctx.restore();
         }
     }
 
@@ -812,9 +845,7 @@ function drawRoundedRectPath(
 }
 
 /**
- * Renders the modern-nostalgic Namecard onto a crisp 720x420 HTML5 Canvas
- * for 1-click Copy Image to Clipboard and Download PNG.
- * Uses a single uniform font family, frameless transparent character cutout, and boxless stats.
+ * Renders the UwU OS Collector Pass onto a crisp 720x420 PNG matching the live preview 1:1.
  */
 export async function renderNamecardToCanvas(
     config: NamecardConfig,
@@ -823,86 +854,102 @@ export async function renderNamecardToCanvas(
 ): Promise<HTMLCanvasElement> {
     const W = 720;
     const H = 420;
-    const R = 28;
+    const R = 10;
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext('2d')!;
 
-    // Clip to smooth rounded card corners
+    const skin = getSkinMeta(config.skinId);
+
     ctx.save();
     drawRoundedRectPath(ctx, 0, 0, W, H, R);
     ctx.clip();
 
-    // 1. Background (Liquid Holo/Chrome, Gradient, or Solid + Sparkles)
-    drawNamecardBackgroundFrame(ctx, W, H, config, 2.4);
+    // 1. Skin Background & Finish
+    drawNamecardBackgroundFrame(ctx, W, H, config, 1.2, 0.5);
 
-    // 1b. If user chose 'behind' layer order, draw their artwork behind avatar & text
-    const paintImg = config.paintDataUrl ? await loadImageHelper(config.paintDataUrl) : null;
-    if (paintImg && config.paintLayer === 'behind') {
-        ctx.drawImage(paintImg, 0, 0, W, H);
-    }
+    // 2. Top Header Bar Text: UWU.OS // MEMBER PASS + Role + Serial
+    const barH = Math.round(H * 0.115); // 48px
+    ctx.fillStyle = skin.headerText;
+    ctx.font = `700 13px ${CARD_MONO_FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('UWU.OS // MEMBER PASS', 24, barH / 2 + 1);
 
-    const tone = resolveCardTextTone(config);
-    const primaryText = tone === 'dark' ? '#161326' : '#ffffff';
-    const secondaryText =
-        tone === 'dark' ? 'rgba(22, 19, 38, 0.62)' : 'rgba(255, 255, 255, 0.72)';
-    const dividerColor =
-        tone === 'dark' ? 'rgba(22, 19, 38, 0.12)' : 'rgba(255, 255, 255, 0.18)';
+    const serial = formatMemberSerial(config.userId, config.username);
+    const rightHeader = `${config.roleBadge.toUpperCase()}  •  NO. ${serial}`;
+    ctx.textAlign = 'right';
+    ctx.font = `700 12px ${CARD_MONO_FONT_STACK}`;
+    ctx.fillText(rightHeader, W - 24, barH / 2 + 1);
 
-    let accentColor = tone === 'dark' ? '#7c3aed' : '#72efdd';
-    if (config.bgMode === 'liquid') {
-        accentColor =
-            LIQUID_PRESETS.find((p) => p.id === config.bgPresetId)?.accentColor || accentColor;
-    } else if (config.bgMode === 'gradient') {
-        accentColor =
-            GRADIENT_PRESETS.find((p) => p.id === config.bgPresetId)?.accentColor || accentColor;
-    }
+    // 3. Left Hero Pixel Unicorn Portrait Bay
+    const bayX = 28;
+    const bayY = 74;
+    const baySize = 190;
+    drawRoundedRectPath(ctx, bayX, bayY, baySize, baySize, 6);
+    ctx.fillStyle = skin.bayBg;
+    ctx.fill();
+    ctx.strokeStyle = skin.bayBorder;
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    // 2. Frameless Transparent Character Cutout (Left Side — Zero Checkerboard, Zero Box)
     const cleanAvatarUrl = await ensureTransparentAvatarUrl(profile);
     const avatarImg = await loadImageHelper(cleanAvatarUrl);
     if (avatarImg) {
         ctx.save();
-        // Soft natural character drop shadow
-        ctx.shadowColor =
-            tone === 'dark' ? 'rgba(22, 19, 38, 0.22)' : 'rgba(0, 0, 0, 0.45)';
-        ctx.shadowBlur = 18;
-        ctx.shadowOffsetY = 6;
+        ctx.shadowColor = skin.tone === 'dark' ? 'rgba(0, 0, 0, 0.22)' : 'rgba(0, 0, 0, 0.55)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 5;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(avatarImg, 28, 36, 210, 210);
+        ctx.drawImage(avatarImg, bayX + 11, bayY + 11, baySize - 22, baySize - 22);
         ctx.restore();
     }
 
-    // 3. Uniform Typography Identity Section (Right Side)
-    const textX = 258;
+    // 4. Right Identity Typography & Vector Emblem Pins
+    const textX = 244;
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
 
-    // Display Name
-    ctx.fillStyle = primaryText;
-    ctx.font = `800 38px ${CARD_FONT_STACK}`;
     const dispName = (config.displayName || profile?.x_display_name || config.username).slice(0, 20);
-    ctx.fillText(dispName, textX, 102);
+    ctx.fillStyle = skin.primaryText;
+    ctx.font = `800 34px ${CARD_UI_FONT_STACK}`;
+    ctx.fillText(dispName, textX, 118);
 
-    // @username handle
-    ctx.fillStyle = accentColor;
-    ctx.font = `600 19px ${CARD_FONT_STACK}`;
-    ctx.fillText(`@${config.username}`, textX, 134);
+    ctx.fillStyle = skin.accentColor;
+    ctx.font = `700 17px ${CARD_MONO_FONT_STACK}`;
+    ctx.fillText(`@${config.username}`, textX, 148);
 
-    // Optional Tagline / Status (clean floating text, no box)
     if (config.tagline && config.tagline.trim()) {
-        ctx.fillStyle = secondaryText;
-        ctx.font = `500 18px ${CARD_FONT_STACK}`;
-        ctx.fillText(config.tagline.trim().slice(0, 38), textX, 174);
+        ctx.fillStyle = skin.secondaryText;
+        ctx.font = `500 16px ${CARD_UI_FONT_STACK}`;
+        ctx.fillText(config.tagline.trim().slice(0, 42), textX, 184);
     }
 
-    // 4. Boxless Floating Stats Row at Bottom of Card
-    const statsTopY = 286;
-    ctx.strokeStyle = dividerColor;
+    // Vector Emblem Pins row (max 3)
+    const pinSize = 42;
+    config.emblems.slice(0, 3).forEach((emblemId, idx) => {
+        const ex = textX + pinSize / 2 + idx * (pinSize + 10);
+        const ey = 232;
+        drawVectorEmblem(
+            ctx,
+            emblemId,
+            ex,
+            ey,
+            pinSize,
+            skin.accentColor,
+            skin.bayBg,
+            skin.bayBorder
+        );
+    });
+
+    // 5. Bottom Tabular Stats Strip + Mini Barcode Seal
+    const statsTopY = 290;
+    ctx.strokeStyle = skin.dividerColor;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(36, statsTopY);
-    ctx.lineTo(W - 36, statsTopY);
+    ctx.moveTo(28, statsTopY);
+    ctx.lineTo(W - 28, statsTopY);
     ctx.stroke();
 
     const chips = stats?.chips ?? 2500;
@@ -913,100 +960,114 @@ export async function renderNamecardToCanvas(
     const bestWin = stats?.high_score ?? 0;
 
     const statCols = [
-        { label: '$UWU', value: chips.toLocaleString() },
-        { label: 'RECORD', value: `${wins}W – ${losses}L` },
+        { label: '$UWU CHIPS', value: chips.toLocaleString() },
+        { label: 'RECORD', value: `${wins}W-${losses}L` },
         { label: 'WIN RATE', value: `${winRate}%` },
         { label: 'BEST WIN', value: bestWin.toLocaleString() }
     ];
 
-    const colWidth = (W - 72) / statCols.length;
+    const statsTotalW = W - 130;
+    const colWidth = statsTotalW / statCols.length;
     statCols.forEach((sc, idx) => {
-        const colX = 36 + idx * colWidth;
+        const colX = 28 + idx * colWidth;
 
-        // Subtle vertical separator between columns
         if (idx > 0) {
-            ctx.strokeStyle = dividerColor;
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = skin.dividerColor;
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(colX - 16, statsTopY + 26);
-            ctx.lineTo(colX - 16, statsTopY + 86);
+            ctx.moveTo(colX - 12, statsTopY + 24);
+            ctx.lineTo(colX - 12, statsTopY + 88);
             ctx.stroke();
         }
 
-        // Micro uppercase label
-        ctx.fillStyle = secondaryText;
-        ctx.font = `600 13px ${CARD_FONT_STACK}`;
+        ctx.fillStyle = skin.secondaryText;
+        ctx.font = `700 12px ${CARD_MONO_FONT_STACK}`;
         ctx.fillText(sc.label, colX, statsTopY + 42);
 
-        // Bold crisp value
-        ctx.fillStyle = primaryText;
-        ctx.font = `800 28px ${CARD_FONT_STACK}`;
+        ctx.fillStyle = skin.primaryText;
+        ctx.font = `800 25px ${CARD_MONO_FONT_STACK}`;
         ctx.fillText(sc.value, colX, statsTopY + 78);
     });
 
-    // 5. User's Freehand Drawing Layer (when set to 'above' card text/avatar)
-    if (paintImg && config.paintLayer !== 'behind') {
+    // Crisp micro-barcode ornament on bottom right
+    const barWidths = [3, 1, 2, 4, 1, 3, 2, 1, 3, 2];
+    let bx = W - 80;
+    ctx.fillStyle = skin.secondaryText;
+    for (const bw of barWidths) {
+        ctx.fillRect(bx, statsTopY + 34, bw, 46);
+        bx += bw + 3;
+    }
+
+    // 6. Optional Autograph Overlay
+    const paintImg = config.paintDataUrl ? await loadImageHelper(config.paintDataUrl) : null;
+    if (paintImg) {
         ctx.drawImage(paintImg, 0, 0, W, H);
     }
 
-    // 6. User's Placed Stickers
-    for (const stk of config.stickers) {
-        const sx = (stk.x / 100) * W;
-        const sy = (stk.y / 100) * H;
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate((stk.rotation * Math.PI) / 180);
-        ctx.scale(stk.scale, stk.scale);
-        ctx.font = `36px ${CARD_FONT_STACK}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = primaryText;
-        ctx.fillText(stk.symbol, 0, 0);
-        ctx.restore();
-    }
+    // 7. Crisp Frame Treatment
+    if (config.frameId === 'win98_bevel') {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(2, H - 2);
+        ctx.lineTo(2, 2);
+        ctx.lineTo(W - 2, 2);
+        ctx.stroke();
 
-    // 7. Clean Card Border Rim
-    if (config.borderId !== 'none') {
-        drawRoundedRectPath(ctx, 2, 2, W - 4, H - 4, R - 2);
-        if (config.borderId === 'holo_glow') {
-            const bGrad = ctx.createLinearGradient(0, 0, W, H);
-            bGrad.addColorStop(0, '#ffafe6');
-            bGrad.addColorStop(0.5, '#9bf6ff');
-            bGrad.addColorStop(1, '#fff3b0');
-            ctx.strokeStyle = bGrad;
-            ctx.lineWidth = 5;
-            ctx.stroke();
-        } else if (config.borderId === 'chrome_edge') {
-            const cGrad = ctx.createLinearGradient(0, 0, W, H);
-            cGrad.addColorStop(0, '#ffffff');
-            cGrad.addColorStop(0.5, '#94a3b8');
-            cGrad.addColorStop(1, '#e2e8f0');
-            ctx.strokeStyle = cGrad;
-            ctx.lineWidth = 4;
-            ctx.stroke();
-        } else if (config.borderId === 'neon_line') {
-            ctx.strokeStyle = accentColor;
-            ctx.lineWidth = 4;
-            ctx.stroke();
-        } else if (config.borderId === 'pearl_soft') {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.88)';
-            ctx.lineWidth = 5;
-            ctx.stroke();
-        } else {
-            // glass_rim
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.62)';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        }
+        ctx.strokeStyle = '#404040';
+        ctx.beginPath();
+        ctx.moveTo(W - 2, 2);
+        ctx.lineTo(W - 2, H - 2);
+        ctx.lineTo(2, H - 2);
+        ctx.stroke();
+    } else if (config.frameId === 'gold_hairline') {
+        drawRoundedRectPath(ctx, 2, 2, W - 4, H - 4, R - 1);
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        drawRoundedRectPath(ctx, 8, 8, W - 16, H - 16, 6);
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    } else if (config.frameId === 'holo_rim') {
+        const bGrad = ctx.createLinearGradient(0, 0, W, H);
+        bGrad.addColorStop(0, '#72efdd');
+        bGrad.addColorStop(0.5, '#a855f7');
+        bGrad.addColorStop(1, '#f43f5e');
+        drawRoundedRectPath(ctx, 2, 2, W - 4, H - 4, R - 1);
+        ctx.strokeStyle = bGrad;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+    } else if (config.frameId === 'tech_brackets') {
+        drawRoundedRectPath(ctx, 1, 1, W - 2, H - 2, R);
+        ctx.strokeStyle = skin.dividerColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.strokeStyle = skin.accentColor;
+        ctx.lineWidth = 4;
+        const len = 24;
+        const pad = 10;
+        ctx.beginPath();
+        // Top-left & Top-right
+        ctx.moveTo(pad, pad + len); ctx.lineTo(pad, pad); ctx.lineTo(pad + len, pad);
+        ctx.moveTo(W - pad - len, pad); ctx.lineTo(W - pad, pad); ctx.lineTo(W - pad, pad + len);
+        // Bottom-left & Bottom-right
+        ctx.moveTo(pad, H - pad - len); ctx.lineTo(pad, H - pad); ctx.lineTo(pad + len, H - pad);
+        ctx.moveTo(W - pad - len, H - pad); ctx.lineTo(W - pad, H - pad); ctx.lineTo(W - pad, H - pad - len);
+        ctx.stroke();
+    } else {
+        drawRoundedRectPath(ctx, 1, 1, W - 2, H - 2, R);
+        ctx.strokeStyle = skin.dividerColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
     }
 
     ctx.restore();
     return canvas;
 }
 
-/**
- * Copies the high-res Namecard PNG directly to the user's clipboard.
- */
 export async function copyNamecardImageToClipboard(
     config: NamecardConfig,
     profile: UserProfile | null,
@@ -1023,20 +1084,17 @@ export async function copyNamecardImageToClipboard(
 
         if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
             await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-            return { ok: true, message: '✨ Copied card image to clipboard!' };
+            return { ok: true, message: '✨ Copied Collector Pass to clipboard!' };
         }
 
         await downloadNamecardPng(config, profile, stats);
-        return { ok: true, message: '💾 Saved card image as PNG!' };
+        return { ok: true, message: '💾 Saved Collector Pass PNG!' };
     } catch {
         await downloadNamecardPng(config, profile, stats);
-        return { ok: true, message: '💾 Downloaded card PNG!' };
+        return { ok: true, message: '💾 Downloaded Collector Pass PNG!' };
     }
 }
 
-/**
- * Triggers a browser download of the rendered Namecard PNG.
- */
 export async function downloadNamecardPng(
     config: NamecardConfig,
     profile: UserProfile | null,
@@ -1046,7 +1104,7 @@ export async function downloadNamecardPng(
     const dataUrl = canvas.toDataURL('image/png');
     const link = document.createElement('a');
     const cleanHandle = (config.username || 'player').replace(/[^a-zA-Z0-9_-]/g, '');
-    link.download = `namecard-${cleanHandle}.png`;
+    link.download = `uwu-pass-${cleanHandle}.png`;
     link.href = dataUrl;
     document.body.appendChild(link);
     link.click();

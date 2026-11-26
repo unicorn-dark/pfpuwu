@@ -141,44 +141,77 @@
 
     let displayHtml = $state(generateFrame(false));
     let glitchInterval: any;
+    let bootCompleted = false;
+
+    const CORE_BOOT_TRAITS = [
+        "/traits/body/classic.png",
+        "/traits/eyes/classic.png",
+        "/traits/head/classic.png",
+        "/traits/horn/classic.png"
+    ];
+
+    function scheduleBackgroundTraitWarm() {
+        if (typeof window === "undefined") return;
+        const remaining = ALL_TRAIT_SRC_PATHS.filter((s) => !CORE_BOOT_TRAITS.includes(s));
+        let cursor = 0;
+        const warmChunk = () => {
+            const end = Math.min(cursor + 6, remaining.length);
+            for (let i = cursor; i < end; i++) {
+                void getCachedTraitImage(remaining[i]);
+            }
+            cursor = end;
+            if (cursor < remaining.length) {
+                if ("requestIdleCallback" in window) {
+                    (window as any).requestIdleCallback(warmChunk, { timeout: 2500 });
+                } else {
+                    setTimeout(warmChunk, 120);
+                }
+            }
+        };
+        if ("requestIdleCallback" in window) {
+            (window as any).requestIdleCallback(warmChunk, { timeout: 1500 });
+        } else {
+            setTimeout(warmChunk, 400);
+        }
+    }
+
+    function finishBoot() {
+        if (bootCompleted) return;
+        bootCompleted = true;
+        if (glitchInterval) {
+            clearInterval(glitchInterval);
+            glitchInterval = null;
+        }
+        scheduleBackgroundTraitWarm();
+        isBooting.set(false);
+    }
 
     onMount(async () => {
-        // 1. Start the visual glitch
+        // 1. Lightweight 10 FPS visual glitch
         glitchInterval = setInterval(() => {
             displayHtml = generateFrame(true);
-        }, 50);
+        }, 100);
 
-        // 2. Dump the initial text so the user isn't staring at a blank screen
+        // 2. Crisp BIOS boot text
         lines = [
             "Unicorn Mememtic Warfare LLC 2026.",
             "SVELTEKIT OS ACPI BIOS Revision 3105",
             "Mounting Virtual File System...",
-            "Loading graphical subsystems into VRAM (Please wait)...",
+            "Loading core graphics & ASMR audio engine..."
         ];
 
-        // 3. 🚀 PRELOAD DIRECTLY INTO SHARED MEMORY CACHE 🚀
-        const imagePromises = ALL_TRAIT_SRC_PATHS.map((src) => getCachedTraitImage(src));
+        // 3. Only await the 4 core default unicorn traits (capped at 550ms) so boot is instant
+        const corePreload = Promise.all(CORE_BOOT_TRAITS.map((src) => getCachedTraitImage(src)));
+        await Promise.race([corePreload, new Promise((r) => setTimeout(r, 550))]);
 
-        // The BIOS screen will hold here until every file is cached in memory!
-        await Promise.all(imagePromises);
-
-        // 4. Update the screen to show we finished downloading
         lines = [
             ...lines,
-            `[OK] ${ALL_TRAIT_SRC_PATHS.length} visual assets cached to VRAM.`,
-            "Starting Desktop Environment...",
+            `[OK] Core subsystems online (${ALL_TRAIT_SRC_PATHS.length} traits lazy-queued).`,
+            "Starting Desktop Environment..."
         ];
 
-        // 5. Wait strictly for the browser to finish rendering the basic HTML/CSS
-        if (document.readyState !== "complete") {
-            await new Promise((resolve) =>
-                window.addEventListener("load", resolve),
-            );
-        }
-
-        // 6. A tiny 300ms cinematic pause, then instantly boot into the OS.
-        await new Promise((r) => setTimeout(r, 300));
-        isBooting.set(false);
+        await new Promise((r) => setTimeout(r, 180));
+        finishBoot();
     });
 
     onDestroy(() => {
@@ -186,7 +219,14 @@
     });
 </script>
 
-<div class="bios-screen">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+    class="bios-screen"
+    onclick={finishBoot}
+    onkeydown={finishBoot}
+    tabindex="0"
+>
     <div class="bios-header">
         <div class="logo-container">
             <pre class="ascii-unicorn">{@html displayHtml}</pre>
@@ -201,6 +241,7 @@
         {#each lines as line}
             <p>{line === " " ? "\u00A0" : line}</p>
         {/each}
+        <p class="bios-skip-hint">Click or press any key to skip...</p>
     </div>
 </div>
 
@@ -279,6 +320,13 @@
         font-weight: bold;
         color: #e0e0e0;
         text-shadow: 0 0 1px rgba(255, 255, 255, 0.4);
+    }
+
+    .bios-skip-hint {
+        margin-top: 1.2rem !important;
+        font-size: 0.85rem !important;
+        color: #9ca3af !important;
+        opacity: 0.8;
     }
 
     /* Mobile Responsiveness */
